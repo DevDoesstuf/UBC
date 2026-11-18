@@ -291,6 +291,46 @@ function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending, smal
 
 // ---------------------------------------------------------------- shared pieces
 
+/**
+ * A scrolling list with the firmware's edge fades (ui.cpp picker): canvas fades in at the top once scrolled and
+ * at the bottom while there is more below, so a long list (10+ players) visibly continues.
+ */
+function ScrollList({ x, y, w, h, label, live, children }: { x: number; y: number; w: number; h: number; label: string; live?: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ top: false, bottom: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const top = el.scrollTop > 2;
+      const bottom = el.scrollTop < el.scrollHeight - el.clientHeight - 2;
+      setEdge((e) => (e.top === top && e.bottom === bottom ? e : { top, bottom }));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro?.disconnect();
+    };
+  }, []);
+  return (
+    <div className="hk-abs" style={{ left: x, top: y, width: w, height: h }}>
+      <div ref={ref} className="hk-scroll" style={{ left: 0, top: 0, width: w, height: h }} aria-label={label} aria-live={live ? "polite" : undefined}>
+        {children}
+      </div>
+      <i className={`hk-edge top ${edge.top ? "on" : ""}`} aria-hidden="true" />
+      <i className={`hk-edge bottom ${edge.bottom ? "on" : ""}`} aria-hidden="true" />
+    </div>
+  );
+}
+
+/**
+ * Like ui.cpp: `home*` on the left, `away*` on the right. The server sends the teams in drawing order, so for
+ * "Away at Home" games (`swapped`) the left team is the real away team: the label then reads "49ers 0 at Cowboys 0".
+ */
 function Scorebug({ s, rx, y, h, elRef }: { s: KioskScreen; rx: number; y: number; h: number; elRef?: Ref<HTMLDivElement> }) {
   const sc = s.score!;
   const live = sc.status === "live";
@@ -369,7 +409,7 @@ function Select({ s, onTouch, fresh }: Ctx) {
       <Wordmark x={20} y={40} />
       <TitleRow title={s.title || "Pick a game"} subtitle={s.subtitle} />
       <LiveDot cx={776} cy={30} fresh={fresh} />
-      <div className="hk-scroll" style={{ left: 0, top: 62, width: 800, height: 418 }} aria-label="Games">
+      <ScrollList x={0} y={62} w={800} h={418} label="Games">
         <div style={{ position: "relative", height: 6 + Math.ceil(cards.length / 3) * 196 + 4 }}>
           {cards.map((c, i) => {
             const x = 16 + (i % 3) * 260;
@@ -424,7 +464,7 @@ function Select({ s, onTouch, fresh }: Ctx) {
             );
           })}
         </div>
-      </div>
+      </ScrollList>
     </>
   );
 }
@@ -478,7 +518,7 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
         <Mark cx={(w - 12) / 2 - 34} cy={50} R={18} lit={Math.max(1, Math.min(12, roster.length))} />
       </Box>
 
-      <div className="hk-scroll" style={{ left: x0 - 6, top: listY, width: w + 12, height: listBottom - listY }} aria-label="Players in the room" aria-live="polite">
+      <ScrollList x={x0 - 6} y={listY} w={w + 12} h={listBottom - listY} label="Players in the room" live>
         <div style={{ position: "relative", height: Math.ceil(roster.length / 2) * 60 }}>
           {roster.length === 0 && (
             <div className="hk-abs hk-rise hk-empty" style={{ left: 6, top: 2, width: w, height: 64, ...d(560) }}>
@@ -498,7 +538,7 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
             );
           })}
         </div>
-      </div>
+      </ScrollList>
 
       {calls.length > 0 && (
         <div className="hk-rise" style={d(600)}>
