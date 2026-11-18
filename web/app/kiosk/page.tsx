@@ -3,7 +3,7 @@
 // Uses the exact API the ESP32 uses, so it is the reference for the firmware and a fallback
 // (open it full screen on a tablet or a Raspberry Pi in kiosk mode).
 import { useEffect, useState } from "react";
-import { KioskView } from "@/components/KioskView";
+import { KioskConnecting, KioskView } from "@/components/KioskView";
 import { api, useNow, usePoll, useQueryParam, type KioskScreen } from "@/components/client";
 
 export default function KioskPage() {
@@ -46,7 +46,7 @@ export default function KioskPage() {
 
   const s = override ?? data;
   return (
-    <div className="kiosk-stage">
+    <div className="hk-page">
       <div style={{ transform: `scale(${scale})` }}>
         {s ? (
           <KioskView
@@ -57,7 +57,7 @@ export default function KioskPage() {
             onTouch={touch}
           />
         ) : (
-          <div className="kiosk" style={{ display: "grid", placeItems: "center", fontSize: 26 }}>Connecting…</div>
+          <KioskConnecting />
         )}
       </div>
     </div>
