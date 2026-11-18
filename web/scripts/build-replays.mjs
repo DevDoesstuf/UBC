@@ -173,8 +173,8 @@ export function tidyPlay(s) {
     .replace(new RegExp(String.raw`\s*[A-Z]{2,3}-${NAME} was injured during the play\.?`, "g"), "")
     .replace(/([a-z0-9)])\.(?=[A-Z]{2}|Penalty)/g, "$1. ") // "...yards.PENALTY on"
     .replace(new RegExp(String.raw`\s*Penalty on [A-Z]{2,3}-${NAME}, [^,.]+(?:\.[^,.]+)*, declined\.?`, "g"), "")
-    .replace(new RegExp(String.raw`PENALTY on ([A-Z]{2,3})-(${NAME}), ([^,]+), (\d+) yards?, enforced (?:at|between) [^.]*?( - No Play)?\.`, "gi"),
-      (_m, team, who, foul, yds, noPlay) => `Penalty on ${who} (${team}), ${foul.toLowerCase()}, ${yds} yards${noPlay ? ", no play" : ""}.`)
+    .replace(new RegExp(String.raw`PENALTY on ([A-Z]{2,3})(?:-(${NAME}))?, ([^,]+), (\d+) yards?, enforced (?:at|between) [^.]*?( - No Play)?\.`, "gi"),
+      (_m, team, who, foul, yds, noPlay) => `Penalty on ${who ? `${who} (${team})` : team}, ${foul.toLowerCase()}, ${yds} yards${noPlay ? ", no play" : ""}.`)
     .replace(/TWO-POINT CONVERSION ATTEMPT\. .*?ATTEMPT (SUCCEEDS|FAILS)\.?\s*/g, (_m, r) => (r === "SUCCEEDS" ? "Two-point try is good. " : "Two-point try fails. "))
     .replace(/\b(pushed|ran|sacked|stepped|forced) ob\b/g, "$1 out of bounds")
     .replace(new RegExp(String.raw`\bby ([A-Z]{2,3})-(${NAME})`, "g"), "by $2 ($1)")
@@ -496,7 +496,8 @@ function soccerEvents(sum, teams) {
       continue;
     }
     if (/^(Shot On Target|Shot Hit Woodwork)$/.test(type)) {
-      raw.push({ ...base, type: "score_update", team, weight: 0.8, text: type === "Shot Hit Woodwork" ? `Off the woodwork! ${shortSoccer(text)}` : shortSoccer(text) });
+      // data tells the engine what it was (the "shot on target in the next 5 minutes?" question settles on it).
+      raw.push({ ...base, type: "score_update", team, weight: 0.8, data: type === "Shot Hit Woodwork" ? { woodwork: true } : { shotOnTarget: true }, text: type === "Shot Hit Woodwork" ? `Off the woodwork! ${shortSoccer(text)}` : shortSoccer(text) });
       continue;
     }
     if (/End Regular Time/i.test(type)) break;
