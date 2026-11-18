@@ -12,6 +12,16 @@ Everything runs on **one website** (Next.js on Vercel, Upstash Redis). The kiosk
 
 **Live:** https://huddle-live-eight.vercel.app (TV: `/watch/CODE`, phones: `/l/CODE`, box preview: `/kiosk?id=1`).
 
+## UBC 2026 Hackathon: tracks and bounties
+
+| Entry | What judges look for | Where Huddle does it |
+|---|---|---|
+| **Consumer Applications** (main track) | Crypto invisible: no seed phrase, no gas, everyday use, real UX | Tap or scan to join, one-tap YES/NO, demo money or Solana Pay with fees paid by the house, a touchscreen box + phones + TV in one design |
+| **Best use of Solana** (chain award) | Core on-chain functionality, Anchor program, Solana-native primitives, smooth wallet UX | Anchor `huddle_vault` program (party vault PDA, Ed25519-verified signed balances, on-chain payouts), SPL USDC, Solana Pay QR on the phone or the box. [Solana](#solana) |
+| **Gemini Prediction Markets** | Odds over time, bringing market data into other apps, market discovery | Gemini's price beside the room's on every comparable question, odds graph and "Odds right now" board on the box, Gemini-calibrated model prices, Room vs Model vs Gemini Brier scorecard, `GET /api/gemini/markets` |
+| **ElevenLabs** | Voice central, not an add-on | The announcer is the box's voice: ElevenLabs TTS (Flash) per sport persona on a speaker ESP32, plus Sound Effects for the room. [ElevenLabs](#elevenlabs-the-announcer-and-the-room-sounds) |
+| **QuickNode Streams** | A Stream with a filter and a destination as a core data source | A Solana devnet Block Stream filtered to our vault and treasury, webhook credits deposits instantly. [QuickNode Streams](#quicknode-streams) |
+
 ## What Huddle adds on top of the original Live Lines build
 
 | Feature | How | Where |
