@@ -1108,9 +1108,14 @@ function ChartSection({ c, question, market, y, h, root }: { c: Chart; question:
               <circle cx={ex} cy={oy} r={8} fill={yes ? P.yes : P.no} />
             </>
           )}
-          {tags.map((t, i) => (
-            <line key={`l${i}`} x1={t.kind === 0 ? ex + 8 : (t.kind === 2 ? px1 : spanX) + 4} y1={t.y} x2={682} y2={ty[i]} stroke={t.kind === 0 ? P.yes : P.ink} strokeOpacity={0.33} strokeWidth={1.2} />
-          ))}
+          {tags.map((t, i) => {
+            // Flat from the line, bending only next to the tag (same as the firmware), so it never reads as a price move.
+            const fx = t.kind === 0 ? ex + 8 : (t.kind === 2 ? px1 : spanX) + 4;
+            const bx = Math.max(fx, 666);
+            return (
+              <polyline key={`l${i}`} points={`${fx},${t.y} ${bx},${t.y} 682,${ty[i]}`} fill="none" stroke={t.kind === 0 ? P.yes : P.ink} strokeOpacity={0.33} strokeWidth={1.2} />
+            );
+          })}
         </g>
       </svg>
       {lockX !== null && <Lock cx={lockX - 12} cy={py0 - 6} s={0.6} color={P.ink} />}

@@ -2426,7 +2426,12 @@ static void chartSection(const Screen &s, int y, int h) {
     uint16_t bg = tags[i].kind == 0 ? P.yes : tags[i].kind == 1 ? P.ink : P.card;
     uint16_t fg = tags[i].kind == 2 ? P.ink : P.white;
     int fromX = tags[i].kind == 0 ? (int)ex + 8 : (tags[i].kind == 2 ? px1 : spanX) + 4;
-    if (fromX < tx - 4) line(fromX, tags[i].y, tx - 2, ty[i], 1.2f, tags[i].kind == 0 ? P.yes : P.ink, ta / 3);
+    if (fromX < tx - 4) {  // flat from the line, bending only next to the tag, so it never reads as a price move
+      uint16_t lc = tags[i].kind == 0 ? P.yes : P.ink;
+      int bendX = max(fromX, tx - 18);
+      if (bendX > fromX) line(fromX, tags[i].y, bendX, tags[i].y, 1.2f, lc, ta / 3);
+      line(bendX, tags[i].y, tx - 2, ty[i], 1.2f, lc, ta / 3);
+    }
     rrect(tx, ty[i] - 13, w, 26, 13, bg, ta);
     if (tags[i].kind == 2) rrectStroke(tx, ty[i] - 13, w, 26, 13, 2, P.ink, ta);
     text(F_N4, tx + 11, ty[i] + 7, v, fg, ta);
