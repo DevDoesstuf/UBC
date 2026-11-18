@@ -10,6 +10,8 @@
 #include <string>
 using std::max;
 using std::min;
+template <class T>
+inline T constrain(T x, T lo, T hi) { return x < lo ? lo : x > hi ? hi : x; }
 
 uint32_t millis();
 

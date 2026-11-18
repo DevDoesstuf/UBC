@@ -84,6 +84,7 @@ struct Person {
   int32_t cents;  // roster: balance; winners: payout; losers: lost; board: final total
   int32_t extra;  // roster: deposited; winners: profit; board: P&L
   bool has2;
+  int16_t rank;  // board: shared on a tie (0 = not sent)
 };
 struct TradeRow {
   char name[24];
@@ -316,6 +317,7 @@ static void parsePeople(Person *out, int &n, JsonArrayConst arr, const char *k1,
       p.cents = v[k1] | 0;
       p.has2 = !v[k2].isNull();
       p.extra = v[k2] | 0;
+      p.rank = (int16_t)constrain((int32_t)(v["rank"] | 0), (int32_t)0, (int32_t)99);
     }
     n++;
   }
@@ -1985,7 +1987,7 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
     if (lead) rrect(LX, ry, LW, rowH, 16, P.ink);
     else card(LX, ry, LW, rowH, 16);
     char rk[4];
-    snprintf(rk, sizeof(rk), "%d", i + 1);
+    snprintf(rk, sizeof(rk), "%d", p.rank > 0 ? p.rank : i + 1);
     textCenter(F_N4, LX + 20, ry + 35, rk, lead ? P.gold : P.muted);
     avatar(LX + 54, ry + rowH / 2, 17, p.name);
     char m[16];
