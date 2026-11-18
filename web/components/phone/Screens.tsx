@@ -718,7 +718,13 @@ export function CashOut({
             className="hd-field"
             value={address}
             onChange={(e) => setAddress(e.target.value.trim())}
-            placeholder={kind === "solana" ? "Paste it, or leave empty to pay the wallet you paid from…" : "0x…"}
+            placeholder={
+              kind === "solana"
+                ? me.solanaAddress
+                  ? `Leave empty to pay ${me.solanaAddress.slice(0, 4)}…${me.solanaAddress.slice(-4)}`
+                  : "Paste it, or leave empty to pay the wallet you paid from…"
+                : "0x…"
+            }
             autoComplete="off"
             spellCheck={false}
             aria-invalid={address.length > 0 && !ok}
