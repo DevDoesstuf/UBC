@@ -643,6 +643,27 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
             )}
           </p>
         )}
+        {l.chain?.settlement === "vault" && (
+          <p className="ph-hint ph-center" data-testid="chain-settled">
+            {l.chain.settleTx ? (
+              <>
+                <a href={l.chain.settleTx.explorer} target="_blank" rel="noreferrer">
+                  Settled on Solana <Icon name="external" size={13} />
+                </a>
+                {l.chain.payout?.explorer && l.chain.payout.cents > 0 && (
+                  <>
+                    {" · "}
+                    <a href={l.chain.payout.explorer} target="_blank" rel="noreferrer">
+                      Your payout <Icon name="external" size={13} />
+                    </a>
+                  </>
+                )}
+              </>
+            ) : (
+              "Settling on Solana…"
+            )}
+          </p>
+        )}
       </section>
 
       {rows.length > 0 && <Podium l={l} />}
@@ -678,7 +699,7 @@ function Podium({ l }: { l: Lobby }) {
 
 // ------------------------------------------------------------------ money
 
-export function PayLink({ url, cents, onCheck, onClose, checking }: { url: string; cents: number; onCheck: () => void; onClose: () => void; checking: boolean }) {
+export function PayLink({ url, cents, onCheck, onClose, checking, onBox, onBoxBusy }: { url: string; cents: number; onCheck: () => void; onClose: () => void; checking: boolean; onBox?: () => void; onBoxBusy?: boolean }) {
   return (
     <div className="ph-paylink hd-card hd-rise" role="group" aria-label={`Pay ${usd(cents)}`}>
       <span className="ph-paylink-qr">
@@ -690,6 +711,11 @@ export function PayLink({ url, cents, onCheck, onClose, checking }: { url: strin
         <a className="hd-btn hd-btn-primary ph-btn-sm" href={url}>
           <Icon name="wallet" size={18} /> Open in wallet
         </a>
+        {onBox && (
+          <button className="hd-btn hd-btn-secondary ph-btn-sm" onClick={onBox} disabled={onBoxBusy} data-testid="pay-on-box">
+            {onBoxBusy ? "Sending to the box…" : "Pay on the box"}
+          </button>
+        )}
         <button className="hd-btn hd-btn-secondary ph-btn-sm" onClick={onCheck} disabled={checking}>
           {checking ? "Checking…" : "Check for my payment"}
         </button>
@@ -801,7 +827,10 @@ export function MoneySheet({
             <p className="ph-hint">{moneyHint(l)}</p>
           </>
         )}
-        {me.balance > 0 && (
+        {me.balance > 0 && l.money.settlement === "vault" && l.phase !== "ended" && (
+          <p className="ph-hint ph-mt16">Your money is in this party’s vault on Solana. It pays out to your wallet when the host ends the game.</p>
+        )}
+        {me.balance > 0 && !(l.money.settlement === "vault" && l.phase !== "ended") && (
           <>
             <h3 className="ph-h3 ph-mt16">Cash out</h3>
             <p className="ph-hint">Takes your whole balance out of the game.</p>

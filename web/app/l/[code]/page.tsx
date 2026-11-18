@@ -38,6 +38,7 @@ export default function PhonePage() {
   const [skipped, setSkipped] = useState(false);
   const [payLink, setPayLink] = useState<{ url: string; cents: number } | null>(null);
   const [checking, setChecking] = useState(false);
+  const [boxBusy, setBoxBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [cashed, setCashed] = useState<{ cents: number; explorer?: string } | null>(null);
   const balanceCoins = useCoins();
@@ -262,8 +263,28 @@ export default function PhonePage() {
     ).finally(() => setChecking(false));
   };
 
+  /** "Pay on the box": the box shows this deposit's Solana Pay QR (for a wallet on another phone); credited by itself. */
+  const payOnBox = (cents: number) => {
+    setBoxBusy(true);
+    run(
+      () => api<{ url: string }>(`/api/lobby/${code}/deposit/box`, { body: { cents }, token }),
+      () => {
+        setPayLink(null);
+        return "It's on the box now. Scan it there with your wallet";
+      },
+    ).finally(() => setBoxBusy(false));
+  };
+
   const payment = payLink ? (
-    <PayLink url={payLink.url} cents={payLink.cents} checking={checking} onCheck={checkPayment} onClose={() => setPayLink(null)} />
+    <PayLink
+      url={payLink.url}
+      cents={payLink.cents}
+      checking={checking}
+      onCheck={checkPayment}
+      onClose={() => setPayLink(null)}
+      onBox={solana && l.money.boxPay ? () => payOnBox(payLink.cents) : undefined}
+      onBoxBusy={boxBusy || busy}
+    />
   ) : null;
 
   const checkButton =
