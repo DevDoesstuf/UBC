@@ -62,6 +62,7 @@ struct Btn {
 };
 struct Team {
   char name[32];
+  char nick[20];  // what fans call the team ("49ers"); the card draws it when the server sends one
   char abbr[8];
   uint16_t color;
   bool has;
@@ -76,6 +77,7 @@ struct GameCard {
   Team home, away;
   uint16_t color;
   bool enabled, gemini, hasColor;
+  bool at;  // "Away at Home" (US style, away drawn first) instead of "Home v Away"
 };
 struct Person {
   char name[24];
@@ -283,6 +285,7 @@ static void parseTeam(Team &t, JsonVariantConst v, uint16_t def) {
     CPY(t.name, v);
   } else if (v.is<JsonObjectConst>()) {
     CPY(t.name, v["name"]);
+    CPY(t.nick, v["nick"]);
     const char *a = v["short"] | (v["abbr"] | "");
     strlcpy(t.abbr, a, sizeof(t.abbr));
     t.color = parseHex(v["color"] | "", def);
@@ -414,6 +417,8 @@ static void parseInto(Screen &s, JsonObjectConst j) {
     c.color = parseHex(t["color"] | "", P.accent);
     parseTeam(c.home, t["home"], c.color);
     parseTeam(c.away, t["away"], P.ink2);
+    // Older servers do not send "at": only the NFL wrote "at" then.
+    c.at = t["at"].is<bool>() ? t["at"].as<bool>() : !strcmp(c.league, "NFL");
   }
   // People.
   if (!j["roster"].isNull()) parsePeople(s.roster, s.nRoster, j["roster"].as<JsonArrayConst>(), "cents", "deposited");
@@ -811,6 +816,28 @@ static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int
   hit(x, y - max(0, (64 - h) / 2), w, max(h, 64), b.id);
 }
 
+/**
+ * A row of "Call it!" buttons between x and x1: as many as fit with their whole label and bolt (at most 4,
+ * at least 2), all in one face (the big one only when every label fits it).
+ */
+static void callRow(const Btn *calls, int nCalls, int x, int x1, int y, int h, int r) {
+  int n = min(nCalls, 4);
+  if (n <= 0) return;
+  auto widthFor = [&](int k) { return (x1 - x - (k - 1) * 8) / k; };
+  for (; n > 2; n--) {
+    int bw = widthFor(n);
+    bool ok = true;
+    for (int i = 0; i < n; i++)
+      if (textW(F_B3, calls[i].label) > bw - 20 - 18) ok = false;
+    if (ok) break;
+  }
+  int bw = widthFor(n);
+  bool big = true;
+  for (int i = 0; i < n; i++)
+    if (textW(F_B1, calls[i].label) > bw - 24 - 18) big = false;
+  for (int i = 0; i < n; i++) button(x + i * (bw + 8), y, bw, h, calls[i], big ? F_B1 : F_B3, r);
+}
+
 static const Btn *findBtn(const Screen &s, const char *id) {
   for (int i = 0; i < s.nButtons; i++)
     if (!strcmp(s.buttons[i].id, id)) return &s.buttons[i];
@@ -958,6 +985,18 @@ static void watch(Watch &w, uint32_t key, int x, int y, int ww, int hh) {
   }
 }
 
+/** The scorebug's width, so the top bar can keep its left side clear of it. */
+static int scorebugW(const Screen &s) {
+  char hs[8], as[8];
+  snprintf(hs, sizeof(hs), "%d", s.homeScore);
+  snprintf(as, sizeof(as), "%d", s.awayScore);
+  const char *ha = s.home.abbr[0] ? s.home.abbr : "HOME";
+  const char *aa = s.away.abbr[0] ? s.away.abbr : "AWAY";
+  int wHa = textW(F_B1, ha), wAa = textW(F_B1, aa), wHs = max(26, textW(F_N4, hs) + 12), wAs = max(26, textW(F_N4, as) + 12);
+  int wClock = max(textW(F_N4, s.clock), textW(F_B3, s.period[0] ? s.period : "Live")) + 8;
+  return 12 + 6 + 8 + wHa + 8 + wHs + 12 + wClock + 12 + wAs + 8 + wAa + 8 + 6 + 12;
+}
+
 static void scorebug(const Screen &s, int rx, int y, int h) {
   // [bar ABBR score] clock [score ABBR bar]  right-aligned at rx
   char hs[8], as[8];
@@ -967,7 +1006,7 @@ static void scorebug(const Screen &s, int rx, int y, int h) {
   const char *aa = s.away.abbr[0] ? s.away.abbr : "AWAY";
   int wHa = textW(F_B1, ha), wAa = textW(F_B1, aa), wHs = max(26, textW(F_N4, hs) + 12), wAs = max(26, textW(F_N4, as) + 12);
   int wClock = max(textW(F_N4, s.clock), textW(F_B3, s.period[0] ? s.period : "Live")) + 8;
-  int w = 12 + 6 + 8 + wHa + 8 + wHs + 12 + wClock + 12 + wAs + 8 + wAa + 8 + 6 + 12;
+  int w = scorebugW(s);
   int x = rx - w;
   watch(wScore, strHash(s.clock, s.homeScore * 1000 + s.awayScore) ^ strHash(s.period) ^ strHash(s.scoreStatus), x - 10, y - 4, w + 20, h + 14);
   card(x, y, w, h, h / 2);
@@ -1070,12 +1109,15 @@ static void drawGameCard(const GameCard &c, int x, int y, int w, int h, int idx)
   }
   // team colour ribbon across the top
   pushClip(x, y, w, 7);
+  // first/second in reading order: "Away at Home" for US leagues, "Home v Away" for soccer
+  const Team &t1 = c.at ? c.away : c.home;
+  const Team &t2 = c.at ? c.home : c.away;
   if (c.home.has && c.away.has) {
     pushClip(x, y, w / 2, 7);
-    rrect(x, y, w, h, r, c.home.color, c.enabled ? 255 : 120);
+    rrect(x, y, w, h, r, t1.color, c.enabled ? 255 : 120);
     popClip();
     pushClip(x + w / 2, y, w - w / 2, 7);
-    rrect(x, y, w, h, r, c.away.color, c.enabled ? 255 : 120);
+    rrect(x, y, w, h, r, t2.color, c.enabled ? 255 : 120);
     popClip();
   } else {
     rrect(x, y, w, h, r, c.hasColor ? c.color : P.accent, c.enabled ? 255 : 120);
@@ -1097,11 +1139,11 @@ static void drawGameCard(const GameCard &c, int x, int y, int w, int h, int idx)
   }
   // teams or title
   if (c.home.has && c.away.has) {
-    rrect(x + 14, y + 58, 8, 28, 4, c.home.color, c.enabled ? 255 : 120);
-    textFit(F_H3, x + 30, y + 80, w - 44, c.home.name, ink);
-    text(F_B3, x + 30, y + 102, !strcmp(c.league, "NFL") ? "at" : "v", P.muted);
-    rrect(x + 14, y + 108, 8, 28, 4, c.away.color, c.enabled ? 255 : 120);
-    textFit(F_H3, x + 30, y + 130, w - 44, c.away.name, ink);
+    rrect(x + 14, y + 58, 8, 28, 4, t1.color, c.enabled ? 255 : 120);
+    textFit(F_H3, x + 30, y + 80, w - 44, t1.nick[0] ? t1.nick : t1.name, ink);
+    text(F_B3, x + 30, y + 102, c.at ? "at" : "v", P.muted);
+    rrect(x + 14, y + 108, 8, 28, 4, t2.color, c.enabled ? 255 : 120);
+    textFit(F_H3, x + 30, y + 130, w - 44, t2.nick[0] ? t2.nick : t2.name, ink);
   } else {
     int starts[2], lens[2];
     bool cut;
@@ -1339,8 +1381,7 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
     if (enter(tScreen, 600, 0, {(int16_t)x0, 304, (int16_t)w, 86})) {
       iconBolt(x0 + 8, 316, 0.75f, P.accent);
       text(F_B3, x0 + 20, 322, "Call it! Tap the moment it happens on TV", P.ink2);
-      int n = min(s.nCalls, 4), bw = (w - (n - 1) * 8) / n;
-      for (int i = 0; i < n; i++) button(x0 + i * (bw + 8), 330, bw, 60, s.calls[i], F_B1, 16);
+      callRow(s.calls, s.nCalls, x0, x0 + w, 330, 60, 16);
     }
     layerReset();
   }
@@ -1427,6 +1468,16 @@ static void outcomeTile(const Screen &s, bool yes, int x, int y, int w, int h, u
 static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
   // top bar: badge + volume | scorebug/code | Lock now
   int bx = 16;
+  // Width budget: the left side (badge, volume, "traded") stops 12 px before the scorebug or code chip.
+  const Btn *lockPre = findBtn(s, "lock");
+  int limit = SCR_W - 16 - 26 - (lockPre && !locked ? textW(F_B1, lockPre->label) + 40 + 12 : 0);
+  if (s.hasScore) limit -= scorebugW(s);
+  else if (s.code[0]) {
+    char jb[24];
+    snprintf(jb, sizeof(jb), "Join %s", s.code);
+    limit -= textW(F_B1, jb) + 28;
+  }
+  limit -= 12;
   if (enter(tQuestion, 0, 1, {16, 10, 360, 40})) {
     if (locked) {
       int w = textW(F_B1, "Trading closed") + 52;
@@ -1442,6 +1493,14 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
       bx += w + 12;
     } else {
       const char *badge = s.title[0] ? s.title : "Market open";
+      char shortBadge[40];
+      char vm[16] = "";
+      if (s.volume >= 0) fmtMoney(s.volume, vm, sizeof(vm));
+      int need = textW(F_B1, badge) + 52 + 12 + (s.volume >= 0 ? textW(F_N4, vm) + 6 + textW(F_B2, "traded") : textW(F_B2, s.traded));
+      if (bx + need > limit && !strncmp(badge, "Question ", 9)) {
+        snprintf(shortBadge, sizeof(shortBadge), "Q%s", badge + 9);  // "Question 10 of 12" -> "Q10 of 12"
+        badge = shortBadge;
+      }
       int w = textW(F_B1, badge) + 52;
       rrectGrad(bx, 12, w, 38, 19, P.deep, P.accent, P.lime);
       iconBolt(bx + 22, 31, 0.9f, P.white);
@@ -1453,11 +1512,14 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
       char m[16];
       fmtMoney(s.volume, m, sizeof(m));
       rollSet(rVol, m, 1);
-      int w = rollDraw(rVol, F_N4, bx, 38, P.ink, P.deep, P.ink, 560);
-      text(F_B2, bx + w + 6, 37, "traded", P.ink2);
-    } else {
+      int vw = textW(F_N4, m);
+      if (bx + vw <= limit) {  // the amount, then the word only when it fits too
+        int w = rollDraw(rVol, F_N4, bx, 38, P.ink, P.deep, P.ink, 560);
+        if (bx + w + 6 + textW(F_B2, "traded") <= limit) text(F_B2, bx + w + 6, 37, "traded", P.ink2);
+      }
+    } else if (bx < limit) {
       strlcpy(vol, s.traded, sizeof(vol));
-      text(F_B2, bx, 37, vol, P.ink2);
+      textFit(F_B2, bx, 37, limit - bx, vol, P.ink2);
     }
   }
   layerReset();
@@ -1793,27 +1855,23 @@ static void drawResult(const Screen &s, const NetStatus &st) {
   const Btn *end = findBtn(s, "end");
   if (enter(tResult, 900, 0, {SX + 24, 396, SW - 48, 64})) {
     int x = SX + 24, x1 = SX + SW - 24;
+    bool calls = s.nCalls > 0;
     if (next) {
       Btn b = *next;
       b.style = voided ? B_BRAND : B_INK;
-      button(x, 396, 230, 62, b, F_B1, 20);
-      x += 242;
+      // With Call it! buttons beside it, Next shrinks to its label so the calls get the room.
+      int w = calls ? min(230, textW(F_B1, b.label) + 62) : 230;
+      button(x, 396, w, 62, b, F_B1, 20);
+      x += w + 12;
     }
     if (end) {
       Btn b = *end;
       b.style = next ? B_WHITE : B_INK;
-      int w = next ? 120 : 230;
+      int w = calls ? min(120, textW(F_B1, b.label) + 44) : next ? 120 : 230;
       button(x1 - w, 396, w, 62, b, F_B1, 20);
       x1 -= w + 12;
     }
-    int n2 = min(s.nCalls, 4);
-    if (n2) {
-      int bw = (x1 - x - (n2 - 1) * 8) / n2;
-      for (int i = 0; i < n2; i++) {
-        Btn b = s.calls[i];
-        button(x + i * (bw + 8), 396, bw, 62, b, bw < 110 ? F_B3 : F_B1, 18);
-      }
-    }
+    callRow(s.calls, s.nCalls, x, x1, 396, 62, 18);
   }
   layerReset();
   if (!voided && s.nWinners > 0) {

@@ -81,7 +81,7 @@
     {
       "id": "nfl-replay",
       "title": "Titans at Cowboys",
-      "subtitle": "Full game replay, live questions",
+      "subtitle": "Demo replay, live questions",
       "live": true,
       "kind": "replay",
       "replay": "replay-ten-dal",
@@ -121,7 +121,7 @@
     {
       "id": "soccer-replay",
       "title": "Portugal v Spain",
-      "subtitle": "Full match replay, live questions",
+      "subtitle": "Demo replay, live questions",
       "live": true,
       "kind": "replay",
       "replay": "replay-por-esp",

@@ -23,6 +23,7 @@
 import QRCode from "qrcode";
 import { allGames, getGame } from "./games";
 import { getTimeline } from "./replay/timeline";
+import { bestCandidate, replayMs } from "./replay/run";
 import { buildScorecard } from "./scorecard";
 import {
   ApiError, createLobby, endSession, getKioskCode, getKioskLobby, getLobby, lockMarket, mutate, openMarket,
@@ -30,6 +31,7 @@ import {
 } from "./lobby";
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
+import { boxName, boxSafe } from "./boxText";
 import type { Game, Lobby } from "./types";
 
 // ---------------------------------------------------------------- "Call it!" moments
@@ -123,6 +125,8 @@ export interface KioskScreen {
 
 export interface KioskTeam {
   name: string;
+  /** What fans call the team ("49ers", "Thunder"): short enough for a game card. */
+  nick?: string;
   short?: string;
   color?: string;
 }
@@ -139,6 +143,8 @@ export interface KioskCard {
   gemini?: boolean;
   home?: KioskTeam;
   away?: KioskTeam;
+  /** true = US style "Away at Home" (draw away first); false = "Home v Away". */
+  at?: boolean;
 }
 
 export interface KioskScore {
@@ -162,15 +168,10 @@ export const KIOSK_PALETTE = {
   no: "#FF6B00", hot: "#E5484D", gold: "#E8A33D",
 } as const;
 
-/** The firmware uses Latin-1 fonts: swap typographic characters and drop anything it cannot draw. */
-function k(s: string): string {
-  return s
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, "-")
-    .replace(/…/g, "...")
-    .replace(/[^\x20-\x7E\xA0-\xFF]/g, "");
-}
+/** The firmware uses Latin-1 fonts: swap typographic characters, transliterate, drop what it cannot draw. */
+const k = boxSafe;
+/** A player's name on the box: Latin-1 and never blank. */
+const kn = boxName;
 
 function qrRows(text: string): { size: number; rows: string[] } {
   const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
@@ -193,14 +194,24 @@ const leagueChip = (s: string) => LEAGUE_SHORT[s.toLowerCase()] ?? s.slice(0, 12
 
 /** Team from the config: a string, {name, short, color}, or the replay timeline's team. */
 function team(v: unknown): KioskTeam | undefined {
-  if (typeof v === "string" && v.trim()) return { name: k(v).slice(0, 30) };
+  if (typeof v === "string" && v.trim()) return { name: k(v).slice(0, 30), nick: nickOf(k(v)) };
   if (v && typeof v === "object") {
-    const t = v as { name?: unknown; short?: unknown; abbr?: unknown; color?: unknown };
+    const t = v as { name?: unknown; nick?: unknown; short?: unknown; abbr?: unknown; color?: unknown };
     if (typeof t.name !== "string" || !t.name.trim()) return undefined;
     const short = typeof t.short === "string" ? t.short : typeof t.abbr === "string" ? t.abbr : undefined;
-    return { name: k(t.name).slice(0, 30), short: short ? k(short).slice(0, 5) : undefined, color: hex(t.color) };
+    const name = k(t.name).slice(0, 30);
+    const nick = typeof t.nick === "string" && t.nick.trim() ? k(t.nick).trim().slice(0, 16) : nickOf(name);
+    return { name, nick, short: short ? k(short).slice(0, 5) : undefined, color: hex(t.color) };
   }
   return undefined;
+}
+
+/** A name short enough for one game-card line: the full name when short, else its last word ("Tennessee Titans" -> "Titans"). */
+function nickOf(name: string): string {
+  const n = name.trim();
+  if (n.length <= 14) return n;
+  const words = n.split(/\s+/);
+  return words.length > 1 ? words[words.length - 1] : n.slice(0, 16);
 }
 
 /** "2026-11-22T18:00:00Z" -> "Sun, Nov 22"; anything else passes through (Latin-1, short). */
@@ -223,11 +234,15 @@ function gameCard(g: Game): KioskCard {
   const away = team(x.away) ?? team(teams[1]) ?? (tl ? team(tl.info.away) : undefined);
   const sport = typeof x.sport === "string" ? x.sport : tl?.info.sport;
   const league = typeof x.league === "string" && x.league.trim() ? leagueChip(k(x.league.trim())) : sport ? LEAGUE[sport] : undefined;
-  const date = prettyDate(x.date ?? x.kickoff ?? x.played ?? x.when ?? tl?.info.startsAt);
+  // Real replayed games carry the real date. Hand-written demo replays have no real date (their startsAt is a
+  // made-up kickoff), so the card says what they are instead of showing a date or repeating the subtitle.
+  const date = prettyDate(x.date ?? x.kickoff ?? x.played ?? x.when ?? (tl?.meta.real ? tl.meta.date ?? tl.info.startsAt : undefined))
+    ?? (tl && !tl.meta.real ? "Demo game" : undefined);
   return {
     id: `game:${g.id}`, title: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled,
     league, kind: g.kind ?? "clip", date, color: hex(g.color), gemini: !!g.gemini?.event,
-    ...(home && away ? { home, away } : {}),
+    // US leagues write "Away at Home"; soccer writes "Home v Away".
+    ...(home && away ? { home, away, at: sport !== "soccer" } : {}),
   };
 }
 
@@ -243,10 +258,11 @@ function scoreOf(l: Lobby): KioskScore | undefined {
   };
 }
 
-function periodLabel(sport: string, period: number | undefined): string {
+export function periodLabel(sport: string, period: number | undefined): string {
   if (!period) return "";
-  if (sport === "nfl") return period > 4 ? "OT" : `Q${period}`;
-  return period === 1 ? "1st half" : period === 2 ? "2nd half" : "ET";
+  if (sport === "soccer") return period === 1 ? "1st half" : period === 2 ? "2nd half" : "ET";
+  // NFL, NBA and every other sport played in quarters
+  return period === 5 ? "OT" : period > 5 ? `${period - 4}OT` : `Q${period}`;
 }
 
 /** Everything the v2 firmware can use on every screen. */
@@ -286,7 +302,7 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
   if (l.phase === "lobby") {
     return {
       ...base,
-      roster: players.map((p) => ({ name: k(p.name), cents: p.balance, deposited: p.deposited })),
+      roster: players.map((p) => ({ name: kn(p.name), cents: p.balance, deposited: p.deposited })),
       pot: players.reduce((a, p) => a + p.deposited, 0),
       calls: players.length ? callsOf(l) : [],
     };
@@ -300,7 +316,7 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       lockTotal: Math.max(0, Math.round((m.lockAt - m.openedAt) / 1000)),
       model: typeof m.model === "number" ? Math.round(m.model * 100) : null,
       gemini: g && typeof g.prob === "number" ? { cents: Math.round(g.prob * 100), label: k(g.label ?? "Gemini").slice(0, 40), live: !!g.live } : null,
-      trades: m.trades.slice(-8).reverse().map((t) => ({ name: k(t.name), side: t.side, cents: t.cents, price: lmsr.toCents(t.priceAfter) })),
+      trades: m.trades.slice(-8).reverse().map((t) => ({ name: kn(t.name), side: t.side, cents: t.cents, price: lmsr.toCents(t.priceAfter) })),
       moment: m.source?.kind === "moment" ? m.source.moment : null,
       mode: m.mode ?? "market",
     };
@@ -309,11 +325,11 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
     const winners = Object.entries(m.payouts)
       .filter(([, c]) => c > 0)
       .sort((a, b) => b[1] - a[1])
-      .map(([id, c]) => ({ name: k(l.players[id]?.name ?? "?"), cents: c, profit: c - (m.positions[id]?.spent ?? 0) }));
+      .map(([id, c]) => ({ name: kn(l.players[id]?.name ?? "?"), cents: c, profit: c - (m.positions[id]?.spent ?? 0) }));
     const losers = Object.entries(m.positions)
       .filter(([id, pos]) => pos.spent > 0 && !(m.payouts[id] > 0))
       .sort((a, b) => b[1].spent - a[1].spent)
-      .map(([id, pos]) => ({ name: k(l.players[id]?.name ?? "?"), cents: pos.spent }));
+      .map(([id, pos]) => ({ name: kn(l.players[id]?.name ?? "?"), cents: pos.spent }));
     return {
       ...base,
       winners, losers, volume: m.volume,
@@ -322,7 +338,7 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
     };
   }
   const board = [...players]
-    .map((p) => ({ name: k(p.name), cents: p.balance + p.withdrawn, pnl: p.balance + p.withdrawn - p.deposited }))
+    .map((p) => ({ name: kn(p.name), cents: p.balance + p.withdrawn, pnl: p.balance + p.withdrawn - p.deposited }))
     .sort((a, b) => b.cents - a.cents);
   const sc = buildScorecard(l.scoreEntries ?? []);
   return { ...base, leaderboard: board, scorecard: { room: sc.room, model: sc.model, gemini: sc.gemini, n: sc.n, verdict: k(sc.verdict) } };
@@ -372,7 +388,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
       code: l.code,
       joinUrl: joinUrl.replace(/^https?:\/\//, ""),
       qr: qrRows(joinUrl),
-      players: players.map((p) => k(`${p.name}  ${p.deposited > 0 ? usd(p.balance) : "adding money..."}`)),
+      players: players.map((p) => k(`${kn(p.name)}  ${p.deposited > 0 ? usd(p.balance) : "adding money..."}`)),
       question: k(game?.questions[l.qIndex]?.text ?? ""),
       buttons: calls.length
         ? [{ id: "start", label: `Start Q${l.qIndex + 1}`, style: "plain" }, ...calls, { id: "cancel", label: "Cancel", style: "plain" }]
@@ -416,7 +432,11 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
 
   if (l.phase === "result" && m && m.outcome) {
     const winners = Object.entries(m.payouts).sort((a, b) => b[1] - a[1]);
-    const more = l.qIndex < total;
+    // Replay games open the next question by themselves; offer Next only when one could open right now.
+    const run = l.replay;
+    const more = run
+      ? run.asked < run.maxQuestions && (run.startedAt === null || !!bestCandidate(run, replayMs(run, Date.now())))
+      : l.qIndex < total;
     const calls = moments(l);
     const end = { id: "end", label: calls.length ? "End" : "End session", style: "plain" as const };
     return {
@@ -426,7 +446,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
       result: m.outcome === "yes" ? "YES" : "NO",
       question: k(m.text),
       lines: winners.length
-        ? winners.slice(0, 6).map(([id, c]) => k(`${l.players[id]?.name ?? "?"}  +${usd(c)}`))
+        ? winners.slice(0, 6).map(([id, c]) => k(`${kn(l.players[id]?.name ?? "?")}  +${usd(c)}`))
         : ["Nobody called it this time"],
       buttons: calls.length
         ? [...(more ? [{ id: "next", label: `Start Q${l.qIndex + 1}`, style: "plain" as const }] : []), ...calls, end]
@@ -442,7 +462,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
     screen: "ended", kiosk: kioskId, color: "gray", footer: footerL,
     title: "Session over",
     subtitle: "Thanks for playing. Cash out on your phone",
-    lines: board.slice(0, 6).map((p, i) => k(`${i + 1}.  ${p.name}  ${usd(p.balance + p.withdrawn)}`)),
+    lines: board.slice(0, 6).map((p, i) => k(`${i + 1}.  ${kn(p.name)}  ${usd(p.balance + p.withdrawn)}`)),
     buttons: [{ id: "new", label: "New game", style: "yes" }],
   };
 }

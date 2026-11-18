@@ -1,6 +1,7 @@
 "use client";
 import { createElement, useCallback, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { avatarHash } from "@/lib/boxText";
 
 /* ------------------------------------------------------------------ kinetic type */
 
@@ -195,9 +196,8 @@ const AVATAR: { bg: string; fg: string }[] = [
 ].map((bg) => ({ bg, fg: "#FFFFFF" }));
 
 export function avatarColour(name: string): { bg: string; fg: string } {
-  let h = 2166136261;
-  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619) >>> 0;
-  return AVATAR[h % AVATAR.length];
+  // Hash the name as the box draws it (Latin-1, UTF-8 bytes), so non-ASCII names match the firmware too.
+  return AVATAR[avatarHash(name) % AVATAR.length];
 }
 
 /** A player's squircle with their initial, coloured from their name. Decorative (the name is next to it). */

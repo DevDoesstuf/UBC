@@ -491,6 +491,7 @@ export function setMode(l: Lobby, mode: MarketMode): void {
 }
 
 export function openMarket(l: Lobby, now: number): void {
+  if (l.phase === "ended") throw new ApiError(400, "This game is over. Tap New game to play again");
   if (l.phase !== "lobby" && l.phase !== "result") throw new ApiError(400, "A question is already running");
   const game = getGame(l.gameId);
   if (!game) throw new ApiError(400, "No more questions in this game");
@@ -529,7 +530,7 @@ function openReplayNext(l: Lobby, game: Game, now: number): void {
   advanceReplay(run, now, replayHost(l), true);
   if (l.phase !== "open") {
     const nowMs = replayMs(run, now);
-    throw new ApiError(400, bestCandidate(run, nowMs) ? "Try again in a moment" : "Waiting for the next play. A question opens by itself when one comes up.");
+    throw new ApiError(400, bestCandidate(run, nowMs) ? "Try again in a moment" : "Waiting for the next play. It opens by itself");
   }
 }
 

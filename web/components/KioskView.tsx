@@ -4,8 +4,9 @@
 // like the firmware does (top = baseline - ascent of the firmware font). Motion is CSS: entrances are keyframes
 // whose resting style is the final state, numbers roll, the lock ring drains from the clock. If the box and
 // this page ever differ, the firmware is the reference.
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import type { KioskButton, KioskCard, KioskScreen } from "@/lib/kiosk";
+import { avatarHash } from "@/lib/boxText";
 
 // ---------------------------------------------------------------- tokens + fonts (same as ui.cpp)
 
@@ -63,11 +64,8 @@ function wrapLines(font: string, text: string, maxW: number): number | null {
   return lines + (line ? 1 : 0);
 }
 
-function hash(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
-  return h >>> 0;
-}
+/** Same hash as the firmware (UTF-8 bytes of the box-safe name) and the phone/TV avatars. */
+const hash = avatarHash;
 const AVATAR = ["#0B7A3E", "#127C71", "#6D4AD6", "#B4235A", "#5B6B2F", "#8C5A1B", "#2F4858", "#9A3412"];
 
 // ---------------------------------------------------------------- primitives
@@ -244,17 +242,34 @@ const STYLE: Record<string, { bg: string; fg: string; cls?: string }> = {
   plain: { bg: P.card, fg: P.ink, cls: "hk-plain" },
 };
 
-function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending }: {
+/** Rough label width (the firmware measures; the preview estimates). */
+const labelW = (label: string, size: number) => label.length * size * 0.5;
+
+/**
+ * Same rule as the firmware's callRow: as many Call it! buttons as fit with their whole label and bolt
+ * (at most 4, at least 2), all in one face.
+ */
+function callRow<T extends { label: string }>(calls: T[], width: number): { shown: T[]; bw: number; small: boolean } {
+  let n = Math.min(calls.length, 4);
+  const bwFor = (k: number) => (width - (k - 1) * 8) / k;
+  while (n > 2 && calls.slice(0, n).some((c) => labelW(c.label, 15) > bwFor(n) - 20 - 18)) n--;
+  const shown = calls.slice(0, n);
+  const bw = n ? bwFor(n) : 0;
+  return { shown, bw, small: shown.some((c) => labelW(c.label, 20) > bw - 30 - 18) };
+}
+
+function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending, small: forceSmall }: {
   b: KioskButton & { enabled?: boolean }; x: number; y: number; w: number; h: number; f?: FontKey; r?: number;
-  style?: string; onTouch: (id: string) => void; pending?: boolean;
+  style?: string; onTouch: (id: string) => void; pending?: boolean; small?: boolean;
 }) {
   const st = STYLE[style ?? b.style ?? "plain"] ?? STYLE.plain;
   const enabled = b.enabled !== false;
-  const play = b.id === "start" || b.id === "next";
   const call = (style ?? b.style) === "call";
   const font = F[f];
-  // same fallback as the firmware: long label on a narrow button -> small face
-  const small = b.label.length * font.size * 0.5 > w - 30 - (play || call ? 18 : 0);
+  // same fallback as the firmware: long label on a narrow button -> small face, then no icon
+  const small = forceSmall ?? labelW(b.label, font.size) > w - 30 - (b.id === "start" || b.id === "next" || call ? 18 : 0);
+  const iconFits = !small || labelW(b.label, 15) <= w - 20 - 18;
+  const play = (b.id === "start" || b.id === "next") && iconFits;
   return (
     <button
       type="button"
@@ -263,9 +278,9 @@ function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending }: {
       onClick={() => enabled && onTouch(b.id)}
       disabled={!enabled}
     >
-      {call && !small && <svg width="14" height="20" viewBox="-7 -10 14 20" aria-hidden="true"><path d="M2 -9 L-6 1.5 L1 1.5 Z M-2 9 L6 -1.5 L-1 -1.5 Z" fill={enabled ? P.accent : P.muted} /></svg>}
+      {call && iconFits && <svg width="14" height="20" viewBox="-7 -10 14 20" aria-hidden="true"><path d="M2 -9 L-6 1.5 L1 1.5 Z M-2 9 L6 -1.5 L-1 -1.5 Z" fill={enabled ? P.accent : P.muted} /></svg>}
       <span className="hk-label">{b.label}</span>
-      {play && !small && <svg width="14" height="16" viewBox="-6 -8 13 16" aria-hidden="true"><path d="M-5 -7 L-5 7 L7 0 Z" fill="currentColor" /></svg>}
+      {play && <svg width="14" height="16" viewBox="-6 -8 13 16" aria-hidden="true"><path d="M-5 -7 L-5 7 L7 0 Z" fill="currentColor" /></svg>}
       {pending && <span className="hk-pending" aria-hidden="true"><i /><i /><i /></span>}
     </button>
   );
@@ -273,12 +288,12 @@ function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending }: {
 
 // ---------------------------------------------------------------- shared pieces
 
-function Scorebug({ s, rx, y, h }: { s: KioskScreen; rx: number; y: number; h: number }) {
+function Scorebug({ s, rx, y, h, elRef }: { s: KioskScreen; rx: number; y: number; h: number; elRef?: Ref<HTMLDivElement> }) {
   const sc = s.score!;
   const live = sc.status === "live";
   const sub = sc.status === "final" ? "Final" : sc.period || (live ? "Live" : "Pre");
   return (
-    <div className="hk-abs hk-lift hk-scorebug hk-drop" style={{ right: 800 - rx, top: y, height: h, borderRadius: h / 2 }} aria-label={`${sc.home} ${sc.homeScore}, ${sc.away} ${sc.awayScore}, ${sc.clock}`}>
+    <div ref={elRef} className="hk-abs hk-lift hk-scorebug hk-drop" style={{ right: 800 - rx, top: y, height: h, borderRadius: h / 2 }} aria-label={`${sc.home} ${sc.homeScore}, ${sc.away} ${sc.awayScore}, ${sc.clock}`}>
       <i className="hk-bar" style={{ background: sc.homeColor ?? P.ink2 }} />
       <b className="hk-body hk-w700">{sc.homeShort || "HOME"}</b>
       <span className="hk-score hk-num hk-w700 hk-c90">{sc.homeScore}</span>
@@ -293,9 +308,9 @@ function Scorebug({ s, rx, y, h }: { s: KioskScreen; rx: number; y: number; h: n
   );
 }
 
-function CodeChip({ code, rx }: { code: string; rx: number }) {
+function CodeChip({ code, rx, elRef }: { code: string; rx: number; elRef?: Ref<HTMLDivElement> }) {
   return (
-    <div className="hk-abs hk-lift hk-chip" style={{ right: 800 - rx, top: 12, height: 38 }}>
+    <div ref={elRef} className="hk-abs hk-lift hk-chip" style={{ right: 800 - rx, top: 12, height: 38 }}>
       <span className="hk-body hk-w600" style={{ fontSize: 15, color: P.ink2 }}>Join</span>
       <b className="hk-body hk-w700" style={{ fontSize: 20 }}>{code}</b>
     </div>
@@ -358,6 +373,11 @@ function Select({ s, onTouch, fresh }: Ctx) {
             const y = 6 + Math.floor(i / 3) * 196;
             const teams = c.home && c.away;
             const replay = c.kind === "replay";
+            // US style "Away at Home" (away on top); soccer "Home v Away". Old servers: NFL only.
+            const at = c.at ?? c.league === "NFL";
+            const [t1, t2] = teams ? (at ? [c.away!, c.home!] : [c.home!, c.away!]) : [];
+            const c1 = at ? c.away?.color ?? P.ink2 : c.home?.color ?? c.color ?? P.accent;
+            const c2 = at ? c.home?.color ?? c.color ?? P.accent : c.away?.color ?? P.ink2;
             return (
               <button
                 key={c.id}
@@ -368,7 +388,7 @@ function Select({ s, onTouch, fresh }: Ctx) {
                 aria-disabled={!c.enabled}
                 aria-label={`${c.title}${c.enabled ? "" : ", coming soon"}`}
               >
-                <i className="hk-ribbon" style={{ background: teams ? `linear-gradient(90deg, ${c.home!.color ?? c.color ?? P.accent} 50%, ${c.away!.color ?? P.ink2} 50%)` : c.color ?? P.accent }} />
+                <i className="hk-ribbon" style={{ background: teams ? `linear-gradient(90deg, ${c1} 50%, ${c2} 50%)` : c.color ?? P.accent }} />
                 {c.league && <span className="hk-pill hk-body hk-w600" style={{ left: 14, top: 18, background: c.enabled ? P.well : P.rule, color: P.ink2 }}>{c.league}</span>}
                 {!c.enabled ? (
                   <span className="hk-pill hk-body hk-w600" style={{ right: 14, top: 18, background: P.rule, color: P.muted }}>Soon</span>
@@ -379,11 +399,11 @@ function Select({ s, onTouch, fresh }: Ctx) {
                 )}
                 {teams ? (
                   <>
-                    <i className="hk-swatch" style={{ left: 14, top: 58, background: c.home!.color ?? P.accent }} />
-                    <T f="H3" x={30} y={80} w={204} color={c.enabled ? P.ink : P.muted}>{c.home!.name}</T>
-                    <T f="B3" x={30} y={102} color={P.muted}>{c.league === "NFL" ? "at" : "v"}</T>
-                    <i className="hk-swatch" style={{ left: 14, top: 108, background: c.away!.color ?? P.ink2 }} />
-                    <T f="H3" x={30} y={130} w={204} color={c.enabled ? P.ink : P.muted}>{c.away!.name}</T>
+                    <i className="hk-swatch" style={{ left: 14, top: 58, background: c1 }} />
+                    <T f="H3" x={30} y={80} w={204} color={c.enabled ? P.ink : P.muted}>{t1!.nick || t1!.name}</T>
+                    <T f="B3" x={30} y={102} color={P.muted}>{at ? "at" : "v"}</T>
+                    <i className="hk-swatch" style={{ left: 14, top: 108, background: c2 }} />
+                    <T f="H3" x={30} y={130} w={204} color={c.enabled ? P.ink : P.muted}>{t2!.nick || t2!.name}</T>
                   </>
                 ) : (
                   <>
@@ -481,10 +501,12 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
         <div className="hk-rise" style={d(600)}>
           <Bolt cx={x0 + 8} cy={316} s={0.75} color={P.accent} />
           <T f="B3" x={x0 + 20} y={322} color={P.ink2}>Call it! Tap the moment it happens on TV</T>
-          {calls.slice(0, 4).map((c, i, arr) => {
-            const bw = (w - (arr.length - 1) * 8) / arr.length;
-            return <Button key={c.id} b={{ ...c, style: "primary" }} style="call" x={x0 + i * (bw + 8)} y={330} w={bw} h={60} r={16} onTouch={onTouch} pending={pending === c.id} />;
-          })}
+          {(() => {
+            const row = callRow(calls, w);
+            return row.shown.map((c, i) => (
+              <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={row.small} x={x0 + i * (row.bw + 8)} y={330} w={row.bw} h={60} r={16} onTouch={onTouch} pending={pending === c.id} />
+            ));
+          })()}
         </div>
       )}
       <div className="hk-rise" style={d(680)}>
@@ -622,27 +644,49 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
   const diff = hist.length ? (s.yes ?? 50) - hist[0] : 0;
   const lockW = lockB ? Math.round(lockB.label.length * 10.6) + 40 : 0;
   const right = 800 - 16 - 26 - (lockB && !locked ? lockW + 12 : 0);
+  // Width budget (same rule as the firmware): the badge, the amount and "traded" stop 12 px before the
+  // scorebug / code chip. "Question 10 of 12" becomes "Q10 of 12", then "traded", then the amount drop out.
+  const title = s.title || "Market open";
+  const [shortBadge, setShortBadge] = useState(false);
+  const [fit, setFit] = useState<0 | 1 | 2>(2);
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const amtRef = useRef<HTMLSpanElement>(null);
+  const wordRef = useRef<HTMLSpanElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const bug = rightRef.current?.getBoundingClientRect();
+    const badge = badgeRef.current?.getBoundingClientRect();
+    if (!bug || !badge || !bug.width) return;
+    const k = (badgeRef.current?.offsetWidth ?? 0) > 0 ? badge.width / badgeRef.current!.offsetWidth : 1;
+    const limit = bug.left - 12 * k;
+    const amt = amtRef.current?.getBoundingClientRect();
+    const word = wordRef.current?.getBoundingClientRect();
+    if (!shortBadge && (!word || word.right > limit) && /^Question \d/.test(title)) setShortBadge(true);
+    const next: 0 | 1 | 2 = word && word.right <= limit ? 2 : amt && amt.right <= limit ? 1 : 0;
+    if (next !== fit) setFit(next);
+  });
   return (
     <div key={q} className="hk-fill">
-      <div className="hk-drop">
+      <div className="hk-drop hk-abs" style={{ left: 16, top: 12, height: 38, display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
         {locked ? (
-          <div className="hk-abs hk-badge hk-pop" style={{ left: 16, top: 12, background: P.ink }}>
+          <div ref={badgeRef} className="hk-badge hk-pop">
             <svg width="20" height="22" viewBox="-10 -11 20 24" aria-hidden="true"><path d="M-5.5 -0.5 V-3 A5.5 5.5 0 0 1 5.5 -3 V-0.5" fill="none" stroke="#fff" strokeWidth="2.6" /><rect x="-9" y="-0.5" width="18" height="13" rx="3" fill="#fff" /></svg>
             <span className="hk-body hk-w700">Trading closed</span>
           </div>
         ) : (
-          <div className="hk-abs hk-badge" style={{ left: 16, top: 12, background: GRAD }}>
+          <div ref={badgeRef} className="hk-badge" style={{ background: GRAD }} aria-label={title}>
             <svg width="14" height="20" viewBox="-7 -10 14 20" aria-hidden="true"><path d="M2 -9 L-6 1.5 L1 1.5 Z M-2 9 L6 -1.5 L-1 -1.5 Z" fill="#fff" /></svg>
-            <span className="hk-body hk-w700">{s.title || "Market open"}</span>
+            <span className="hk-body hk-w700">{shortBadge ? title.replace(/^Question /, "Q") : title}</span>
           </div>
         )}
-        <div className="hk-abs hk-traded" style={{ left: locked ? 220 : 40 + (s.title || "Market open").length * 10.4 + 24, top: 18 }}>
-          <span className="hk-num hk-w700 hk-c90">{s.volume !== undefined ? money(s.volume) : ""}</span> <span className="hk-body hk-w400">{s.volume !== undefined ? "traded" : s.traded}</span>
+        <div className="hk-traded" aria-label={s.volume !== undefined ? `${money(s.volume)} traded` : s.traded}>
+          <span ref={amtRef} className="hk-num hk-w700 hk-c90" style={{ visibility: fit >= 1 ? "visible" : "hidden" }}>{s.volume !== undefined ? money(s.volume) : ""}</span>{" "}
+          <span ref={wordRef} className="hk-body hk-w400" style={{ visibility: fit >= 2 ? "visible" : "hidden" }}>{s.volume !== undefined ? "traded" : s.traded}</span>
         </div>
       </div>
       <LiveDot cx={776} cy={30} fresh={fresh} />
       {lockB && !locked && <Button b={lockB} x={800 - 16 - 26 - lockW} y={10} w={lockW} h={42} r={21} onTouch={onTouch} pending={pending === "lock"} />}
-      {s.score ? <Scorebug s={s} rx={right} y={10} h={42} /> : s.code ? <CodeChip code={s.code} rx={right} /> : null}
+      {s.score ? <Scorebug s={s} rx={right} y={10} h={42} elRef={rightRef} /> : s.code ? <CodeChip code={s.code} rx={right} elRef={rightRef} /> : null}
 
       <div className={`hk-abs hk-stage hk-zoom hk-lift ${urgent ? "hk-urgent-edge" : ""}`} style={{ left: 12, top: 64, width: 776, height: 404 }}>
         <i className="hk-ribbon" style={{ background: GRAD, height: 7 }} />
@@ -744,16 +788,19 @@ function Result({ s, onTouch, pending, fresh }: Ctx) {
   share = Math.min(0.95, Math.max(0.05, share));
   const next = s.buttons.find((b) => b.id === "next");
   const end = s.buttons.find((b) => b.id === "end");
-  const calls = (s.calls ?? s.buttons.filter((b) => b.id.startsWith("moment:"))).slice(0, 4);
+  const allCalls = s.calls ?? s.buttons.filter((b) => b.id.startsWith("moment:"));
   const winners = s.winners ?? (s.lines ?? []).map((l) => ({ name: l, cents: 0, profit: 0 }));
   const losers = s.losers ?? [];
   const trailing = (s.volume !== undefined ? `${money(s.volume)} traded` : s.traded) ?? "";
   let x = 36;
   let x1 = 764;
-  const nextW = 230, endW = next ? 120 : 230;
+  // With Call it! buttons in the row, Next and End shrink to their labels so the calls get the room (firmware too).
+  const has = allCalls.length > 0;
+  const nextW = next ? (has ? Math.min(230, labelW(next.label, 20) + 62) : 230) : 0;
+  const endW = end ? (has ? Math.min(120, labelW(end.label, 20) + 44) : next ? 120 : 230) : 0;
   if (next) x += nextW + 12;
   if (end) x1 -= endW + 12;
-  const bw = calls.length ? (x1 - x - (calls.length - 1) * 8) / calls.length : 0;
+  const { shown: calls, bw, small } = callRow(allCalls, x1 - x);
   return (
     <div key={s.question} className="hk-fill">
       <Wordmark x={20} y={40} />
@@ -792,7 +839,7 @@ function Result({ s, onTouch, pending, fresh }: Ctx) {
       <div className="hk-rise" style={d(900)}>
         {next && <Button b={next} style={voided ? "brand" : "ink"} x={36} y={396} w={nextW} h={62} r={20} onTouch={onTouch} pending={pending === next.id} />}
         {calls.map((c, i) => (
-          <Button key={c.id} b={{ ...c, style: "primary" }} style="call" f={bw < 110 ? "B3" : "B1"} x={x + i * (bw + 8)} y={396} w={bw} h={62} r={18} onTouch={onTouch} pending={pending === c.id} />
+          <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={small} x={x + i * (bw + 8)} y={396} w={bw} h={62} r={18} onTouch={onTouch} pending={pending === c.id} />
         ))}
         {end && <Button b={end} style={next ? "white" : "ink"} x={764 - endW} y={396} w={endW} h={62} r={20} onTouch={onTouch} pending={pending === end.id} />}
       </div>
