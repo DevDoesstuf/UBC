@@ -22,7 +22,7 @@ This README is the single source of context for people and agents working on the
 | LMSR pricing | **Unit tested** against the spec's worked example (`npm test`). |
 | Coinbase Onramp deposits + on-chain payouts | **Written against Coinbase's current docs, not yet run** (needs your CDP keys). See [Money](#money). |
 | Upstash Redis storage (needed on Vercel) | **Written, not yet run** against a real Upstash instance. Local dev uses memory. |
-| Kiosk firmware (ESP32-S3 touchscreen) | **Written, not compiled or flashed yet.** See [Kiosk firmware](#kiosk-firmware-esp32-s3-touch-lcd-43). |
+| Kiosk firmware (ESP32-S3 touchscreen) | **Compiled, flashed and working on the real board** (Nov 17). First flash failed only because PSRAM was off in the IDE settings. See [Kiosk firmware](#kiosk-firmware-esp32-s3-touch-lcd-43). |
 | Speaker + second ESP32 | Not built. The site already serves `/api/kiosk/audio` for it, and the watch page plays the sounds meanwhile. |
 | NFC | No firmware needed: a passive NFC sticker holding `https://<site>/k/1`. |
 | YouTube clip | **Placeholder.** Put a real clip id and timestamps in `web/config/games.json`. |
@@ -278,9 +278,9 @@ Just the board and one USB-C cable. No other wiring for the screen. The touch pa
 2. Library Manager: install exactly these three: **GFX Library for Arduino** by Moon On Our Nation (1.6.x; not "Adafruit GFX"), **U8g2** by oliver (fonts), **ArduinoJson** by Benoit Blanchon (7.x). Wi-Fi, HTTPS and I2C come with the ESP32 board package.
 3. Tools menu:
    - Board: **ESP32S3 Dev Module**
-   - PSRAM: **OPI PSRAM** (required; the screen won't start without it)
-   - Flash Size: **8MB** (safe on both 8 MB and 16 MB boards)
-   - Partition Scheme: **8M with spiffs (3MB APP/1.5MB SPIFFS)**
+   - PSRAM: **OPI PSRAM** (required; it defaults to Disabled, and then the board reboot-loops with a black screen and "no mem for frame buffer" on serial)
+   - Flash Size: **16MB (128Mb)**. Our board reported 16 MB via `esptool flash_id` even though Waveshare's docs say 8 MB. **8MB** also works and is safe on either.
+   - Partition Scheme: **16M Flash (3MB APP/9.9MB FATFS)** (or **8M with spiffs** if you picked 8MB)
    - USB CDC On Boot: Disabled
    - Upload and Serial Monitor go through the USB-C port labeled **UART**
 4. Copy `firmware/kiosk_screen/secrets.example.h` to `secrets.h` and fill in:
@@ -298,9 +298,15 @@ With arduino-cli instead:
 arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB" firmware/kiosk_screen
 ```
 
-### Not verified yet / troubleshooting
+### Build times and when to reflash
 
-This sketch has **not been compiled or run on the board yet**. Things to check on first flash:
+- The first compile, or any compile after changing a Tools setting, the ESP32 board package or a library, rebuilds everything: several minutes. After that, rebuilds take about a minute.
+- Most changes don't need a reflash at all: screens, labels, buttons, games and flow all come from the site. Reflash only to change Wi-Fi or `SERVER_URL` (`secrets.h`), or the drawing code in `ui.cpp`.
+- Upload needs no button presses on the UART port (auto-reset). Close the Serial Monitor before uploading.
+
+### Troubleshooting
+
+Things to check if a flash misbehaves:
 
 - **Compile error in the `Arduino_ESP32RGBPanel(...)` call:** an older GFX library; update to 1.6.x, or remove the last four constructor arguments.
 - **Blank screen, serial says panel begin failed:** PSRAM is not set to OPI PSRAM.

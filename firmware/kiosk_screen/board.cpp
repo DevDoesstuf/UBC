@@ -104,6 +104,13 @@ bool boardTouch(int16_t &x, int16_t &y) {
 // ---------------------------------------------------------------- bring-up
 
 bool boardBegin() {
+  // The 768 KB screen buffer only fits in PSRAM. Without it the display driver aborts and the board reboot-loops.
+  if (!psramFound()) {
+    Serial.println("[board] PSRAM is OFF. In Arduino IDE set Tools > PSRAM > \"OPI PSRAM\" and upload again.");
+    return false;
+  }
+  Serial.printf("[board] PSRAM %u KB free\n", (unsigned)(ESP.getFreePsram() / 1024));
+
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
 
   // IO expander: all EXIO pins as outputs. Touch + LCD held in reset, backlight off, SD deselected.

@@ -26,7 +26,7 @@ void setup() {
   if (!boardBegin()) {
     // Without a working panel there is nothing to show; keep logging so the serial monitor explains.
     for (;;) {
-      Serial.println("[kiosk] display failed to start. Check board settings: PSRAM = OPI PSRAM.");
+      Serial.println("[kiosk] display failed to start. Check Tools > PSRAM = \"OPI PSRAM\", then upload again.");
       delay(3000);
     }
   }
