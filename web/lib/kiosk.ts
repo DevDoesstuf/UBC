@@ -71,13 +71,16 @@ function qrRows(text: string): { size: number; rows: string[] } {
 
 export async function kioskScreen(kioskId: string, baseUrl: string): Promise<KioskScreen> {
   const l = await getKioskLobby(kioskId);
-  const footer = `Kiosk ${kioskId}`;
+  // Look (firmware palette only): header green while a lobby or question is live and when YES wins, gray for
+  // calm screens. Main actions use the "yes" style (the firmware's green) instead of "primary" (blue).
+  // Copy stays short and Latin-1 (the firmware truncates titles at 560 px and subtitles at 750 px).
+  const footer = `Huddle · Kiosk ${kioskId}`;
 
   if (!l) {
     return {
-      screen: "select", kiosk: kioskId, color: "blue", footer,
+      screen: "select", kiosk: kioskId, color: "gray", footer,
       title: "Pick a game",
-      subtitle: "Then everyone taps a phone to join",
+      subtitle: "Then everyone taps a phone here to join",
       tiles: allGames().slice(0, 4).map((g) => {
         const enabled = g.live && g.questions.length > 0;
         return { id: `game:${g.id}`, label: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled };
@@ -88,23 +91,23 @@ export async function kioskScreen(kioskId: string, baseUrl: string): Promise<Kio
 
   const game = getGame(l.gameId);
   const total = game?.questions.length ?? 0;
-  const footerL = `${footer}  -  Lobby ${l.code}`;
+  const footerL = `Huddle · ${l.code}`;
   const m = l.market;
   const players = l.order.map((id) => l.players[id]);
 
   if (l.phase === "lobby") {
     const joinUrl = `${baseUrl}/l/${l.code}`;
     return {
-      screen: "lobby", kiosk: kioskId, color: "blue", footer: footerL,
+      screen: "lobby", kiosk: kioskId, color: "green", footer: footerL,
       title: k(game?.title ?? "Lobby"),
-      subtitle: `Tap your phone or scan to join  -  ${players.length} in`,
+      subtitle: `Tap your phone or scan to join  ·  ${players.length} in`,
       code: l.code,
       joinUrl: joinUrl.replace(/^https?:\/\//, ""),
       qr: qrRows(joinUrl),
-      players: players.map((p) => k(`${p.name}  ${p.deposited > 0 ? usd(p.balance) : "no deposit yet"}`)),
+      players: players.map((p) => k(`${p.name}  ${p.deposited > 0 ? usd(p.balance) : "adding money..."}`)),
       question: k(game?.questions[l.qIndex]?.text ?? ""),
       buttons: [
-        { id: "start", label: `Start question ${l.qIndex + 1}`, style: "primary" },
+        { id: "start", label: `Start question ${l.qIndex + 1}`, style: "yes" },
         { id: "cancel", label: "Cancel", style: "plain" },
       ],
     };
@@ -122,17 +125,17 @@ export async function kioskScreen(kioskId: string, baseUrl: string): Promise<Kio
     };
     if (l.phase === "open") {
       return {
-        ...base, screen: "market", color: "amber",
+        ...base, screen: "market", color: "green",
         title: `Question ${m.qIndex + 1} of ${total}`,
-        subtitle: "Buy YES or NO on your phone",
+        subtitle: "Buy YES or NO on your phone. A winning share pays $1",
         lockIn: Math.max(0, Math.ceil((m.lockAt - Date.now()) / 1000)),
         buttons: [{ id: "lock", label: "Lock now", style: "plain" }],
       };
     }
     return {
-      ...base, screen: "locked", color: "red",
+      ...base, screen: "locked", color: "gray",
       title: "Trading closed",
-      subtitle: m.resolveAt ? "Watch the play! Result comes in automatically" : "Watch the play! Then tap what happened",
+      subtitle: m.resolveAt ? "Watch the play. The result comes in by itself" : "Watch the play, then tap what happened",
       lockIn: 0,
       buttons: [
         { id: "resolve:yes", label: "It was YES", style: "yes" },
@@ -145,17 +148,17 @@ export async function kioskScreen(kioskId: string, baseUrl: string): Promise<Kio
     const winners = Object.entries(m.payouts).sort((a, b) => b[1] - a[1]);
     const more = l.qIndex < total;
     return {
-      screen: "result", kiosk: kioskId, color: "green", footer: footerL,
-      title: m.outcome === "yes" ? "YES!" : "NO!",
-      subtitle: k(m.text),
+      screen: "result", kiosk: kioskId, color: m.outcome === "yes" ? "green" : "gray", footer: footerL,
+      title: m.outcome === "yes" ? "It was YES" : "It was NO",
+      subtitle: `${winners.length} ${winners.length === 1 ? "winner" : "winners"}  ·  ${usd(m.volume)} traded  ·  winning shares pay $1`,
       result: m.outcome === "yes" ? "YES" : "NO",
       question: k(m.text),
       lines: winners.length
         ? winners.slice(0, 6).map(([id, c]) => k(`${l.players[id]?.name ?? "?"}  +${usd(c)}`))
-        : ["No winners this time"],
+        : ["Nobody called it this time"],
       buttons: more
-        ? [{ id: "next", label: "Next question", style: "primary" }, { id: "end", label: "End session", style: "plain" }]
-        : [{ id: "end", label: "End session", style: "primary" }],
+        ? [{ id: "next", label: `Start question ${l.qIndex + 1}`, style: "yes" }, { id: "end", label: "End session", style: "plain" }]
+        : [{ id: "end", label: "End session", style: "yes" }],
     };
   }
 
@@ -164,9 +167,9 @@ export async function kioskScreen(kioskId: string, baseUrl: string): Promise<Kio
   return {
     screen: "ended", kiosk: kioskId, color: "gray", footer: footerL,
     title: "Session over",
-    subtitle: "Cash out on your phone",
-    lines: board.slice(0, 6).map((p) => k(`${p.name}  ${usd(p.balance + p.withdrawn)}`)),
-    buttons: [{ id: "new", label: "New game", style: "primary" }],
+    subtitle: "Thanks for playing. Cash out on your phone",
+    lines: board.slice(0, 6).map((p, i) => k(`${i + 1}.  ${p.name}  ${usd(p.balance + p.withdrawn)}`)),
+    buttons: [{ id: "new", label: "New game", style: "yes" }],
   };
 }
 
