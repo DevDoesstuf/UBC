@@ -16,6 +16,8 @@ html:has(.ph-screen) {
   font-size: 1.0625rem;
   line-height: 1.45;
   isolation: isolate;
+  /* Confetti and coins fly past the edges; clip (not hidden) keeps the sticky header working. */
+  overflow: clip;
 }
 .ph-screen button, .ph-screen a, .ph-screen label { touch-action: manipulation; }
 .ph-screen input { font-size: max(16px, 1em); }
