@@ -65,7 +65,8 @@ web/                       <- the website (Next.js 16, TypeScript). Vercel root 
   app/kiosk                <- web version of the kiosk screen (same JSON as the ESP32)
   app/k/[kiosk]            <- NFC entry point (redirects to the kiosk's current lobby)
   components/              <- huddle/ (the shared kit: Roll, LockRing, SplitBar, Kinetic, Burst, Avatar, motion), phone/, tv/, KioskView (same layout as firmware), Qr, client helpers
-  public/sounds/*.wav      <- join, start, lock, win, tap (from the TapBet prototype)
+  public/sounds/*.wav      <- room sounds (join, tap, start, lastcall, lock, win, lose, siren, cheer, coin)
+  scripts/make-sounds.mjs  <- remakes them: ElevenLabs Sound Effects with a key, procedural placeholders without
   test/lmsr.test.mts       <- pricing tests
 firmware/kiosk_screen/     <- Arduino sketch for the Waveshare ESP32-S3-Touch-LCD-4.3
   kiosk_screen.ino         <- setup/loop
@@ -209,7 +210,7 @@ All JSON. Phones identify themselves with the `x-player-token` header they get f
 
 `POST /api/kiosk/touch` with body `{"kiosk":"1","id":"<tile or button id>"}` returns the new screen. A refused tap returns HTTP 400 with the current screen plus `"error"`, which the kiosk shows as a toast. Ids: `game:<gameId>`, `start`, `next`, `lock`, `resolve:yes`, `resolve:no`, `end`, `cancel`, `new`. If `KIOSK_KEY` is set on the site, touches need the header `x-kiosk-key`.
 
-`GET /api/kiosk/audio?kiosk=1&after=<last id>` is what the speaker ESP32 (`firmware/speaker`) polls. `after=-1` at boot returns the latest id without a sound. Otherwise it returns the next `{id, url, text}` to play (22 kHz mono WAV) or `url: null`. Ids are increasing timestamps, so they never reset between games.
+`GET /api/kiosk/audio?kiosk=1&after=<last id>` is what the speaker ESP32 (`firmware/speaker`) polls. `after=-1` at boot returns the latest id without a sound. Otherwise it returns the next `{id, url, text, kind}` to play (a WAV; `kind` is `sound` or `voice`) or `url: null`. Ids are increasing timestamps, so they never reset between games. Items older than 8 s (the last-call tick: 1.2 s) are skipped, so a speaker that fell behind catches up instead of playing a backlog. See [ElevenLabs](#elevenlabs-the-announcer-and-the-room-sounds).
 
 Strings sent to the kiosk are limited to Latin-1, because the firmware fonts are Latin-1.
 
@@ -373,7 +374,7 @@ No hardware code needed. The tap is a **passive NFC sticker** (NTAG213/215) that
 
 **Why not on the screen board:** I2S needs three free GPIOs (bit clock, word select, data). The screen uses nearly all of the ESP32-S3's pins. The 4-pin **VCC / GND / SDA / SCL** port is the I2C bus (GPIO 8 and 9) that the **touch controller and the backlight/reset expander** share: putting I2S on it would break touch and the backlight, and it's still one pin short. So the speaker gets its own ESP32, which also keeps the screen firmware untouched.
 
-**How it works:** the speaker ESP32 polls `GET /api/kiosk/audio?kiosk=1&after=<id>` about every 0.7 s and streams each WAV straight to the amp: the event sounds in `web/public/sounds` (join, start, lock, win, tap), and with `ELEVENLABS_API_KEY` on the site, the announcer's voice from `/api/tts` after each sound. It never needs to know about games: **to change what plays and when, change the website** (`lib/lobby.ts` events, `public/sounds`, `/api/kiosk/audio`), never the speaker firmware.
+**How it works:** the speaker ESP32 polls `GET /api/kiosk/audio?kiosk=1&after=<id>` about every 0.7 s and streams each WAV straight to the amp: the event sounds in `web/public/sounds` (see [ElevenLabs](#elevenlabs-the-announcer-and-the-room-sounds) for the list), and with `ELEVENLABS_API_KEY` on the site, the announcer's voice from `/api/tts` after each sound. It never needs to know about games: **to change what plays and when, change the website** (`lib/lobby.ts` events, `public/sounds`, `/api/kiosk/audio`), never the speaker firmware.
 
 **Wiring (fixed, don't change):**
 
@@ -392,6 +393,46 @@ No hardware code needed. The tap is a **passive NFC sticker** (NTAG213/215) that
 - **Board settings:** "ESP32 Dev Module", defaults. No PSRAM needed.
 - **Check it by ear:** two quick beeps at power-up = amp and wiring OK. One high beep a few seconds later = Wi-Fi up and the website answered. After that it plays whatever the site sends (pick a game on the kiosk and you hear `tap.wav`). Serial (115200) logs each step.
 - **No sound but the serial log says "played":** check BCLK/LRC/DIN aren't swapped, the amp has 5 V and GND, and the speaker is on SPK+/SPK−. **Distorted or the board resets:** lower `VOLUME_PERCENT` or use a stronger 5 V supply.
+
+## ElevenLabs: the announcer and the room sounds
+
+The box's speaker is the room's announcer. The website decides every sound; the speaker ESP32 only plays the WAVs it is handed (see [Speaker](#speaker-second-esp32--i2s-amp)). Two ElevenLabs products are used:
+
+**1. Text to Speech (live, on every lobby event).** Every lobby event gets a screen caption and a separate spoken line (`lib/announcer.ts` `speechLine`): one short, punchy sentence in the game's persona, without the model and Gemini numbers the screen shows, with every number written out ("seventy-four percent", "one dollar thirty-five", "second half") because Flash leaves text normalization off by default. `lib/tts.ts` sends it to ElevenLabs:
+
+- `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream`, header `xi-api-key`, model **`eleven_flash_v2_5`** (the ~100 ms low-latency model; `ELEVENLABS_TTS_MODEL` overrides, for example `eleven_v4_turbo`).
+- For the speaker: `output_format=pcm_22050` (raw 16-bit mono PCM), wrapped into a 44-byte WAV header with the real data size, served by `/api/tts?code=..&id=..&format=wav` with a `Content-Length`. That is exactly what `speaker.ino` parses (`test/speaker.test.mts` runs a line-by-line copy of its parser over it). For the TV: `mp3_44100_128`.
+- Voices, all from ElevenLabs' default library (no cloned or celebrity voices), one per persona, each overridable by env var:
+
+  | Persona (games) | Voice | Env var |
+  |---|---|---|
+  | `nfl` (NFL, NBA replays) | Brian `nPczCjzI2devNBz1zQrb`, deep American play-by-play | `ELEVENLABS_VOICE_NFL` |
+  | `soccer` (Premier League, Portugal vs Spain) | George `JBFqnCBsd6RMkjVDRZzb`, warm British | `ELEVENLABS_VOICE_SOCCER` |
+  | `calm` (any game with `"persona": "calm"` in `games.json`) | Eric `cjVigY5qzO86Huf0OWal`, friendly and even | `ELEVENLABS_VOICE_CALM` |
+
+- Each clip is cached by a hash of (voice, model, settings, format, text) in Redis for 24 h, so a line is synthesized once. While the speaker plays an event's sound effect, `/api/kiosk/audio` pre-warms the voice line that follows it, so the line is usually cached by the time the speaker asks. A key ElevenLabs rejects (401/403) is remembered for 5 minutes and the site behaves as if there were no key.
+
+**2. Sound Effects (offline, once).** `web/scripts/make-sounds.mjs` asks the Sound Effects API (`POST /v1/sound-generation`, `output_format=pcm_22050`, model `eleven_text_to_sound_v3`, falling back to `eleven_text_to_sound_v2`) for each room sound from a text prompt, then trims, normalizes and writes it to `web/public/sounds` as mono 16-bit WAV under 60 KB. Until it is run with a key, the committed files are procedural placeholders the same script synthesizes (`--synth`), so the speaker already plays all of them.
+
+| Sound | When | Prompt (shortened) |
+|---|---|---|
+| `start` | a market opens | airy whoosh |
+| `siren` | the host calls a "Call it!" moment | stadium alert siren |
+| `lastcall` (8 kHz) | 4.5 s before the lock, on markets of 10 s or more | clock ticks one second apart, then a ding |
+| `lock` | trading locks | heavy latch clunk |
+| `win` / `lose` | the result: somebody won / nobody did | brass fanfare / crowd "aww" |
+| `cheer` | a touchdown, goal, field goal or the final whistle in a replay game | stadium crowd cheering |
+| `coin` | a deposit, and the end of the session (cash out) | coins ka-ching |
+| `join`, `tap` | a player joins / a game is picked, a question is voided | chime / click |
+
+**What the speaker plays, in order:** the sound effect of an event, then the announcer's line for it (captions are always created right after their event, with a larger id). It polls every 0.7 s and blocks while it plays; if it falls behind, anything older than 8 s is skipped rather than queued, and a voice line more than 2.5 s late gives way to a newer one ("Nine seconds!" for a market that has locked since is never said) (`lib/speaker.ts`). Without a key it plays the sound effects only.
+
+**Without the hardware:** `node scripts/speaker-sim.mjs http://localhost:3000 1` runs the speaker's loop (same polling, same WAV header checks) and logs what it would play, with timings. With `ELEVENLABS_BASE_URL` pointing at a local mock, the whole voice chain can be tried without a key.
+
+**When `ELEVENLABS_API_KEY` is set** (Text to Speech and Sound Effects permissions):
+
+1. Add it in Vercel (Production) and redeploy: the TV and the speaker start speaking. Nothing else changes.
+2. Once, locally in `web/`: `ELEVENLABS_API_KEY=... node scripts/make-sounds.mjs` (or `--only win,cheer` for some). Listen, commit `web/public/sounds`, push, redeploy. The key is read from the environment only and never printed or written anywhere.
 
 ---
 
@@ -425,6 +466,8 @@ No hardware code needed. The tap is a **passive NFC sticker** (NTAG213/215) that
 - Secrets live in env vars (`web/.env.local`, git-ignored; Vercel project settings). The firmware `secrets.h` files (hotspot name and password, site URL) ARE committed on purpose so a fresh clone can flash the boards; never put real keys in them.
 
 ## Sources
+
+- ElevenLabs (read Nov 18 2026): [text to speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert), [streaming](https://elevenlabs.io/docs/api-reference/text-to-speech/stream), [models](https://elevenlabs.io/docs/models), [sound effects API](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert), [sound effects overview](https://elevenlabs.io/docs/capabilities/sound-effects)
 
 - Coinbase: [create onramp session (v2)](https://docs.cdp.coinbase.com/api-reference/v2/rest-api/onramp/create-an-onramp-session), [session token (v1)](https://docs.cdp.coinbase.com/api-reference/rest-api/onramp-offramp/create-session-token), [transaction status](https://docs.cdp.coinbase.com/onramp/core-features/transaction-status), [hosted onramp overview](https://docs.cdp.coinbase.com/onramp/coinbase-hosted-onramp/overview), [session token auth](https://docs.cdp.coinbase.com/onramp-&-offramp/session-token-authentication)
 - Waveshare: [ESP32-S3-Touch-LCD-4.3 docs](https://docs.waveshare.com/ESP32-S3-Touch-LCD-4.3), [4.3B docs](https://docs.waveshare.com/ESP32-S3-Touch-LCD-4.3B), [Arduino_GFX example for this board](https://github.com/Westcott1/Waveshare-ESP32-S3-Touch-LCD-4.3-and-Arduino), [ESP32_Display_Panel board configs](https://github.com/esp-arduino-libs/ESP32_Display_Panel)

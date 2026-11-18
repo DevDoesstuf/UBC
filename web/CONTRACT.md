@@ -126,7 +126,8 @@ unchanged after it resolves). The caption leads with the call: "Penalty called! 
 | `POST /api/lobby` (x-kiosk-key if set) | `{game, kiosk?, mode?}` | `{ok, code, kiosk, mode}`: same as tapping a game tile, plus a mode |
 | `POST /api/kiosk/touch` | `{kiosk, id, mode?}` | unchanged; `mode` is honoured on `game:<id>` taps (the ESP32 never sends it) |
 | `GET /api/tts?text=...&persona=nfl` or `?code=ABCD&id=<caption id>` | | `audio/mpeg` (ElevenLabs, cached by hash); `&format=wav` gives 22 kHz mono WAV. **204** when `ELEVENLABS_API_KEY` is unset, or ElevenLabs rejected it (401/403) in the last 5 minutes (`x-tts: rejected-key`); 502/504 when ElevenLabs fails. On anything but 200, read the caption with Web Speech |
-| `GET /api/kiosk/audio?kiosk=1&after=<id>` | | unchanged shape `{id, url, text}`. Still serves the WAV sound effects; with `ELEVENLABS_API_KEY` set (and not rejected by ElevenLabs in the last 5 minutes), every caption is also an item whose `url` is `/api/tts?code=..&id=..&format=wav` (the announcer on the speaker). Ids only increase (captions share the event id counter) |
+| `GET /api/kiosk/audio?kiosk=1&after=<id>` | | `{id, url, text, kind}` (`kind`: `sound` or `voice`; `url: null` = nothing to play). The WAV sound effects of lobby events; with `ELEVENLABS_API_KEY` set (and not rejected by ElevenLabs in the last 5 minutes), every caption is also an item whose `url` is `/api/tts?code=..&id=..&format=wav` and whose `text` is the spoken line (the announcer on the speaker). Ids only increase (captions share the event id counter), and a caption always follows its event's sound. Items older than 8 s (a last-call tick: 1.2 s), and voice lines more than 2.5 s late with a newer voice line waiting, are skipped and `id` moves past them, so a speaker that fell behind never plays a backlog (`lib/speaker.ts`). `after=-1`: latest id, no sound |
+| `GET /sounds/<name>.wav` | | `join tap start lastcall lock win lose siren cheer coin`: mono 16-bit PCM, 22.05 kHz (lastcall 8 kHz), each under 60 KB. `scripts/make-sounds.mjs` remakes them (ElevenLabs Sound Effects with a key, procedural without) |
 | `GET/POST /api/lobby/:code/moment` | `{kind}` | list / open a "Call it" moment (see above) |
 | `GET /api/gemini/markets` `?league=NFL,NBA,EPL&team=DAL` | | Market discovery: `{asOf, live, source: 'live'\|'snapshot'\|'unavailable', note, leagues, count, games: [{base, league, title, startTime, isLive, url, home: {code, name, prob}, away, draw, volume}], ours: [{gameId, title, event, real, date, settled, hasPriceHistory, liveNow, upcoming: [game...]}]}`. Full-game moneylines Gemini is trading, soonest first (default leagues NFL, NBA, EPL; also NHL NCAAF NCAAM MLB MLS UCL). `ours` lists the Gemini games our teams play next. Cached 2 min; when Gemini is down it serves the last good list (`live: false`, real `asOf`), never a 5xx |
 | `POST /api/lobby/:code/deposit` | `{cents}` | demo: `{credited}`; coinbase: `{url}`; **solana**: `{url: "solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle&message=..", solanaPay: true, reference, recipient, mint, amount}`. Show `url` as a QR and an "Open in wallet" link, then poll `/deposit/sync` every 3 s |
@@ -233,7 +234,9 @@ close quarter (random-walk margin, asked only between 15% and 60%). Kiosk "Call 
 |---|---|---|
 | `ELEVENLABS_API_KEY` | TTS for captions | unset = `/api/tts` returns 204 (Web Speech fallback) |
 | `ELEVENLABS_TTS_MODEL` | | `eleven_flash_v2_5` |
-| `ELEVENLABS_VOICE_NFL` / `_SOCCER` / `_CALM` | other stock voices | Brian / George / Eric |
+| `ELEVENLABS_VOICE_NFL` / `_SOCCER` / `_CALM` | other stock voices | Brian `nPczCjzI2devNBz1zQrb` / George `JBFqnCBsd6RMkjVDRZzb` / Eric `cjVigY5qzO86Huf0OWal` |
+| `ELEVENLABS_BASE_URL` | a regional ElevenLabs host, or a local mock for tests | `https://api.elevenlabs.io` |
+| `ELEVENLABS_SFX_MODEL` | `scripts/make-sounds.mjs` only (not on Vercel) | `eleven_text_to_sound_v3` (falls back to `_v2`) |
 | `GEMINI_API_BASE` | Gemini Prediction Markets | `https://api.gemini.com` (public, no key) |
 | `GEMINI_DISABLED=1` | turn Gemini off | |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis on Vercel (lobbies, Gemini and TTS caches) | memory |
@@ -249,7 +252,9 @@ close quarter (random-walk margin, asked only between 15% and 60%). Kiosk "Call 
   **Not set yet** (checked Nov 18 with `vercel env pull` on the `huddle-live` project: only the Upstash vars are
   there), so `/api/tts` answers 204 and the TV uses Web Speech. The request (`POST /v1/text-to-speech/{voice}/stream`,
   `xi-api-key`, `output_format=mp3_44100_128` or `pcm_22050`, `model_id: eleven_flash_v2_5`, `voice_settings`) was
-  checked against ElevenLabs' current API reference and is tested against a mock (`test/games-live.test.mts`).
+  checked against ElevenLabs' current API reference and is tested against a mock (`test/games-live.test.mts`,
+  `test/speaker.test.mts`). Once the key is set: `ELEVENLABS_API_KEY=... node scripts/make-sounds.mjs` in `web/`
+  (needs Sound Effects permission), commit `public/sounds`, redeploy.
 - **Gemini**: nothing; the public API needs no key. If it is down, the Titans at Cowboys game uses the bundled
   Nov 16 snapshot (shown with `live: false` and its real `asOf`). Settled markets are never fetched again: the
   stored pregame snapshot is used and `note` says so. Real replayed games need no network for Gemini at all.
