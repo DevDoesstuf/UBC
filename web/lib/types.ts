@@ -139,6 +139,8 @@ export interface Market {
   /** Resolved as void: every stake refunded. */
   voided?: boolean;
   voidReason?: string | null;
+  /** The "last call" tick was sent (once per market, a few seconds before the lock). */
+  lastCall?: boolean;
   /** Where the question came from. */
   source?:
     | { kind: "replay"; templateId: string; key: string; rationale: string; moment?: string }
@@ -168,14 +170,19 @@ export interface Caption {
   text: string;
   /** Lobby event kind it narrates. */
   kind?: string;
+  /** What the announcer says out loud (shorter than `text`, numbers as words). Missing on old lobbies: use `text`. */
+  say?: string;
 }
+
+/** A file in web/public/sounds (<name>.wav). The speaker and the TV play it when the event happens. */
+export type SoundName = "join" | "start" | "lock" | "win" | "tap" | "lose" | "lastcall" | "siren" | "cheer" | "coin";
 
 export interface LobbyEvent {
   id: number;
   at: number;
-  kind: "join" | "start" | "lock" | "result" | "deposit" | "end" | "tap";
+  kind: "join" | "start" | "lock" | "result" | "deposit" | "end" | "tap" | "lastcall" | "play";
   text: string;
-  sound?: "join" | "start" | "lock" | "win" | "tap";
+  sound?: SoundName;
 }
 
 export interface Result {

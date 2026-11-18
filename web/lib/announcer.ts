@@ -17,7 +17,7 @@ export type CaptionEvent =
   | { type: "void"; reason?: string | null }
   | { type: "trade"; name: string; side: "yes" | "no"; cents: number; yesPctAfter?: number | null }
   | { type: "offer"; name: string; side: "yes" | "no"; cents: number; odds: number }
-  | { type: "play"; text: string }
+  | { type: "play"; text: string; kind?: "touchdown" | "goal" | "fg" | "final" | null; team?: string | null; score?: string | null }
   | { type: "end"; leader?: { name: string; cents: number } | null; verdict?: string | null };
 
 /** "$5" / "$2.50" (whole dollars drop the cents, which reads better aloud). */
@@ -222,6 +222,175 @@ export function captionLine(ev: CaptionEvent, persona: Persona = "nfl", seed = "
   if (!list.length) return null;
   const line = pick(list, `${seed}|${ev.type}`);
   return line ? fitText(line) : null;
+}
+
+// ---------------------------------------------------------------- spoken lines (the speaker and the TV voice)
+// The screen caption can carry detail (model price, Gemini, the full play-by-play line); the voice should not.
+// speechLine gives one short, punchy line per event in the persona's voice, with every number written out in
+// words, because the low-latency ElevenLabs model reads digits literally unless text normalization is on
+// (it is off by default for Flash v2.5) and "$1.35" or "74%" read badly on the speaker otherwise.
+
+const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+/** 0..999,999 in words ("seventy-four", "one hundred five"); larger numbers stay digits. */
+export function numberWords(n: number): string {
+  n = Math.floor(Math.abs(n));
+  if (n < 20) return ONES[n];
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? `-${ONES[n % 10]}` : "");
+  if (n < 1000) return `${ONES[Math.floor(n / 100)]} hundred${n % 100 ? ` ${numberWords(n % 100)}` : ""}`;
+  if (n < 1_000_000) return `${numberWords(Math.floor(n / 1000))} thousand${n % 1000 ? ` ${numberWords(n % 1000)}` : ""}`;
+  return String(n);
+}
+
+function ordinalWords(n: number): string {
+  const w = numberWords(n);
+  const irregular: Record<string, string> = { one: "first", two: "second", three: "third", five: "fifth", eight: "eighth", nine: "ninth", twelve: "twelfth" };
+  return w.replace(/([a-z]+)$/, (last) => irregular[last] ?? (last.endsWith("y") ? `${last.slice(0, -1)}ieth` : `${last}th`));
+}
+
+/** "56.5" -> "fifty-six and a half", "1.80" -> "one point eight". */
+function decimalWords(int: string, frac: string): string {
+  const f = frac.replace(/0+$/, "");
+  if (!f) return numberWords(Number(int));
+  if (f === "5") return `${numberWords(Number(int))} and a half`;
+  return `${numberWords(Number(int))} point ${[...f].map((d) => ONES[Number(d)]).join(" ")}`;
+}
+
+/** "$5" -> "five dollars", "$1.35" -> "one dollar thirty-five", "$0.50" -> "fifty cents". */
+export function moneyWords(dollars: number, cents: number): string {
+  if (!dollars) return `${numberWords(cents)} cent${cents === 1 ? "" : "s"}`;
+  const d = `${numberWords(dollars)} dollar${dollars === 1 ? "" : "s"}`;
+  return cents ? `${d} ${numberWords(cents)}` : d;
+}
+
+/**
+ * Text as the announcer should say it: no URLs or symbols, numbers in words, YES/NO and shouty play-by-play
+ * words in normal case ("TOUCHDOWN" would be read as a shout or spelled), initials spaced ("D.Prescott").
+ */
+export function toSpeech(text: string): string {
+  let s = String(text ?? "")
+    .replace(/https?:\/\/\S+|www\.\S+/gi, "")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, ", ")
+    .replace(/\s*\(([^)]*)\)/g, ", $1,")
+    .replace(/&/g, " and ")
+    .replace(/[#*_~`|<>[\]{}]/g, " ")
+    .replace(/\b49ers\b/g, "Niners");
+  s = s.replace(/\$(\d[\d,]*)(?:\.(\d{1,2}))?\b/g, (_, d: string, c?: string) => moneyWords(Number(d.replace(/,/g, "")), c ? Number(c.padEnd(2, "0")) : 0));
+  s = s.replace(/(\d+)(?:\.(\d+))?\s?%/g, (_, i: string, f?: string) => `${f ? decimalWords(i, f) : numberWords(Number(i))} percent`);
+  s = s.replace(/\b(\d+)(st|nd|rd|th)\b/gi, (_, n: string) => ordinalWords(Number(n)));
+  s = s.replace(/\b(\d{1,3})-(\d{1,3})\b/g, (_, a: string, b: string) => `${numberWords(Number(a))} to ${numberWords(Number(b))}`);
+  s = s.replace(/\b(\d+)\.(\d+)\b/g, (_, i: string, f: string) => decimalWords(i, f));
+  s = s.replace(/\b\d{1,3}(?:,\d{3})+\b|\b\d+\b/g, (n) => numberWords(Number(n.replace(/,/g, ""))));
+  s = s
+    .replace(/\b(YES|NO)\b/g, (w) => w[0] + w.slice(1).toLowerCase())
+    .replace(/\b[A-Z]{4,}\b/g, (w) => w[0] + w.slice(1).toLowerCase())
+    .replace(/\b([A-Z])\.(?=[A-Z][a-z])/g, "$1. ")
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/,([.!?])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/(^|[.!?]\s+)([a-z])/g, (_, pre: string, c: string) => pre + c.toUpperCase());
+  return s;
+}
+
+/** The longest spoken line (about five seconds of speech). */
+export const MAX_SPEECH = 140;
+
+function speechVariants(ev: CaptionEvent, p: Persona): string[] {
+  switch (ev.type) {
+    case "start": {
+      const q = endSentence(ev.text);
+      const lock = ev.lockIn && ev.lockIn > 0 ? Math.round(ev.lockIn) : null;
+      const closer: Record<Persona, string> = {
+        nfl: lock ? `${lock} seconds!` : "Window's open!",
+        soccer: lock ? `${lock} seconds, get in!` : "Get your bets in!",
+        calm: lock ? `You have ${lock} seconds.` : "Bets are open.",
+      };
+      if (ev.call) return [[ev.call, q, closer[p]].join(" ")];
+      // Same heads (and so the same pick) as the screen caption, without the model and Gemini numbers.
+      const head: Record<Persona, string[]> = {
+        nfl: [`Here we go! ${q}`, `Market's open! ${q}`, q],
+        soccer: [`New market! ${q}`, q, `Here we go! ${q}`],
+        calm: [q, `New one for you. ${q}`, q],
+      };
+      return head[p].map((h) => `${h} ${closer[p]}`);
+    }
+    case "result": {
+      const o = side(ev.outcome);
+      const w = [...ev.winners].sort((a, b) => b.cents - a.cents)[0];
+      if (!w) return variants(ev, p);
+      const amt = money(w.cents);
+      const upset = typeof ev.atLockPct === "number" && ev.atLockPct > 0 && ev.atLockPct < 30;
+      if (upset) return [{ nfl: `Upset alert! ${w.name} takes ${amt}!`, soccer: `What an upset! ${w.name} takes ${amt}!`, calm: `A surprise. ${w.name} takes ${amt}.` }[p]];
+      const t: ByPersona = {
+        nfl: [`It's ${o}! ${w.name} takes ${amt}.`, `${o}! ${w.name} cashes in ${amt}.`, `That's ${o}, folks! ${w.name} collects ${amt}.`],
+        soccer: [`It's ${o}! ${w.name} takes ${amt}.`, `There it is, ${o}! ${w.name} collects ${amt}.`, `${o} it is! ${w.name} pockets ${amt}.`],
+        calm: [`It's ${o}. ${w.name} takes ${amt}.`, `${o}. ${w.name} collects ${amt}.`, `It's ${o}. ${amt} to ${w.name}.`],
+      };
+      return t[p];
+    }
+    case "void":
+      return [{ nfl: "No play on that one. Money back!", soccer: "That one's off. Money back!", calm: "That one is off. Stakes are refunded." }[p]];
+    case "trade": {
+      const a = money(ev.cents);
+      const o = side(ev.side);
+      const t: ByPersona = {
+        nfl: [`${ev.name} drops ${a} on ${o}!`, `Whoa! ${ev.name}, ${a} on ${o}!`, `${a} on ${o} from ${ev.name}!`],
+        soccer: [`Big move! ${ev.name}, ${a} on ${o}.`, `${ev.name} goes ${a} on ${o}!`, `${a} on ${o} from ${ev.name}!`],
+        calm: [`${ev.name} put ${a} on ${o}.`, `${a} on ${o} from ${ev.name}.`, `${ev.name} likes ${o}.`],
+      };
+      return t[p];
+    }
+    case "offer": {
+      const t: Record<Persona, string> = {
+        nfl: `${ev.name} offers ${money(ev.cents)} on ${side(ev.side)}. Any takers?`,
+        soccer: `${ev.name} offers ${money(ev.cents)} on ${side(ev.side)}. Who wants it?`,
+        calm: `${ev.name} is offering ${money(ev.cents)} on ${side(ev.side)}.`,
+      };
+      return [t[p]];
+    }
+    case "play": {
+      const team = ev.team?.trim();
+      if (ev.kind === "final") {
+        const sc = ev.score ? ` ${endSentence(ev.score)}` : "";
+        return [{ nfl: `That's the final!${sc}`, soccer: `Full time!${sc}`, calm: `That's the final.${sc}` }[p]];
+      }
+      if (ev.kind && team) {
+        const t: Record<"touchdown" | "goal" | "fg", ByPersona> = {
+          touchdown: { nfl: [`Touchdown, ${team}!`, `Touchdown ${team}!`], soccer: [`Touchdown, ${team}!`], calm: [`Touchdown, ${team}.`] },
+          goal: { nfl: [`Goal, ${team}!`], soccer: [`Goal! ${team}!`, `It's in! Goal, ${team}!`], calm: [`Goal for ${team}.`] },
+          fg: { nfl: [`Field goal is good, ${team}!`, `Three points, ${team}!`], soccer: [`Field goal, ${team}!`], calm: [`Field goal for ${team}.`] },
+        };
+        return t[ev.kind][p];
+      }
+      // No structured play: the first sentence of the play-by-play.
+      const first = ev.text.trim().split(/(?<=[.!?])\s+(?=[A-Z])/)[0] ?? "";
+      return first ? [endSentence(first)] : [];
+    }
+    case "end": {
+      const l = ev.leader;
+      const lead = l && l.cents > 0 ? ` ${l.name} wins the night, up ${money(l.cents)}!` : l ? ` ${l.name} finishes on top.` : " Thanks for playing!";
+      return [{ nfl: `That's the ballgame!${lead}`, soccer: `Full time!${lead}`, calm: `That's the session.${lead}` }[p]];
+    }
+    default:
+      return variants(ev, p);
+  }
+}
+
+/**
+ * The line the announcer says for an event (see toSpeech), or null when there is nothing to say. Picks the
+ * same variant index as captionLine for the same seed, so the voice and the screen tell the same story.
+ */
+export function speechLine(ev: CaptionEvent, persona: Persona = "nfl", seed = ""): string | null {
+  const p: Persona = persona === "soccer" || persona === "calm" ? persona : "nfl";
+  const list = speechVariants(ev, p);
+  if (!list.length) return null;
+  const line = pick(list, `${seed}|${ev.type}`);
+  return line ? fitText(toSpeech(line), MAX_SPEECH) : null;
 }
 
 /** A trade is announced when it is big: at least $5, or at least a third of the market's volume so far. */

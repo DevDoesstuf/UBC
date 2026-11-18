@@ -1,10 +1,13 @@
 // ElevenLabs text to speech for announcer captions (ported from Huddle packages/announcer/src/tts.ts).
 //
-// Endpoint (checked against the ElevenLabs API reference, Nov 2026):
-//   POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream?output_format=mp3_44100_128
+// Endpoint (checked against the ElevenLabs API reference, Nov 18 2026):
+//   POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream?output_format=mp3_44100_128 (TV) | pcm_22050 (speaker)
 //   header xi-api-key: <key>
 //   body   { text, model_id, voice_settings: { stability, similarity_boost, style, use_speaker_boost, speed } }
-//   200 -> audio/mpeg bytes
+//   200 -> audio/mpeg bytes, or raw PCM S16LE mono 22.05 kHz for pcm_22050 (wrapped into a WAV here)
+// Model: eleven_flash_v2_5 (ElevenLabs' ~100 ms low-latency model; ELEVENLABS_TTS_MODEL overrides, e.g.
+// eleven_v4_turbo). Flash leaves text normalization off by default, so lines arrive with numbers already in words
+// (lib/announcer.ts toSpeech).
 // Clips are cached by a hash of (voice, model, settings, text) in the store (Redis or memory) for 24 h,
 // so each caption is synthesized once no matter how many TVs ask for it.
 import { createHash } from "crypto";
@@ -18,8 +21,12 @@ export const TTS_OUTPUT_FORMAT = "mp3_44100_128";
 export const TTS_WAV_FORMAT = "pcm_22050";
 export type AudioFormat = "mp3" | "wav";
 
-/** 44-byte RIFF header for 16-bit mono PCM. */
+/**
+ * 44-byte RIFF header for 16-bit mono PCM (exactly what firmware/speaker/speaker.ino parses: RIFF/WAVE, a 16-byte
+ * "fmt " chunk with format 1, then "data" with its real size). An odd trailing byte (half a sample) is dropped.
+ */
 export function wavFromPcm(pcm: Uint8Array, sampleRate = 22050): Uint8Array {
+  if (pcm.byteLength & 1) pcm = pcm.subarray(0, pcm.byteLength - 1);
   const out = new Uint8Array(44 + pcm.byteLength);
   const v = new DataView(out.buffer);
   const str = (o: number, s: string) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
@@ -50,7 +57,13 @@ interface VoiceSettings {
   speed: number;
 }
 
-/** Stock voices from the ElevenLabs default library (never a cloned or celebrity voice). Override with env vars. */
+/**
+ * Stock voices from the ElevenLabs default (premade) library, never a cloned or celebrity voice:
+ *   nfl    Brian   nPczCjzI2devNBz1zQrb  deep American, the play-by-play voice
+ *   soccer George  JBFqnCBsd6RMkjVDRZzb  warm British, the touchline voice
+ *   calm   Eric    cjVigY5qzO86Huf0OWal  friendly, even American
+ * Override per persona with ELEVENLABS_VOICE_NFL / _SOCCER / _CALM (any voice id in your ElevenLabs account).
+ */
 const VOICES: Record<Persona, { env: string; id: string; settings: VoiceSettings }> = {
   nfl: { env: "ELEVENLABS_VOICE_NFL", id: "nPczCjzI2devNBz1zQrb", settings: { stability: 0.45, similarity_boost: 0.8, style: 0, use_speaker_boost: true, speed: 1.02 } },
   soccer: { env: "ELEVENLABS_VOICE_SOCCER", id: "JBFqnCBsd6RMkjVDRZzb", settings: { stability: 0.35, similarity_boost: 0.8, style: 0, use_speaker_boost: true, speed: 1.08 } },
@@ -134,8 +147,17 @@ export class TtsError extends Error {
   }
 }
 
-/** MP3 bytes for a line, from the cache or ElevenLabs. Throws TtsError. */
-export async function synthesize(rawText: string, persona: Persona, opts: { fetch?: typeof fetch; timeoutMs?: number; format?: AudioFormat } = {}): Promise<{ audio: Uint8Array; cached: boolean; id: string; contentType: string }> {
+type Synth = { audio: Uint8Array; cached: boolean; id: string; contentType: string };
+
+// One ElevenLabs request per clip per instance: the speaker's own request for a line that /api/kiosk/audio is
+// pre-warming waits for that request instead of starting a second one.
+const inflight = new Map<string, Promise<Synth>>();
+
+/** The speaker gives up on a sound download after 10 s (speaker.ino playUrl); answer well before that. */
+export const WAV_TIMEOUT_MS = 8000;
+
+/** MP3 (or, with format "wav", 22 kHz mono WAV) bytes for a line, from the cache or ElevenLabs. Throws TtsError. */
+export async function synthesize(rawText: string, persona: Persona, opts: { fetch?: typeof fetch; timeoutMs?: number; format?: AudioFormat } = {}): Promise<Synth> {
   const format: AudioFormat = opts.format === "wav" ? "wav" : "mp3";
   const contentType = format === "wav" ? "audio/wav" : "audio/mpeg";
   const key = (process.env.ELEVENLABS_API_KEY || "").trim();
@@ -150,9 +172,32 @@ export async function synthesize(rawText: string, persona: Persona, opts: { fetc
   const hit = await kvGet(cacheKey).catch(() => null);
   if (hit) return { audio: new Uint8Array(Buffer.from(hit, "base64")), cached: true, id, contentType };
   if (await ttsKeyRejected()) throw new TtsError(503, "ElevenLabs rejected the API key recently; using Web Speech");
+  const pending = inflight.get(id);
+  if (pending) return pending;
+  const job = callElevenLabs({ key, voiceId, modelId, settings: v.settings, text, format, id, contentType, cacheKey, fetch: opts.fetch, timeoutMs: opts.timeoutMs ?? (format === "wav" ? WAV_TIMEOUT_MS : 12_000) });
+  inflight.set(id, job);
+  try {
+    return await job;
+  } finally {
+    inflight.delete(id);
+  }
+}
 
+/** Synthesizes a line into the cache ahead of time (the speaker asks for it a moment later). Never throws. */
+export async function prewarm(text: string, persona: Persona, format: AudioFormat = "wav"): Promise<void> {
+  if (!(await ttsAvailable())) return;
+  await synthesize(text, persona, { format }).catch(() => undefined);
+}
+
+async function callElevenLabs(o: {
+  key: string; voiceId: string; modelId: string; settings: VoiceSettings; text: string; format: AudioFormat; id: string; contentType: string; cacheKey: string;
+  fetch?: typeof fetch; timeoutMs: number;
+}): Promise<Synth> {
+  const { key, voiceId, modelId, text, format, id, contentType, cacheKey } = o;
+  const v = { settings: o.settings };
+  const opts = { fetch: o.fetch };
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
+  const timer = setTimeout(() => ctrl.abort(), o.timeoutMs);
   try {
     const r = await (opts.fetch ?? fetch)(`${ELEVENLABS_BASE_URL}/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${format === "wav" ? TTS_WAV_FORMAT : TTS_OUTPUT_FORMAT}`, {
       method: "POST",
@@ -174,7 +219,10 @@ export async function synthesize(rawText: string, persona: Persona, opts: { fetc
     }
     const raw = new Uint8Array(await r.arrayBuffer());
     if (!raw.byteLength) throw new TtsError(502, "ElevenLabs returned no audio");
-    const audio = format === "wav" ? wavFromPcm(raw) : raw;
+    // pcm_22050 is raw signed 16-bit little-endian mono samples (no header): wrap it. Should ElevenLabs ever send
+    // a WAV already, pass it through as is (the speaker parses any PCM WAV).
+    const isWav = raw.byteLength > 12 && Buffer.from(raw.subarray(0, 4)).toString("latin1") === "RIFF";
+    const audio = format === "wav" && !isWav ? wavFromPcm(raw) : raw;
     await kvSet(cacheKey, Buffer.from(audio).toString("base64"), { px: CACHE_TTL_MS }).catch(() => undefined);
     return { audio, cached: false, id, contentType };
   } catch (e) {

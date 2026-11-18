@@ -28,7 +28,8 @@ export async function GET(req: Request) {
       const caps = l.captions ?? [];
       const cap = idParam ? caps.find((c) => c.id === Number(idParam)) : caps[caps.length - 1];
       if (!cap) throw new ApiError(404, idParam ? "No caption with that id (it may have rolled off)" : "No caption yet");
-      text = cap.text;
+      // The spoken version (short, numbers in words); older lobbies only have the screen text.
+      text = cap.say || cap.text;
       if (!q.get("persona")) persona = personaOf(l);
     }
     if (!text) throw new ApiError(400, "Pass text or code+id");
