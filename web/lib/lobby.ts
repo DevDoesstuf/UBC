@@ -97,7 +97,10 @@ function caption(l: Lobby, ev: CaptionEvent, now: number, seed = ""): void {
   if (!text) return;
   const caps = (l.captions ??= []);
   const last = caps.length ? caps[caps.length - 1].id : 0;
-  caps.push({ id: Math.max(last + 1, now), at: now, text, kind: ev.type });
+  // Captions share the event id counter, so the speaker's audio stream (events + captions) never repeats an id.
+  const id = Math.max(last + 1, l.eventSeq + 1, now);
+  l.eventSeq = id;
+  caps.push({ id, at: now, text, kind: ev.type });
   if (caps.length > MAX_CAPTIONS) caps.splice(0, caps.length - MAX_CAPTIONS);
 }
 
