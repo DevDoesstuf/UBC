@@ -9,7 +9,7 @@
     "start": "next start",
     "lan": "next build && next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mts"
+    "test": "node --import ./test/register.mjs --test test/*.test.mts"
   },
   "engines": {
     "node": ">=20.9.0"
