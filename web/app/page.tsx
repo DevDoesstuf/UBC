@@ -48,6 +48,9 @@ export default function Home() {
             <p className="hd-rise hm-lead" style={d(520)}>
               Huddle turns a watch party into a tiny market. Pick a game on the box, tap your phone to join, and buy Yes or No on one question at a time. A winning call pays $1 a share.
             </p>
+          </section>
+
+          <div className="hm-demo-slot">
             <div className="hm-demo hd-card hd-rise" style={d(640)} aria-hidden="true">
               <div className="hm-demo-top">
                 <span className="ph-moment-badge">
@@ -62,7 +65,7 @@ export default function Home() {
                 <span className="ph-tile no small"><span className="ph-tile-label">No</span><span className="hd-num hm-demo-pct">28%</span></span>
               </div>
             </div>
-          </section>
+          </div>
 
           <aside className="hm-side">
             <form

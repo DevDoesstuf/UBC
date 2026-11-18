@@ -98,9 +98,9 @@ export function MarketCard({ l, m, serverNow, actions }: { l: Lobby; m: Mkt; ser
       </div>
 
       <div className={cx("ph-trade", fresh && "hd-rise")} style={step(4)}>
-        {mode === "h2h" ? (
+        {settled ? null : mode === "h2h" ? (
           <OfferBook l={l} m={m} live={live} actions={actions} flow={flow} />
-        ) : settled ? null : (
+        ) : (
           <Tiles m={m} live={live} locked={locked} actions={actions} flow={flow} />
         )}
       </div>
