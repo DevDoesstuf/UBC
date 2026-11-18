@@ -187,6 +187,9 @@ function qrRows(text: string): { size: number; rows: string[] } {
 const HEX = /^#?[0-9a-f]{6}$/i;
 const hex = (c: unknown): string | undefined => (typeof c === "string" && HEX.test(c) ? (c.startsWith("#") ? c : `#${c}`) : undefined);
 const LEAGUE: Record<string, string> = { nfl: "NFL", soccer: "Soccer", nba: "NBA", mlb: "MLB", nhl: "NHL", tennis: "Tennis" };
+/** League names that do not fit the card chip, as fans write them. */
+const LEAGUE_SHORT: Record<string, string> = { "premier league": "EPL", "champions league": "UCL", "major league soccer": "MLS" };
+const leagueChip = (s: string) => LEAGUE_SHORT[s.toLowerCase()] ?? s.slice(0, 12);
 
 /** Team from the config: a string, {name, short, color}, or the replay timeline's team. */
 function team(v: unknown): KioskTeam | undefined {
@@ -219,7 +222,7 @@ function gameCard(g: Game): KioskCard {
   const home = team(x.home) ?? team(teams[0]) ?? (tl ? team(tl.info.home) : undefined);
   const away = team(x.away) ?? team(teams[1]) ?? (tl ? team(tl.info.away) : undefined);
   const sport = typeof x.sport === "string" ? x.sport : tl?.info.sport;
-  const league = typeof x.league === "string" && x.league.trim() ? k(x.league).slice(0, 12) : sport ? LEAGUE[sport] : undefined;
+  const league = typeof x.league === "string" && x.league.trim() ? leagueChip(k(x.league.trim())) : sport ? LEAGUE[sport] : undefined;
   const date = prettyDate(x.date ?? x.kickoff ?? x.played ?? x.when ?? tl?.info.startsAt);
   return {
     id: `game:${g.id}`, title: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled,
