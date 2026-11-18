@@ -816,11 +816,6 @@ static const Btn *findBtn(const Screen &s, const char *id) {
     if (!strcmp(s.buttons[i].id, id)) return &s.buttons[i];
   return nullptr;
 }
-static const Btn *findBtnPrefix(const Screen &s, const char *pre) {
-  for (int i = 0; i < s.nButtons; i++)
-    if (!strncmp(s.buttons[i].id, pre, strlen(pre))) return &s.buttons[i];
-  return nullptr;
-}
 
 // Split bar: YES share from the left in blue, NO in orange, a white seam that glides; model/Gemini notches.
 static void splitBar(int x, int y, int w, int h, float frac, int model, int gemini) {
@@ -950,6 +945,19 @@ static void lockRing(int cx, int cy, int R, int32_t rem, int32_t tot, bool locke
   mark(cx - R - 14, cy - R - 14, 2 * R + 28, 2 * R + 28);
 }
 
+// Redraw a small area when a value it shows changes, without a full-screen redraw (the game clock ticks every second).
+struct Watch {
+  uint32_t drawn;
+};
+static Watch wScore;
+static void watch(Watch &w, uint32_t key, int x, int y, int ww, int hh) {
+  if (measuring) {
+    if (key != w.drawn) mark(x, y, ww, hh);
+  } else {
+    w.drawn = key;
+  }
+}
+
 static void scorebug(const Screen &s, int rx, int y, int h) {
   // [bar ABBR score] clock [score ABBR bar]  right-aligned at rx
   char hs[8], as[8];
@@ -961,6 +969,7 @@ static void scorebug(const Screen &s, int rx, int y, int h) {
   int wClock = max(textW(F_N4, s.clock), textW(F_B3, s.period[0] ? s.period : "Live")) + 8;
   int w = 12 + 6 + 8 + wHa + 8 + wHs + 12 + wClock + 12 + wAs + 8 + wAa + 8 + 6 + 12;
   int x = rx - w;
+  watch(wScore, strHash(s.clock, s.homeScore * 1000 + s.awayScore) ^ strHash(s.period) ^ strHash(s.scoreStatus), x - 10, y - 4, w + 20, h + 14);
   card(x, y, w, h, h / 2);
   int cy = y + h / 2;
   int cx = x + 12;
@@ -1017,8 +1026,6 @@ static void burst(uint32_t t0, int delay, float ox, float oy, int count, int see
 }
 
 // ================================================================ screens
-
-static const int TOP_H = 60;
 
 static void topRight(const Screen &s, int &rx, const NetStatus &st) {
   bool fresh = st.lastOkMs && millis() - st.lastOkMs < 2500;
@@ -2336,12 +2343,27 @@ void uiSetJson(const String &body) {
     }
   }
   // The countdown alone changes every second: the ring redraws itself, so that is not a full redraw.
-  int keepIn = n.lockIn, keepMs = n.lockInMs;
+  // So does the scorebug's game clock: it redraws its own pill (watch()).
+  int keepIn = n.lockIn, keepMs = n.lockInMs, keepH = n.homeScore, keepA = n.awayScore;
+  char keepClock[12], keepPeriod[12], keepStatus[8];
+  memcpy(keepClock, n.clock, sizeof(keepClock));
+  memcpy(keepPeriod, n.period, sizeof(keepPeriod));
+  memcpy(keepStatus, n.scoreStatus, sizeof(keepStatus));
   n.lockIn = c.lockIn;
   n.lockInMs = c.lockInMs;
+  n.homeScore = c.homeScore;
+  n.awayScore = c.awayScore;
+  memcpy(n.clock, c.clock, sizeof(keepClock));
+  memcpy(n.period, c.period, sizeof(keepPeriod));
+  memcpy(n.scoreStatus, c.scoreStatus, sizeof(keepStatus));
   if (layoutChange || memcmp(&n, &c, sizeof(Screen)) != 0) fullDirty = true;
   n.lockIn = keepIn;
   n.lockInMs = keepMs;
+  n.homeScore = keepH;
+  n.awayScore = keepA;
+  memcpy(n.clock, keepClock, sizeof(keepClock));
+  memcpy(n.period, keepPeriod, sizeof(keepPeriod));
+  memcpy(n.scoreStatus, keepStatus, sizeof(keepStatus));
   if (n.error[0]) {
     strlcpy(toast, n.error, sizeof(toast));
     tToast = NOW;
