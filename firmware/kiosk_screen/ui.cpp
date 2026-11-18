@@ -32,7 +32,7 @@ static void defaultPalette() {
   P.ruleStrong = rgb(0xCFC8B8);
   P.ink = rgb(0x10261C);
   P.ink2 = rgb(0x3E5247);
-  P.muted = rgb(0x6C7A70);
+  P.muted = rgb(0x616D64);  // AA on canvas, card and well (the site sends the same in palette.muted)
   P.accent = rgb(0x12A150);
   P.deep = rgb(0x0B7A3E);
   P.lime = rgb(0x7CCB4E);
@@ -100,6 +100,7 @@ struct Screen {
   char gameTitle[64], mode[12], moment[24], verdict[120], caption[200], error[96];
   int yes, no, move, lockIn, lockInMs, lockTotal, volume, pot, model, gemini, lockYes;
   bool geminiLive, hasLock, hasWinners;
+  bool boardTie;  // the site sent ranks and nobody is strictly ahead: no crown, no highlighted row
   char geminiLabel[40];
   char result;  // 'Y', 'N' or 0
   int16_t hist[MAX_HIST];
@@ -427,6 +428,7 @@ static void parseInto(Screen &s, JsonObjectConst j) {
   s.hasWinners = !j["winners"].isNull();
   parsePeople(s.losers, s.nLosers, j["losers"].as<JsonArrayConst>(), "cents", "x");
   parsePeople(s.board, s.nBoard, j["leaderboard"].as<JsonArrayConst>(), "cents", "pnl");
+  s.boardTie = s.nBoard > 0 && !j["leaderboard"][0]["rank"].isNull() && !(j["leaderboard"][0]["lead"] | false);
   for (JsonVariantConst t : j["trades"].as<JsonArrayConst>()) {
     if (s.nTrades >= 8) break;
     TradeRow &r = s.trades[s.nTrades++];
@@ -1946,7 +1948,7 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
     uint8_t a = (uint8_t)(255 * clampf((pr - 0.4f) * 2.5f, 0, 1));
     int ay = y - 92;
     avatar(x + w / 2, ay + 22, 22, p.name, a);
-    if (rank == 1) iconCrown(x + w / 2, ay - 12, 1.2f, P.gold, a);
+    if (rank == 1 && !s.boardTie) iconCrown(x + w / 2, ay - 12, 1.2f, P.gold, a);
     char nm[24];
     fit(F_B1, p.name, w + 8, nm, sizeof(nm));
     textCenter(F_B1, x + w / 2, ay + 66, nm, P.ink, a);
@@ -1979,7 +1981,7 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
       mark(LX - 10, ry - 4, LW + 60, rowH + 8);
     }
     const Person &p = board[i];
-    bool lead = i == 0;
+    bool lead = i == 0 && !s.boardTie;
     if (lead) rrect(LX, ry, LW, rowH, 16, P.ink);
     else card(LX, ry, LW, rowH, 16);
     char rk[4];
