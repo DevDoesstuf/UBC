@@ -2,6 +2,7 @@
 //  - "@/x" resolves to <web>/x (the tsconfig path alias)
 //  - extensionless relative imports try .ts, then /index.ts (Next's bundler resolution)
 //  - .json files load as an ES module with a default export (no import attributes needed)
+//  - "next/server" resolves to next/server.js (so route handlers can be called in tests)
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -27,6 +28,8 @@ export async function resolve(specifier, context, next) {
     const hit = tryFile(new URL(specifier.slice(2), ROOT));
     if (hit) return { url: hit, shortCircuit: true };
   }
+  // Route handlers import "next/server"; Next ships it as CommonJS without an exports map, so name the file.
+  if (specifier === "next/server") return next("next/server.js", context);
   if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL?.startsWith("file:")) {
     const hit = tryFile(new URL(specifier, context.parentURL));
     if (hit) return { url: hit, shortCircuit: true };

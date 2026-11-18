@@ -61,6 +61,51 @@ export function ttsEnabled(): boolean {
   return !!(process.env.ELEVENLABS_API_KEY || "").trim();
 }
 
+// ---- a key ElevenLabs rejects
+// An invalid (or revoked, or out of quota) key answers 401/403 on every call. After one such answer we remember it
+// for a few minutes, in this instance and in the store (other serverless instances), keyed by a fingerprint of the
+// key (never the key itself): /api/tts answers 204 and /api/kiosk/audio lists no announcer lines, exactly as with
+// no key, so the TV uses Web Speech and the speaker plays its sound effects instead of failing on every caption.
+export const BAD_KEY_MS = 5 * 60_000;
+let badKey: { fp: string; until: number } | null = null;
+
+function keyFingerprint(key: string): string {
+  return createHash("sha256").update(`huddle-tts|${key}`).digest("hex").slice(0, 16);
+}
+
+async function markKeyBad(key: string, now: number): Promise<void> {
+  const fp = keyFingerprint(key);
+  badKey = { fp, until: now + BAD_KEY_MS };
+  await kvSet(`tts:badkey:${fp}`, String(now + BAD_KEY_MS), { px: BAD_KEY_MS }).catch(() => undefined);
+}
+
+/** True when the configured key was rejected by ElevenLabs in the last BAD_KEY_MS. */
+export async function ttsKeyRejected(now: number = Date.now()): Promise<boolean> {
+  const key = (process.env.ELEVENLABS_API_KEY || "").trim();
+  if (!key) return false;
+  const fp = keyFingerprint(key);
+  if (badKey && badKey.fp === fp && badKey.until > now) return true;
+  const hit = await kvGet(`tts:badkey:${fp}`).catch(() => null);
+  const until = hit ? Number(hit) : NaN;
+  if (Number.isFinite(until) && until > now) {
+    badKey = { fp, until };
+    return true;
+  }
+  return false;
+}
+
+/** A key is set and ElevenLabs has not just rejected it: the announcer can speak. */
+export async function ttsAvailable(now: number = Date.now()): Promise<boolean> {
+  return ttsEnabled() && !(await ttsKeyRejected(now));
+}
+
+/** Tests: forget a rejected key. */
+export async function resetTtsKeyCheck(): Promise<void> {
+  const key = (process.env.ELEVENLABS_API_KEY || "").trim();
+  if (badKey && key && badKey.fp === keyFingerprint(key)) await kvSet(`tts:badkey:${badKey.fp}`, "0", { px: 1 }).catch(() => undefined);
+  badKey = null;
+}
+
 export function asPersona(v: unknown): Persona {
   return v === "soccer" || v === "calm" ? v : "nfl";
 }
@@ -104,6 +149,7 @@ export async function synthesize(rawText: string, persona: Persona, opts: { fetc
   const cacheKey = `tts:${id}`;
   const hit = await kvGet(cacheKey).catch(() => null);
   if (hit) return { audio: new Uint8Array(Buffer.from(hit, "base64")), cached: true, id, contentType };
+  if (await ttsKeyRejected()) throw new TtsError(503, "ElevenLabs rejected the API key recently; using Web Speech");
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
@@ -116,6 +162,7 @@ export async function synthesize(rawText: string, persona: Persona, opts: { fetc
       cache: "no-store",
     });
     if (!r.ok) {
+      if (r.status === 401 || r.status === 403) await markKeyBad(key, Date.now());
       let detail = "";
       try {
         const j = (await r.json()) as { detail?: unknown };

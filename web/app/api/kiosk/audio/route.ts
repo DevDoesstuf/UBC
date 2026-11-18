@@ -6,10 +6,11 @@
 //
 // With ELEVENLABS_API_KEY set, the announcer speaks too: every caption is also a sound, with
 // url = /api/tts?code=..&id=<caption id>&format=wav (ElevenLabs, 22 kHz mono WAV, cached), so the speaker plays
-// the sound effect of an event and then the announcer's line. Without a key this is exactly the old behaviour.
+// the sound effect of an event and then the announcer's line. Without a key, or while ElevenLabs is rejecting the
+// key (lib/tts.ts ttsAvailable), this is exactly the old behaviour.
 import { baseUrl, handle, json } from "@/lib/http";
 import { getKioskLobby, normKiosk } from "@/lib/lobby";
-import { ttsEnabled } from "@/lib/tts";
+import { ttsAvailable } from "@/lib/tts";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,8 @@ export async function GET(req: Request) {
     const items: { id: number; url: string; text: string }[] = (l?.events ?? [])
       .filter((e) => e.sound)
       .map((e) => ({ id: e.id, url: `${base}/sounds/${e.sound}.wav`, text: e.text }));
-    if (l && ttsEnabled()) {
+    // No key, or a key ElevenLabs just rejected (401/403, remembered a few minutes): sound effects only.
+    if (l && (await ttsAvailable())) {
       for (const c of l.captions ?? []) {
         items.push({ id: c.id, url: `${base}/api/tts?code=${l.code}&id=${c.id}&format=wav`, text: c.text });
       }
