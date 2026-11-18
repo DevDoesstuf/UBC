@@ -1,15 +1,18 @@
 import type { Metadata, Viewport } from "next";
+import "@fontsource-variable/geist/wght.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Live Lines",
-  description: "Watch-party prediction market: kiosk, phones and a watch page on one site.",
+  title: "Huddle",
+  description: "Call the next play with your friends. A tiny prediction market for your watch party.",
+  applicationName: "Huddle",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0b0f17",
+  viewportFit: "cover",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

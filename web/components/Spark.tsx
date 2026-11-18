@@ -1,15 +1,34 @@
-/** Price line of YES (in cents, 0-100) with a dashed 50 line. Same idea as the kiosk's small chart. */
-export function Spark({ points, width = 240, height = 80, color = "var(--yes)" }: { points: number[]; width?: number; height?: number; color?: string }) {
+/**
+ * Price line of YES (cents, 0-100): a quiet 50¢ guide, the line, and a dot at the latest price.
+ * The SVG stretches to its box (non-scaling strokes); the dot and the label are HTML so they never squash.
+ */
+export function Spark({ points, height = 80, color = "var(--green-line)", label = true }: {
+  points: number[];
+  height?: number;
+  color?: string;
+  /** Show the 50¢ guide label on the right. */
+  label?: boolean;
+}) {
+  const W = 1000;
   const pts = points.length > 1 ? points : [points[0] ?? 50, points[0] ?? 50];
-  const x = (i: number) => (i / (pts.length - 1)) * (width - 8) + 4;
-  const y = (v: number) => height - 4 - (v / 100) * (height - 8);
-  const d = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const px = (i: number) => (i / (pts.length - 1)) * W;
+  const py = (v: number) => 100 - Math.min(100, Math.max(0, v));
+  const d = pts.map((v, i) => `${i ? "L" : "M"}${px(i).toFixed(1)},${py(v).toFixed(2)}`).join("");
   const last = pts[pts.length - 1];
   return (
-    <svg width="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ display: "block", height }} aria-label={`YES price history, now ${last} cents`}>
-      <line x1="0" x2={width} y1={y(50)} y2={y(50)} stroke="var(--line)" strokeDasharray="4 4" />
-      <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      <circle cx={x(pts.length - 1)} cy={y(last)} r="4" fill={color} />
-    </svg>
+    <div className="spark" style={{ height }} role="img" aria-label={`YES price history, now ${last} cents`}>
+      <div className="spark-plot">
+        <svg width="100%" height="100%" viewBox={`0 0 ${W} 100`} preserveAspectRatio="none" aria-hidden="true">
+          <line x1="0" x2={W} y1="50" y2="50" stroke="var(--line-strong)" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+          <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <span className="spark-dot" style={{ left: "100%", top: `${py(last)}%`, background: color }} aria-hidden="true" />
+      </div>
+      {label && (
+        <span className="spark-label" aria-hidden="true">
+          50¢
+        </span>
+      )}
+    </div>
   );
 }
