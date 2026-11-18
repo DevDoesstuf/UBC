@@ -1,0 +1,28 @@
+[package]
+name = "huddle_vault"
+version = "0.1.0"
+description = "Huddle party vault: USDC buy-ins settled from co-signed off-chain balances"
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "huddle_vault"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "1.2.2", features = ["init-if-needed"] }
+anchor-spl = "1.2.2"
+# anchor-lang 1.x no longer re-exports the instructions-sysvar loaders; same major as anchor's solana-v3 cohort.
+solana-instructions-sysvar = "3"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

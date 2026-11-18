@@ -12,7 +12,8 @@
     "test": "node --import ./test/register.mjs --test test/*.test.mts",
     "test:localnet": "node --import ./test/register.mjs --test test/solana-localnet.e2e.mts",
     "solana:setup": "node scripts/solana-setup.mjs",
-    "solana:wallet": "node scripts/solana-wallet.mjs"
+    "solana:wallet": "node scripts/solana-wallet.mjs",
+    "test:vault-localnet": "node --import ./test/register.mjs --test --test-concurrency=1 test/vault-localnet.e2e.mts"
   },
   "engines": {
     "node": ">=20.9.0"

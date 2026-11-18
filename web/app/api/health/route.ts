@@ -4,6 +4,7 @@ import { MONEY_MODE, REQUESTED_MONEY_MODE, moneyInfo, moneyProblems } from "@/li
 import { SOLANA_RPC_URL, redactRpc, solanaProblems, solanaReadiness } from "@/lib/solana";
 import { allGames, hasVideo } from "@/lib/games";
 import { ttsEnabled } from "@/lib/tts";
+import { vaultProgramId, vaultReadiness, vaultRequested } from "@/lib/vault";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,9 @@ export async function GET() {
   const solanaAsked = REQUESTED_MONEY_MODE === "solana" || !!process.env.SOLANA_TREASURY_SECRET_KEY;
   const readiness = solanaAsked ? await solanaReadiness().catch((e) => ({ ready: false, problems: [String(e)], nextSteps: [] as string[] })) : null;
   if (readiness && REQUESTED_MONEY_MODE === "solana") for (const p of readiness.problems) if (!warnings.some((w) => w.includes(p))) warnings.push(`Solana: ${p}`);
+  // SETTLEMENT=vault: is the huddle_vault program deployed on this cluster?
+  const vault = vaultRequested() || MONEY_MODE === "solana" ? await vaultReadiness().catch((e) => ({ requested: vaultRequested(), active: false, problems: [String(e)], nextSteps: [] as string[] })) : null;
+  if (vault && vaultRequested()) for (const p of vault.problems) warnings.push(`Vault: ${p}`);
   if (process.env.VERCEL && storageMode === "memory") {
     warnings.push("Running on Vercel without Redis: lobbies will randomly disappear. Add Upstash Redis (see README).");
   }
@@ -38,7 +42,12 @@ export async function GET() {
       nextSteps: readiness?.nextSteps ?? (REQUESTED_MONEY_MODE === "solana" ? ["Run `node scripts/solana-setup.mjs` in web/"] : []),
       treasury: readiness && "treasury" in readiness && readiness.treasury ? { address: readiness.treasury, mint: process.env.USDC_MINT?.trim() || null, rpc: redactRpc(SOLANA_RPC_URL) } : null,
       checks: readiness && "checkedAt" in readiness ? readiness : null,
+      /** SETTLEMENT=vault: parties settle through the huddle_vault program. `ready` = active and the program is deployed. */
+      vault: vault
+        ? { ...vault, ready: !!(vault.active && "executable" in vault && vault.executable && readiness?.ready) }
+        : { requested: false, active: false, ready: false, programId: vaultProgramId() },
     },
+    quicknode: { webhook: "/api/quicknode/webhook", configured: !!process.env.QUICKNODE_STREAM_TOKEN?.trim() },
     gemini: { enabled: process.env.GEMINI_DISABLED !== "1", games: allGames().filter((g) => g.gemini?.event).map((g) => g.id) },
     games: allGames().filter((g) => g.live).map((g) => ({ id: g.id, kind: g.kind ?? "clip", mode: g.mode ?? "market", questions: g.questions.length })),
     warnings,

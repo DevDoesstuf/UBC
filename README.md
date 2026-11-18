@@ -22,7 +22,7 @@ Everything runs on **one website** (Next.js on Vercel, Upstash Redis). The kiosk
 | **Model prices + Gemini odds** | Each market opens at the model's probability, calibrated to Gemini; Gemini sits beside the room's price (on real games: Gemini's real price at that moment of the game, from its price history), recorded at open and lock and drawn over time; end-of-game Brier scorecard (Room vs Model vs Gemini); `GET /api/gemini/markets` lists what Gemini is trading now | `lib/gemini.ts`, `lib/lobby.ts` |
 | **Announcer** | One caption per event in the game's voice; ElevenLabs TTS when `ELEVENLABS_API_KEY` is set (served to the TV and to the speaker ESP32 through `/api/kiosk/audio`), browser voice otherwise | `lib/announcer.ts`, `lib/tts.ts` |
 | **Three ways to play** | LMSR market (default), pool (winners split the pot), head-to-head offers between friends | `lib/modes.ts` |
-| **Solana money, invisible** | Demo money by default. `MONEY_MODE=solana`: buy in with **Solana Pay** (scan a QR with any Solana wallet, devnet USDC), cash out to any Solana address; the treasury pays all fees | `lib/solana.ts` |
+| **Solana money, invisible** | Demo money by default. `MONEY_MODE=solana`: buy in with **Solana Pay** (scan a QR with any Solana wallet, devnet USDC, or **pay on the box**), cash out to any Solana address; the treasury pays all fees. `SETTLEMENT=vault`: each party's money sits in its own **Anchor program vault** and the game settles on chain from box-signed balances verified by the Ed25519 program. A **QuickNode Stream** credits deposits the moment they land. See [Solana](#solana) | `lib/solana.ts`, `lib/vault.ts`, `lib/quicknode.ts` |
 | **Kickoff design, green + ivory** | The original Huddle "Kickoff" look and motion (kinetic questions, rolling odds, LED-ring countdown, split bar, result flood, confetti, podium) recoloured green on ivory. One kit and one set of tokens for the phones, the TV page and the box preview; the box firmware draws the same design | `components/huddle/` (kit), `app/globals.css` (tokens), `components/phone/`, `components/tv/`, `firmware/kiosk_screen/ui.cpp` |
 
 Data contract, env vars and human setup steps: [`web/CONTRACT.md`](web/CONTRACT.md).
@@ -42,6 +42,7 @@ This README is the single source of context for people and agents working on the
 | Kiosk firmware (ESP32-S3 touchscreen) | **Compiled, flashed and working on the real board** (Nov 17). First flash failed only because PSRAM was off in the IDE settings. See [Kiosk firmware](#kiosk-firmware-esp32-s3-touch-lcd-43). |
 | Speaker + second ESP32 | **Wiring confirmed** with a beep test (BCLK 26, LRC 25, DIN 27). `firmware/speaker` polls `/api/kiosk/audio` and streams each WAV (event sounds, plus the announcer's voice when ElevenLabs is on), using the same I2S driver as the test. The full sketch has not been run on the board yet. See [Speaker](#speaker-second-esp32--i2s-amp). |
 | NFC | No firmware needed: a passive NFC sticker holding `https://<site>/k/1`. |
+| Solana vault (`SETTLEMENT=vault`) + QuickNode webhook | **Proven end to end on a local validator** (Nov 18, `npm run test:vault-localnet`): program deployed, Solana Pay deposits (polling, a real block through the Stream filter into the webhook, pay on the box), sweeps into the vault, Ed25519-verified settlement, payouts checked on chain. **Devnet deploy waits for devnet SOL** (`node scripts/solana-go-live.mjs`, see [Solana](#solana)); the QuickNode Stream waits for an account. |
 | YouTube clip | **Placeholder.** Put a real clip id and timestamps in `web/config/games.json`. |
 
 ---
@@ -57,6 +58,11 @@ web/                       <- the website (Next.js 16, TypeScript). Vercel root 
   lib/lobby.ts             <- lobby state machine, trades, payouts, public view
   lib/kiosk.ts             <- what the kiosk shows + what each kiosk tap does
   lib/money.ts             <- demo money, Coinbase Onramp, USDC payouts
+  lib/solana.ts            <- Solana Pay URLs, finding payments by reference, treasury sends, faucet
+  lib/vault.ts             <- SETTLEMENT=vault: the huddle_vault client (party, sweeps, Ed25519 settlement, payouts)
+  lib/quicknode.ts         <- QuickNode Streams webhook: auth, records, crediting by reference
+  quicknode/filter.js      <- the Stream's filter (paste into QuickNode)
+  scripts/solana-go-live.mjs <- fund -> deploy program -> mint -> Vercel env -> deploy, in one command
   lib/store.ts             <- Upstash Redis (REST) or in-memory store + per-lobby lock
   lib/http.ts, lib/games.ts, lib/types.ts
   app/api/...              <- JSON API (see API reference)
@@ -78,6 +84,8 @@ firmware/kiosk_screen/     <- Arduino sketch for the Waveshare ESP32-S3-Touch-LC
 firmware/speaker/          <- Arduino sketch for the speaker ESP32 (I2S amp): plays /api/kiosk/audio
   speaker.ino              <- pins, volume, Wi-Fi, WAV streaming to I2S
   secrets.example.h        <- copy to secrets.h: same values as the screen's
+programs/huddle_vault/     <- the Anchor program (Rust) the vault mode settles through; idl/ has its IDL
+Anchor.toml, Cargo.toml    <- Anchor workspace (anchor build -> target/deploy/huddle_vault.so)
 .claude/launch.json        <- dev server config for Claude Code's preview
 ```
 
@@ -263,6 +271,150 @@ Cash-out with `PAYOUTS=onchain` (real money only) sends the player's whole balan
 ### Real money
 
 Peer-to-peer betting with real money is regulated as gambling in most places, and the spec itself says to keep the demo to test funds. Real money needs **all of** `MONEY_MODE=coinbase`, `COINBASE_SANDBOX=false` and (for payouts) `PAYOUTS=onchain`, so it can't be switched on by accident. Make sure it is legal where you run it before turning it on.
+
+---
+
+## Solana
+
+| | |
+|---|---|
+| Program | **`huddle_vault`**, Anchor (Rust), program id **`GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu`** |
+| Network | Solana **devnet** (deployed by `web/scripts/solana-go-live.mjs` once the treasury is funded; until then it runs on a local validator, see [Proof](#proof-on-a-local-validator)) |
+| Token | A 6-decimal test USDC SPL token (`USDC_MINT`), minted by the treasury |
+| Wallet UX | **Solana Pay** transfer requests (QR or "Open in wallet", any Solana wallet), shown on the phone or **on the box** |
+| Source | [`programs/huddle_vault`](programs/huddle_vault) (instructions in `lib.rs`, Ed25519 checks in `ed25519.rs`, settlement math in `settle.rs`, accounts in `state.rs`; IDL in `idl/`); the site's client is `web/lib/vault.ts` |
+
+Turn it on with `MONEY_MODE=solana` and `SETTLEMENT=vault` (env vars in [`web/CONTRACT.md`](web/CONTRACT.md)).
+Without `SETTLEMENT=vault`, Solana money is plain transfers to and from a treasury wallet; demo money stays the default.
+
+### What happens on chain
+
+1. **The party opens a vault.** On the first deposit the site calls `create_party`: a Party account (a PDA owned by
+   the program) and its USDC token vault (a second PDA, whose authority is the Party PDA, so only the program can move
+   the money).
+2. **Buy-in with Solana Pay.** The phone (or the box) shows `solana:<treasury>?amount=10&spl-token=<USDC>&reference=<key>`.
+   The player's wallet sends a `transferChecked` with the reference key attached. Huddle finds it by that key (from
+   the QuickNode Stream within seconds, or by polling) and credits it once per signature. Then it moves the money into
+   the party vault in **one transaction** through the program's `deposit`, under the player's seat in this party.
+3. **The game runs off chain**: trades are instant and free.
+4. **Settlement on chain** when the host ends the game:
+   - `request_close`;
+   - per player, the box signs the final balance, and an **Ed25519 program** instruction plus `submit_state` verify that
+     signature on chain through the instructions sysvar;
+   - `finalize`;
+   - per player, **one** transaction: `withdraw` from the vault and transfer to the player's own wallet;
+   - `withdraw_host` returns the house's share.
+
+   If the room beat the house, the house first tops the vault up so that everyone is paid in full.
+5. **The treasury pays every fee and all rent.** Players never need SOL except for their own Solana Pay send, and the
+   faucet covers that.
+
+Every transaction's signature is kept on the lobby. The phone and the TV get explorer links through `chain` in the
+lobby view, and the end screen shows **Settled on Solana**.
+
+### Account layout
+
+| Account | Seeds | Holds |
+|---|---|---|
+| Party (PDA, 294 bytes) | `["party", host, party_id]`: host = the treasury, party_id = sha256("huddle-party-v1\|CODE\|createdAt") | host, box_signer, mint, vault, status (Open, Closing, Finalized), member/claims/withdrawn counts, challenge window, total deposits, bond, running claim sums, finalize results (available, finalized_sum, cut, host_refund), total paid |
+| Vault (SPL token account PDA) | `["vault", party]`, authority = the Party PDA | the party's USDC |
+| Member (PDA, 139 bytes) | `["member", party, seat]` | deposited, claimed balance, nonce, state hash, withdrawn, paid out |
+| Seat (keypair, no account) | derived per party and player from the treasury key | the program's `member` signer; payouts pass through it to the player's wallet in the same transaction |
+
+Signed state (127 bytes): `"HUDDLE_STATE_V1" || party || seat || nonce u64 LE || balance u64 LE || state_hash`.
+The program only counts an Ed25519 instruction whose offsets all point into its own data, so a signature verified
+elsewhere in the transaction cannot be passed off as the box's. A claim only replaces an earlier one with a higher
+nonce.
+
+Why the Solana Pay recipient is the treasury and not the vault: a transfer request names a **wallet**, and the wallet
+pays that wallet's associated token account. The vault is a PDA-owned token account, which wallets refuse to derive
+(`@solana/pay` rejects off-curve owners). So every wallet works, and the sweep into the vault follows in the next
+transaction. A Solana Pay **transaction request**, where the wallet signs the program's `deposit` directly, is the
+natural next step.
+
+### Why Solana
+
+- **It is cheap enough for $5 buy-ins and 30-second markets.** A settlement transaction costs about $0.001, so the house
+  can pay every fee and players never handle gas.
+- **It is fast enough for a living room.** A deposit confirms in about a second, so the box can flash "Alice is in" while
+  the play is still on screen.
+- **Solana Pay works with any wallet.** A QR or link opens Phantom, Solflare or Backpack with no SDK to embed and no
+  wallet connect.
+- **PDAs and the Ed25519 program make the vault trustless enough.** No one can move party money except through the
+  program, and the program only pays out balances the box signed. It verifies them natively, with no oracle.
+- **Streams turn the chain into a push feed.** QuickNode Streams gives us that (next section).
+
+### Proof on a local validator
+
+`cd web && npm run test:vault-localnet` (Agave CLI + `target/deploy/huddle_vault.so`) deploys the program to
+`solana-test-validator` and plays a whole party:
+
+- faucet;
+- three Solana Pay deposits paid exactly like Phantom: credited by polling, by a real block run through the QuickNode
+  filter into the webhook, and on the box;
+- sweeps into the vault;
+- buy, resolve, end;
+- top-up, close, Ed25519-verified `submit_state`, finalize, payouts.
+
+It checks every wallet and the vault on chain (the vault ends at 0). A second party covers a house win (`withdraw_host`).
+`VAULT_E2E_LOG=1` prints every signature.
+
+## QuickNode Streams
+
+| | |
+|---|---|
+| Network | Solana **Devnet** |
+| Dataset | **Block** (each block as `getBlock` returns it). The filter also accepts the "Programs + Logs" shape |
+| Filter | [`web/quicknode/filter.js`](web/quicknode/filter.js) (plain ES5, no imports, as Streams requires) |
+| Destination | Webhook `POST https://huddle-live-eight.vercel.app/api/quicknode/webhook` (`web/app/api/quicknode/webhook/route.ts`) |
+| Auth | `QUICKNODE_STREAM_TOKEN`: sent as a custom header `x-huddle-token`, or used as the Stream's security token for QuickNode's `X-QN-Signature` HMAC (checked, with a 10 minute timestamp window). Anything else gets a 401 |
+
+**Filter logic.** For each block, the filter:
+
+- drops failed transactions;
+- keeps only the transactions that touch the `huddle_vault` program, or the treasury's USDC token account (where every
+  Solana Pay deposit lands);
+- returns one small record per transaction: signature, slot, block time, all account keys, and the vault
+  instructions decoded from their Anchor discriminators (party, member, amount).
+
+A batch with nothing of ours returns `null`, so QuickNode sends nothing.
+
+**What the webhook does.**
+
+- **Deposits.** One of a transaction's account keys is the Solana Pay reference of an open deposit request, found
+  through a global reference index. The webhook re-reads that transaction from our own RPC (the payload is never
+  trusted for money). If it paid the treasury, the webhook credits it through the same once-per-signature path as
+  `/deposit/sync`. A box payment flips to "paid", and in vault mode the sweep into the vault starts.
+- **Vault steps.** These are marked `streamed` on the lobby's chain events for the TV.
+- **Redelivery.** A redelivered batch never credits twice.
+
+**Why Streams.**
+
+- **No polling delay.** Without a Stream, a phone polls `/deposit/sync` every 3 s, which runs
+  `getSignaturesForAddress` and a transaction fetch per open QR. The Stream pushes the payment the moment its block
+  lands.
+- **Payments from anywhere are caught.** That includes a payment made on another phone (Pay on the box), or one sent
+  after the player closed the page.
+- **The filter runs on QuickNode's side.** We receive a few hundred bytes per Huddle transaction instead of every
+  devnet block.
+- **Polling stays as the fallback.** It covers the case where the Stream is paused or not set up.
+
+Setup, click by click: [`web/CONTRACT.md` → QuickNode Stream setup](web/CONTRACT.md#quicknode-stream-setup).
+
+### Go live (human steps)
+
+1. From `web/`, run `node scripts/solana-go-live.mjs --dry-run`. It prints the treasury address and how much SOL is
+   missing: about **1.53 SOL** (1.28 to deploy the program at devnet's current rent, plus a 0.25 reserve).
+2. At https://faucet.solana.com, request **5 SOL** on Devnet for that address.
+3. Run `node scripts/solana-go-live.mjs`. It:
+   - deploys the program (or reuses it);
+   - creates the mint;
+   - generates the Stream token and the filled filter;
+   - sets the Vercel env;
+   - deploys.
+4. Create the QuickNode Stream.
+
+Details are in [`web/CONTRACT.md` → Human steps](web/CONTRACT.md#human-steps).
 
 ---
 

@@ -19,6 +19,7 @@ import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePair
 import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
 import { findMoment, kioskSafe, MOMENT_KINDS, type MomentKind, type MomentSport } from "./moments";
 import { getTimeline, wallAt } from "./replay/timeline";
+import { chainView } from "./chain";
 import type { Game, Lobby, LobbyEvent, Market, MarketMode, Offer, Player, Side, WithdrawalRecord } from "./types";
 import { MARKET_MODES } from "./types";
 
@@ -45,6 +46,11 @@ export const PREGAME_TRADE_MS = 20_000;
 export const LAST_CALL_MS = 4500;
 /** ...on markets that trade at least this long (shorter windows are all announcement anyway). */
 export const LAST_CALL_MIN_WINDOW_MS = 10_000;
+/** "Pay on the box" (lobby.boxPay): the QR stays up this long unpaid, and this long once paid. */
+export const BOX_PAY_MS = 90_000;
+export const BOX_PAID_SHOW_MS = 4000;
+/** The lobby read path checks an open box payment on chain at most this often. */
+export const BOX_CHECK_MS = 3000;
 
 const lobbyKey = (code: string) => `lobby:${code}`;
 const kioskKey = (id: string) => `kiosk:${id}`;
@@ -379,6 +385,13 @@ function tickReplay(l: Lobby, now: number, dryRun: boolean): boolean {
 /** Applies (or, with dryRun, only detects) the transitions that happen on a timer: auto-lock and auto-resolve. */
 function tick(l: Lobby, now: number, dryRun = false): boolean {
   let changed = false;
+  // "Pay on the box": gone ~4 s after it was paid, or when it timed out unpaid.
+  const bp = l.boxPay;
+  if (bp && ((bp.paidAt && now >= bp.paidAt + BOX_PAID_SHOW_MS) || (!bp.paidAt && now > bp.until))) {
+    if (dryRun) return true;
+    l.boxPay = null;
+    changed = true;
+  }
   if (l.replay && l.phase !== "ended") {
     if (tickReplay(l, now, dryRun)) {
       if (dryRun) return true;
@@ -452,8 +465,16 @@ async function geminiFor(l: Lobby): Promise<GeminiSnapshot | null> {
 export async function getLobby(code: string, opts: { gemini?: boolean } = {}): Promise<Lobby | null> {
   code = normCode(code);
   if (!code) return null;
-  const l = await read(code);
+  let l = await read(code);
   if (!l) return null;
+  // An open "Pay on the box" QR: look for the payment on chain, at most every 3 s per lobby (checkBoxPay throttles).
+  const bp = l.boxPay;
+  if (bp && !bp.paidAt && Date.now() <= bp.until) {
+    const { checkBoxPay } = await import("./solana-lobby");
+    if (await checkBoxPay(l).catch((e) => (console.error("[boxPay]", e instanceof Error ? e.message : e), false))) {
+      l = (await read(code)) ?? l;
+    }
+  }
   // gemini: false (the speaker's audio poll) never waits on a Gemini quote; the timers still run.
   const g = opts.gemini !== false && (l.phase === "open" || l.phase === "lobby") ? await geminiFor(l) : null;
   const stale = !!g && (!l.gemini || g.at !== l.gemini.at || g.live !== l.gemini.live);
@@ -1077,6 +1098,12 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
     events: l.events.slice(-15),
     captions: (l.captions ?? []).slice(-MAX_CAPTIONS).map((c) => ({ id: c.id, at: c.at, text: c.text })),
     scorecard: buildScorecard(l.scoreEntries ?? []),
+    /** On-chain activity (Solana money): explorer links, and "Settled on Solana" once the vault finalized. Null otherwise. */
+    chain: chainView(l, me?.id ?? null),
+    /** "Pay on the box" request being shown on the box right now (null when none). */
+    boxPay: l.boxPay
+      ? { name: l.boxPay.name, cents: l.boxPay.cents, url: l.boxPay.url, until: l.boxPay.until, paidAt: l.boxPay.paidAt ?? null, mine: !!me && l.boxPay.playerId === me.id }
+      : null,
     me: me
       ? {
           id: me.id,

@@ -72,6 +72,11 @@ export function solanaProblems(): string[] {
   return out;
 }
 
+/** Explorer link for an account address, same cluster rules as explorerTx. */
+export function explorerAddress(addr: string, rpc = SOLANA_RPC_URL): string {
+  return explorerTx(addr, rpc).replace("/tx/", "/address/");
+}
+
 /** Explorer link for a signature on whichever cluster SOLANA_RPC_URL points at (a local validator uses a custom URL). */
 export function explorerTx(sig: string, rpc = SOLANA_RPC_URL): string {
   const base = `https://explorer.solana.com/tx/${sig}`;
@@ -89,7 +94,7 @@ async function splToken() {
 }
 
 let conn: Connection | null = null;
-async function connection(): Promise<Connection> {
+export async function connection(): Promise<Connection> {
   if (!conn) {
     const { Connection } = await web3();
     conn = new Connection(SOLANA_RPC_URL, { commitment: "confirmed", disableRetryOnRateLimit: false });
@@ -114,7 +119,7 @@ export async function treasury(): Promise<Keypair> {
   return treasuryKp;
 }
 
-async function mint(): Promise<PublicKey> {
+export async function mint(): Promise<PublicKey> {
   const { PublicKey } = await web3();
   return new PublicKey(env("USDC_MINT"));
 }
@@ -241,6 +246,27 @@ export async function findPayments(
   return out;
 }
 
+/**
+ * One known transaction (e.g. from a QuickNode Stream): what it paid the treasury, re-read from our own RPC so a
+ * forged webhook body can never credit anything. Null unless it succeeded, carries `reference` as an account key
+ * and moved USDC into a treasury-owned token account.
+ */
+export async function paymentBySignature(
+  signature: string,
+  reference: string,
+  opts: { rpc?: Pick<Connection, "getParsedTransaction">; treasury?: string; mint?: string } = {},
+): Promise<FoundPayment | null> {
+  const c = opts.rpc ?? (await connection());
+  const t = opts.treasury ?? (await treasury()).publicKey.toBase58();
+  const m = opts.mint ?? (await mint()).toBase58();
+  const tx = await c.getParsedTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+  if (!tx) return null;
+  const keys = tx.transaction.message.accountKeys.map((k) => (typeof k === "string" ? k : k.pubkey.toBase58()));
+  if (!keys.includes(reference)) return null;
+  const pay = paymentFromMeta(tx.meta, t, m);
+  return pay ? { signature, ...pay } : null;
+}
+
 // ---------------------------------------------------------------- sending from the treasury
 
 /**
@@ -277,15 +303,18 @@ export async function signatureOutcome(signature: string, lastValidBlockHeight?:
   return (await rpc.getBlockHeight("confirmed")) > lastValidBlockHeight ? "failed" : "pending";
 }
 
-/** Signs, sends and confirms one treasury transaction; the signature is known before it is sent. */
-async function sendTreasuryTx(ixs: TransactionInstruction[]): Promise<string> {
+/**
+ * Signs, sends and confirms one treasury transaction (the treasury is the fee payer; `extraSigners` co-sign,
+ * e.g. a vault seat key); the signature is known before it is sent.
+ */
+export async function sendTreasuryTx(ixs: TransactionInstruction[], extraSigners: Keypair[] = []): Promise<string> {
   const { Transaction } = await web3();
   const bs58 = (await import("bs58")).default;
   const c = await connection();
   const payer = await treasury();
   const { blockhash, lastValidBlockHeight } = await c.getLatestBlockhash("confirmed");
   const tx: Transaction = new Transaction({ feePayer: payer.publicKey, blockhash, lastValidBlockHeight }).add(...ixs);
-  tx.sign(payer);
+  tx.sign(payer, ...extraSigners);
   const signature = bs58.encode(tx.signature!);
   try {
     await c.sendRawTransaction(tx.serialize(), { preflightCommitment: "confirmed", maxRetries: 5 });
@@ -316,7 +345,7 @@ interface MintFacts {
   tokenProgram: PublicKey;
 }
 let mintFacts: MintFacts | null = null;
-async function mintInfo(): Promise<MintFacts> {
+export async function mintInfo(): Promise<MintFacts> {
   if (!mintFacts) {
     const spl = await splToken();
     const c = await connection();
@@ -354,7 +383,7 @@ export async function destinationProblem(to: string): Promise<string | null> {
 }
 
 /** Instructions that make sure the treasury holds `units` of USDC, minting the shortfall when it is the mint authority. */
-async function treasuryFundsIxs(units: bigint): Promise<{ ixs: TransactionInstruction[]; source: PublicKey }> {
+export async function treasuryFundsIxs(units: bigint): Promise<{ ixs: TransactionInstruction[]; source: PublicKey }> {
   const spl = await splToken();
   const c = await connection();
   const payer = await treasury();

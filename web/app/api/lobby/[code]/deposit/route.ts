@@ -5,8 +5,8 @@
 import { baseUrl, clientIp, handle, json, playerToken, readBody } from "@/lib/http";
 import { ApiError, creditDeposit, getLobby, mutate, requirePlayer } from "@/lib/lobby";
 import { DEPOSIT_OPTIONS, MONEY_MODE, createOnrampUrl, moneyProblems } from "@/lib/money";
-import { newReference, transferRequestUrl, treasuryInfo } from "@/lib/solana";
-import { addSolanaRef } from "@/lib/solana-lobby";
+import { newSolanaDeposit } from "@/lib/solana-lobby";
+import { isVault } from "@/lib/vault";
 //   solana mode   -> {"ok":true,"url":"solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle...",
 //                    "solanaPay":true,"reference","recipient","mint","amount"}; show it as a QR / "Open in wallet"
 //                    link, then call /deposit/sync (optionally with {"reference"}) every 3 s.
@@ -30,18 +30,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     }
 
     if (MONEY_MODE === "solana") {
-      // Solana Pay transfer request: a unique reference key tags the payment so /deposit/sync can find it.
-      const reference = await newReference();
-      const { address, mint } = await treasuryInfo();
-      let code4 = "";
-      await mutate(code, (l, now) => {
-        const p = requirePlayer(l, token);
-        if (l.phase === "ended") throw new ApiError(400, "This session has ended. Cash out instead");
-        code4 = l.code;
-        addSolanaRef(l, p.id, reference, cents, now);
-      });
-      const url = transferRequestUrl({ recipient: address, cents, mint, reference, label: "Huddle", message: `Huddle lobby ${code4}`, memo: `huddle-${code4}` });
-      return json({ ok: true, url, solanaPay: true, reference, recipient: address, mint, amount: (cents / 100).toFixed(2) });
+      // Solana Pay transfer request: a unique reference key tags the payment so /deposit/sync (or the QuickNode
+      // webhook) can find it. SETTLEMENT=vault sweeps it into the party vault as soon as it is credited.
+      const d = await newSolanaDeposit(code, token, cents);
+      return json({ ok: true, url: d.url, solanaPay: true, reference: d.reference, recipient: d.recipient, mint: d.mint, amount: d.amount, vault: isVault() });
     }
 
     const problems = moneyProblems();

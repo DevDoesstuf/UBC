@@ -1,0 +1,1509 @@
+{
+  "address": "GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu",
+  "metadata": {
+    "name": "huddle_vault",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Huddle party vault: USDC buy-ins settled from co-signed off-chain balances"
+  },
+  "instructions": [
+    {
+      "name": "create_party",
+      "docs": [
+        "The host creates the party and deposits the bond into the vault.",
+        "`payer` (the treasury) pays rent and fees, so the host key needs no SOL."
+      ],
+      "discriminator": [
+        251,
+        84,
+        246,
+        151,
+        106,
+        204,
+        201,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Rent + fee payer (the treasury). May be the host itself."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "host",
+          "signer": true
+        },
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "host"
+              },
+              {
+                "kind": "arg",
+                "path": "party_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host_token",
+          "docs": [
+            "The host's token account the bond is taken from."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "party_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "box_signer",
+          "type": "pubkey"
+        },
+        {
+          "name": "challenge_secs",
+          "type": "u32"
+        },
+        {
+          "name": "bond",
+          "type": "u64"
+        },
+        {
+          "name": "require_member_sig",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "deposit",
+      "docs": [
+        "Buy in. Creates the Member account on first deposit. `payer` (the treasury) pays rent and fees;",
+        "the member only signs for the token transfer, so players never need SOL."
+      ],
+      "discriminator": [
+        242,
+        35,
+        198,
+        137,
+        82,
+        225,
+        242,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Rent + fee payer (the treasury). May be the member itself."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "member",
+          "signer": true
+        },
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party.host",
+                "account": "Party"
+              },
+              {
+                "kind": "account",
+                "path": "party.party_id",
+                "account": "Party"
+              }
+            ]
+          }
+        },
+        {
+          "name": "member_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party"
+              },
+              {
+                "kind": "account",
+                "path": "member"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "member_token",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "finalize",
+      "docs": [
+        "After the challenge window, anyone can finalize. See `settle.rs` for the math."
+      ],
+      "discriminator": [
+        171,
+        61,
+        218,
+        56,
+        127,
+        115,
+        12,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party.host",
+                "account": "Party"
+              },
+              {
+                "kind": "account",
+                "path": "party.party_id",
+                "account": "Party"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "request_close",
+      "docs": [
+        "Start the challenge window. The host or the box signer can do it at any time; any member can",
+        "do it once the party is older than `MEMBER_CLOSE_TIMEOUT_SECS` (so a dead box cannot lock funds)."
+      ],
+      "discriminator": [
+        82,
+        168,
+        167,
+        86,
+        14,
+        15,
+        199,
+        180
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party.host",
+                "account": "Party"
+              },
+              {
+                "kind": "account",
+                "path": "party.party_id",
+                "account": "Party"
+              }
+            ]
+          }
+        },
+        {
+          "name": "member_account",
+          "docs": [
+            "Only needed when the signer is a member (not the host or the box). Pass the program id for \"none\"."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "submit_state",
+      "docs": [
+        "Submit a member's signed balance during Closing. Anyone can submit. The transaction must carry",
+        "Ed25519 program instruction(s), before this one, that verify the canonical 127-byte message",
+        "",
+        "\"HUDDLE_STATE_V1\" || party || member || nonce u64 LE || balance u64 LE || state_hash",
+        "",
+        "for the box signer and, when `require_member_sig` is set, for the member wallet as well.",
+        "The claim is kept only if its nonce is higher than the stored one."
+      ],
+      "discriminator": [
+        172,
+        31,
+        42,
+        160,
+        233,
+        237,
+        4,
+        251
+      ],
+      "accounts": [
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party.host",
+                "account": "Party"
+              },
+              {
+                "kind": "account",
+                "path": "party.party_id",
+                "account": "Party"
+              }
+            ]
+          }
+        },
+        {
+          "name": "member_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party"
+              },
+              {
+                "kind": "arg",
+                "path": "member"
+              }
+            ]
+          }
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "member",
+          "type": "pubkey"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "balance",
+          "type": "u64"
+        },
+        {
+          "name": "state_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "docs": [
+        "Pay a member's final amount to the member's own associated token account. Anyone can crank it."
+      ],
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Crank: pays fees and, if needed, rent for the member's associated token account."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party.host",
+                "account": "Party"
+              },
+              {
+                "kind": "account",
+                "path": "party.party_id",
+                "account": "Party"
+              }
+            ]
+          }
+        },
+        {
+          "name": "member_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  109,
+                  98,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party"
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "wallet_token",
+          "docs": [
+            "The member's own associated token account: the only place a member payout can go."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "wallet"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw_host",
+      "docs": [
+        "Pay the host. Anyone can crank it; funds only go to the host's own associated token account.",
+        "- First call after finalize: `host_refund` (remaining bond + surplus).",
+        "- Once every member has withdrawn: everything left in the vault (pro-rata rounding dust)."
+      ],
+      "discriminator": [
+        103,
+        247,
+        115,
+        166,
+        187,
+        165,
+        7,
+        18
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Crank: pays fees and, if needed, rent for the host's associated token account."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "party",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party.host",
+                "account": "Party"
+              },
+              {
+                "kind": "account",
+                "path": "party.party_id",
+                "account": "Party"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "host_token",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "host"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Member",
+      "discriminator": [
+        54,
+        19,
+        162,
+        21,
+        29,
+        166,
+        17,
+        198
+      ]
+    },
+    {
+      "name": "Party",
+      "discriminator": [
+        208,
+        64,
+        165,
+        146,
+        114,
+        138,
+        161,
+        100
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CloseRequested",
+      "discriminator": [
+        136,
+        120,
+        170,
+        78,
+        168,
+        236,
+        47,
+        118
+      ]
+    },
+    {
+      "name": "Deposited",
+      "discriminator": [
+        111,
+        141,
+        26,
+        45,
+        161,
+        35,
+        100,
+        57
+      ]
+    },
+    {
+      "name": "Finalized",
+      "discriminator": [
+        4,
+        77,
+        242,
+        80,
+        20,
+        152,
+        247,
+        252
+      ]
+    },
+    {
+      "name": "HostWithdrawn",
+      "discriminator": [
+        164,
+        59,
+        177,
+        93,
+        165,
+        174,
+        170,
+        117
+      ]
+    },
+    {
+      "name": "PartyCreated",
+      "discriminator": [
+        181,
+        103,
+        87,
+        221,
+        198,
+        141,
+        108,
+        58
+      ]
+    },
+    {
+      "name": "StateSubmitted",
+      "discriminator": [
+        31,
+        198,
+        220,
+        75,
+        236,
+        240,
+        237,
+        143
+      ]
+    },
+    {
+      "name": "Withdrawn",
+      "discriminator": [
+        20,
+        89,
+        223,
+        198,
+        194,
+        124,
+        219,
+        13
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "PartyNotOpen",
+      "msg": "The party is not open"
+    },
+    {
+      "code": 6001,
+      "name": "PartyNotClosing",
+      "msg": "The party is not closing"
+    },
+    {
+      "code": 6002,
+      "name": "PartyNotFinalized",
+      "msg": "The party is not finalized"
+    },
+    {
+      "code": 6003,
+      "name": "ChallengeWindowOpen",
+      "msg": "The challenge window is still open"
+    },
+    {
+      "code": 6004,
+      "name": "ChallengeTooLong",
+      "msg": "Challenge window is too long"
+    },
+    {
+      "code": 6005,
+      "name": "ZeroAmount",
+      "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6006,
+      "name": "NotAuthorizedToClose",
+      "msg": "Only the host or the box signer can close before the member timeout"
+    },
+    {
+      "code": 6007,
+      "name": "MemberCloseTooEarly",
+      "msg": "Members can only request a close after the timeout"
+    },
+    {
+      "code": 6008,
+      "name": "MissingBoxSignature",
+      "msg": "No valid Ed25519 signature by the box signer over this exact state message"
+    },
+    {
+      "code": 6009,
+      "name": "MissingMemberSignature",
+      "msg": "No valid Ed25519 signature by the member over this exact state message"
+    },
+    {
+      "code": 6010,
+      "name": "MalformedEd25519Instruction",
+      "msg": "Malformed Ed25519 instruction"
+    },
+    {
+      "code": 6011,
+      "name": "StaleNonce",
+      "msg": "A state with an equal or higher nonce is already stored"
+    },
+    {
+      "code": 6012,
+      "name": "AlreadyWithdrawn",
+      "msg": "Already withdrawn"
+    },
+    {
+      "code": 6013,
+      "name": "NothingToWithdraw",
+      "msg": "Nothing to withdraw"
+    },
+    {
+      "code": 6014,
+      "name": "MathOverflow",
+      "msg": "Math overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "CloseRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          },
+          {
+            "name": "close_requested_at",
+            "type": "i64"
+          },
+          {
+            "name": "challenge_ends_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Deposited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "member",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "member_deposited",
+            "docs": [
+              "The member's total deposit after this one."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_deposits",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Finalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "host",
+            "type": "pubkey"
+          },
+          {
+            "name": "host_refund",
+            "type": "u64"
+          },
+          {
+            "name": "total_deposits",
+            "type": "u64"
+          },
+          {
+            "name": "bond",
+            "type": "u64"
+          },
+          {
+            "name": "available",
+            "type": "u64"
+          },
+          {
+            "name": "finalized_sum",
+            "type": "u128"
+          },
+          {
+            "name": "cut",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HostWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "host",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Member",
+      "docs": [
+        "One member of one party. PDA seeds: [\"member\", party, wallet]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposited",
+            "type": "u64"
+          },
+          {
+            "name": "claim_balance",
+            "type": "u64"
+          },
+          {
+            "name": "claim_nonce",
+            "type": "u64"
+          },
+          {
+            "name": "claim_state_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "has_claim",
+            "type": "bool"
+          },
+          {
+            "name": "withdrawn",
+            "type": "bool"
+          },
+          {
+            "name": "paid_out",
+            "docs": [
+              "Amount actually paid by `withdraw`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Party",
+      "docs": [
+        "One watch party. PDA seeds: [\"party\", host, party_id]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "host",
+            "type": "pubkey"
+          },
+          {
+            "name": "party_id",
+            "docs": [
+              "Opaque 32-byte id chosen by the host (the client zero-pads or hashes the engine's party id)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "box_signer",
+            "docs": [
+              "Key the box signs balance states with."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "SPL token account owned by this PDA. Seeds: [\"vault\", party]."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "PartyStatus"
+              }
+            }
+          },
+          {
+            "name": "require_member_sig",
+            "docs": [
+              "false = trusted-host mode: only the box signature is required on a state."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "member_count",
+            "type": "u32"
+          },
+          {
+            "name": "claims_count",
+            "docs": [
+              "Members that have a verified claim."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "withdrawn_count",
+            "docs": [
+              "Members that have withdrawn."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "challenge_secs",
+            "type": "u32"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "close_requested_at",
+            "type": "i64"
+          },
+          {
+            "name": "finalized_at",
+            "type": "i64"
+          },
+          {
+            "name": "total_deposits",
+            "docs": [
+              "Sum of all member deposits (the bond is not included)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Host bond held in the vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "claimed_deposits",
+            "docs": [
+              "Sum of `deposited` over members that have a claim."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sum_claims",
+            "docs": [
+              "Sum of `claim_balance` over members that have a claim."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "finalized_sum",
+            "docs": [
+              "Sum of effective claims: sum_claims + (total_deposits - claimed_deposits). Pro-rata denominator."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "available",
+            "docs": [
+              "total_deposits + bond. Pro-rata numerator."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cut",
+            "docs": [
+              "True when claims exceed deposits + bond and every payout is cut pro rata."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "host_refund",
+            "docs": [
+              "Owed to the host at finalize (remaining bond + surplus). Rounding dust is swept later."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "host_refund_paid",
+            "type": "bool"
+          },
+          {
+            "name": "total_paid",
+            "docs": [
+              "Total paid to members so far."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartyCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "host",
+            "type": "pubkey"
+          },
+          {
+            "name": "box_signer",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "party_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bond",
+            "type": "u64"
+          },
+          {
+            "name": "challenge_secs",
+            "type": "u32"
+          },
+          {
+            "name": "require_member_sig",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartyStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Closing"
+          },
+          {
+            "name": "Finalized"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StateSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "member",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "state_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Withdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "party",
+            "type": "pubkey"
+          },
+          {
+            "name": "member",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

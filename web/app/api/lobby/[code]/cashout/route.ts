@@ -16,6 +16,40 @@ import { ApiError, getLobby, mutate, requirePlayer } from "@/lib/lobby";
 import { isEvmAddress, moneyInfo, sendUsdc } from "@/lib/money";
 import type { WithdrawalRecord } from "@/lib/types";
 import { reserveWithdrawal } from "@/lib/lobby";
+import { pushChainEvent } from "@/lib/chain";
+import { advanceVault, isVault } from "@/lib/vault";
+
+//   SETTLEMENT=vault -> the money is in the party's huddle_vault on chain and only the program can pay it out, after
+//                    the game ended and settled. Before that: 400. After: runs the settlement (idempotent) and pays
+//                    the player's payout from the vault to `address` (or the wallet they paid from) in one
+//                    transaction. Most players never need this: settlement pays everyone with a known wallet.
+export const maxDuration = 60;
+
+async function vaultCashout(code: string, token: string | null, address: string) {
+  const l = await getLobby(code);
+  if (!l) throw new ApiError(404, "Lobby not found");
+  const p = requirePlayer(l, token);
+  const done = l.vault?.payouts[p.id];
+  if (done) return { ok: true, cents: done.cents, mode: "solana", vault: true, to: done.to, txHash: done.sig, explorer: done.explorer };
+  if (l.phase !== "ended") throw new ApiError(400, "Your money is in this party's vault on Solana. It pays out to your wallet when the host ends the game");
+  if (p.balance <= 0 && !l.vault) throw new ApiError(400, "Nothing to cash out");
+  if (address) {
+    const problem = await destinationProblem(address);
+    if (problem) throw new ApiError(400, problem);
+    await mutate(code, (lobby) => {
+      const me = requirePlayer(lobby, token);
+      me.solanaAddress = address;
+    });
+  } else if (!p.solanaAddress) {
+    throw new ApiError(400, "Enter the Solana address of your wallet");
+  }
+  const r = await advanceVault(code, { waitMs: 45_000 });
+  const after = await getLobby(code);
+  const paid = after?.vault?.payouts[p.id];
+  if (paid) return { ok: true, cents: paid.cents, mode: "solana", vault: true, to: paid.to, txHash: paid.sig, explorer: paid.explorer };
+  if (r.error) throw new ApiError(502, `Settling on Solana failed, nothing was lost; try again. ${r.error}`);
+  return { ok: true, cents: 0, mode: "solana", vault: true, pending: true, status: after?.vault?.status ?? null };
+}
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
   return handle(async () => {
@@ -26,6 +60,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const onchain = moneyInfo().payouts === "onchain" || solana;
     const address = String(body.address ?? "").trim();
     if (onchain && !solana && !isEvmAddress(address)) throw new ApiError(400, "Enter the 0x address of your wallet on Base");
+
+    if (solana && isVault()) return json(await vaultCashout(code, token, address));
 
     if (solana) {
       const l = await getLobby(code);
@@ -55,9 +91,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const same = (x: WithdrawalRecord) => x.playerId === rec.playerId && x.at === rec.at;
     try {
       const txHash = solana ? await sendSolanaUsdc(rec.to!, rec.cents) : await sendUsdc(address as `0x${string}`, rec.cents);
-      await mutate(code, (l) => {
+      await mutate(code, (l, now) => {
         const r = l.withdrawals.find(same);
         if (r) Object.assign(r, { status: "sent", txHash });
+        if (solana) pushChainEvent(l, { at: now, kind: "cashout", sig: txHash, explorer: explorerTx(txHash), playerId: rec.playerId, cents: rec.cents, via: "server" });
       });
       const explorer = solana ? explorerTx(txHash) : `https://basescan.org/tx/${txHash}`;
       return json({ ok: true, cents: rec.cents, mode: solana ? "solana" : "onchain", to: rec.to, txHash, explorer });
