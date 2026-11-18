@@ -9,7 +9,7 @@
 //   buy -> lock -> resolve -> cash-out to a brand-new address and to the paying wallet, checked on chain.
 // Env: SOLANA_RPC_URL (default http://127.0.0.1:8899), E2E_PORT (default 3405), HUDDLE_URL, E2E_SOLANA_DIR
 // (setup output dir, for HUDDLE_URL runs: must be the dir the server's env came from).
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -37,7 +37,10 @@ async function rpcUp(): Promise<boolean> {
   }
 }
 
+let cleaned = false;
 function cleanup() {
+  if (cleaned) return;
+  cleaned = true;
   for (const c of children.reverse()) {
     try {
       if (c.pid) process.kill(-c.pid, "SIGTERM");
@@ -51,14 +54,18 @@ function cleanup() {
   }
   rmSync(tmp, { recursive: true, force: true });
 }
+// The validator and server run in their own process groups (detached) and are unref'd so they never keep this
+// test alive; after() stops both groups and deletes the temp ledger, and so do exit and Ctrl-C.
+after(cleanup);
 process.on("exit", cleanup);
-process.on("SIGINT", () => process.exit(130));
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => process.exit(130));
 
 // ---------------------------------------------------------------- environment
 if (!(await rpcUp())) {
   const bin = join(homedir(), ".local/share/solana/install/active_release/bin");
   const port = new URL(RPC).port || "8899";
   const v = spawn(join(bin, "solana-test-validator"), ["--reset", "--quiet", "--ledger", join(tmp, "ledger"), "--rpc-port", port], { detached: true, stdio: "ignore", cwd: tmp });
+  v.unref();
   children.push(v);
   for (let i = 0; i < 60 && !(await rpcUp()); i++) await sleep(1000);
   assert.ok(await rpcUp(), "local validator did not start");
@@ -77,6 +84,7 @@ if (!BASE) {
   BASE = `http://localhost:${PORT}`;
   const env = { ...process.env, MONEY_MODE: "solana", SOLANA_TREASURY_SECRET_KEY: SECRET, USDC_MINT: MINT, SOLANA_RPC_URL: RPC, GEMINI_DISABLED: "1", KIOSK_KEY: "" };
   const s = spawn("npx", ["next", "dev", "-p", String(PORT)], { cwd: WEB, env, detached: true, stdio: "ignore" });
+  s.unref();
   children.push(s);
   for (let i = 0; i < 90; i++) {
     if (await fetch(`${BASE}/api/health`).then((r) => r.ok, () => false)) break;
