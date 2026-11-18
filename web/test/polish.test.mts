@@ -32,7 +32,7 @@ test("replay text: Latin-1, at most 150 characters, whole words, no feed boilerp
       if (!s) continue;
       assert.ok(s.length <= builder.MAX_TEXT, `${id} #${e.seq} is ${s.length} chars: ${s}`);
       assert.match(s, /[.!?)"']$/, `${id} #${e.seq} ends mid-sentence: ${s}`);
-      assert.doesNotMatch(s, /Shotgun|No Huddle|Center-|Holder-|was injured during|reported in as eligible|\[|\*\*|enforced at|\(\d{1,2}:\d\d/, `${id} #${e.seq}: ${s}`);
+      assert.doesNotMatch(s, /Shotgun|No Huddle|formation\)|Center-|Holder-|was injured during|reported in as eligible|\[|\*\*|enforced at|\(\d{1,2}:\d\d/, `${id} #${e.seq}: ${s}`);
       assert.doesNotMatch(s, /[a-z]\.[A-Z][a-z]{2,} /, `${id} #${e.seq} has a missing space after a sentence: ${s}`);
     }
   }
@@ -51,6 +51,7 @@ test("build-replays text rules: formations, tacklers, snappers, penalties, revie
   assert.equal(p("B.Purdy sacked at SF 39 for -2 yards (sack split by J.Houston and O.Ogbonnia). DAL-O.Ogbonnia was injured during the play."), "B.Purdy sacked at SF 39 for -2 yards.");
   assert.equal(p("D.Prescott pass short right to G.Pickens for 5 yards, TOUCHDOWN. TWO-POINT CONVERSION ATTEMPT. D.Prescott pass to G.Pickens is incomplete. ATTEMPT FAILS."), "D.Prescott pass short right to G.Pickens for 5 yards, TOUCHDOWN. Two-point try fails.");
   assert.equal(p("J.Herbert pass incomplete deep right to T.Harris.Los Angeles Chargers challenged the incomplete pass ruling, and the play was REVERSED.J.Herbert pass deep right to T.Harris to BLT 26 for 31 yards (K.Hamilton)."), "After review: J.Herbert pass deep right to T.Harris to BLT 26 for 31 yards.");
+  assert.equal(p("(Run formation) PENALTY on LAC, Delay of Game, 5 yards, enforced at BLT 1 - No Play."), "Penalty on LAC, delay of game, 5 yards, no play.");
   assert.equal(p("(14:56 - 1st) D.Henry right end to BLT 21 for -2 yards (K.Mack, D.Henley)."), "D.Henry right end to BLT 21 for -2 yards.");
   assert.equal(p("Aday Mara blocks Max Strus 's 5-foot two point shot"), "Aday Mara blocks Max Strus's 5-foot two point shot.");
   assert.equal(builder.tidySoccer("Alysson (Aston Villa) left footed shot from the right side of the box is saved in the bottom right corner by Senne Lammens (Manchester United)."), "Alysson (Aston Villa) left footed shot from the right side of the box is saved by Senne Lammens (Manchester United).");

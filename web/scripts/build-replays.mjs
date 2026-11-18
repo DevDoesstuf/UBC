@@ -160,7 +160,7 @@ export function tidyPlay(s) {
     .replace(/\(\d{1,2}:\d{2}(?:\s*-\s*\d\w*(?: \w+)?)?\)\s*/g, "") // "(14:56 - 1st)" clock stamps
     .replace(/\((?:No Huddle, )?Shotgun\)\s*/gi, "")
     .replace(/\(No Huddle(?:, Shotgun)?\)\s*/gi, "")
-    .replace(/\((?:Punt|Field Goal|Kick|Pistol|Wildcat)(?: formation)?\)\s*/gi, "")
+    .replace(/\((?:Pistol|Wildcat|[A-Za-z ,]* formation)\)\s*/gi, "") // "(Punt formation)", "(Run formation)"
     // Replay review: "<ruling>.<Team> challenged the ... ruling, and the play was REVERSED.<new ruling>" keeps the
     // call that stood.
     .replace(/^.*?\.\s*[A-Z][A-Za-z. ]+? challenged the [^,]+?, and the play was REVERSED\.\s*/, "After review: ")
