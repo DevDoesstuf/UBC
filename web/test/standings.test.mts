@@ -1,5 +1,6 @@
 // Boards everywhere (phone, TV, box) rank by worth = balance + withdrawn + open positions at value
-// (lib/standings.ts): a buy never drops a player down the board, a tie names no leader.
+// (lib/standings.ts): a buy never drops a player down the board, a tie names no leader. Also the scorebug's
+// team order (lib/matchup.ts): US leagues away first, soccer home first, the box without a firmware change.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -8,6 +9,7 @@ delete process.env.KV_REST_API_URL;
 delete process.env.UPSTASH_REDIS_REST_URL;
 
 const { openValue, openValues, standings, worthOf, losersOf } = await import("../lib/standings.ts");
+const { awayFirst } = await import("../lib/matchup.ts");
 const lmsr = await import("../lib/lmsr.ts");
 const lobby = await import("../lib/lobby.ts");
 const { kioskScreen, kioskTouch } = await import("../lib/kiosk.ts");
@@ -114,4 +116,32 @@ test("ended board on the box: a tie at the top shares rank 1 and has no leader",
   const s = await kioskTouch(kiosk, "end", "http://x");
   assert.deepEqual(s.leaderboard!.map((p) => [p.rank, p.lead]), [[1, false], [1, false]]);
   assert.deepEqual(s.lines, ["1.  Ana  $10.00", "1.  Ben  $10.00"]);
+});
+
+test("scorebug order: US leagues away first (MLS too), soccer home first; the box gets drawing order", async () => {
+  assert.equal(awayFirst("nfl"), true);
+  assert.equal(awayFirst("nba", "NBA"), true);
+  assert.equal(awayFirst("soccer", "Premier League"), false);
+  assert.equal(awayFirst("soccer", "MLS"), true);
+  assert.equal(awayFirst("soccer", "Major League Soccer"), true);
+
+  // 49ers at Cowboys: the firmware draws score.home on the left, so the box gets the 49ers (away) there.
+  await kioskTouch("953", "game:nfl-sf-dal", "http://x");
+  const nfl = await kioskScreen("953", "http://x");
+  assert.equal(nfl.score!.swapped, true);
+  assert.equal(nfl.score!.homeShort, "SF");
+  assert.equal(nfl.score!.awayShort, "DAL");
+  const code = (await lobby.getKioskCode("953"))!;
+  const l = (await lobby.getLobby(code))!;
+  assert.equal(nfl.score!.homeScore, l.replay!.state.score.away, "the score travels with its team");
+  // The lobby view is unchanged (real home/away); phones and the TV order it with awayFirst.
+  const v = lobby.publicView(l, null, "http://x");
+  assert.equal(v.game!.score!.homeShort, "DAL");
+  assert.equal(awayFirst(v.game!.sport, v.game!.league), true);
+
+  await kioskTouch("954", "game:epl-mun-avl", "http://x");
+  const epl = await kioskScreen("954", "http://x");
+  assert.equal(epl.score!.swapped, false);
+  const el = (await lobby.getLobby((await lobby.getKioskCode("954"))!))!;
+  assert.equal(epl.score!.homeShort, el.replay!.state.home.short, "soccer keeps the home team on the left");
 });

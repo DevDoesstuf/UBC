@@ -13,7 +13,9 @@
 // v2 (optional, additive; old firmware ignores them, the new firmware copes when any is missing):
 //   v: 2, palette {canvas,card,well,rule,ink,ink2,muted,accent,accentDeep,accentLight,yes,no,hot,gold} (hex)
 //   game {id,title,league,sport,kind,mode}, score {home,away,homeShort,awayShort,homeColor,awayColor,
-//     homeScore,awayScore,clock,period,status}, caption {id,text}
+//     homeScore,awayScore,clock,period,status,swapped}, caption {id,text}
+//     score is in drawing order (home* left, away* right): for "Away at Home" games (US leagues) the real away
+//     team is in home* and swapped is true, so the box draws away first without a firmware change.
 //   cards [{id,title,sub,enabled,league,kind,date,color,gemini,home?,away?}]   select: EVERY game (tiles = first 4)
 //   roster [{name,cents,deposited}], pot (cents), calls [{id,label,enabled}]    lobby/result ("Call it!" moments)
 //   volume (cents), lockInMs, lockTotal (s), model (cents|null), gemini {cents,label,live}|null,
@@ -33,6 +35,7 @@ import {
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
 import { boxName, boxSafe } from "./boxText";
+import { awayFirst } from "./matchup";
 import { losersOf, openValues, standings } from "./standings";
 import type { Game, Lobby } from "./types";
 
@@ -162,6 +165,8 @@ export interface KioskScore {
   clock: string;
   period: string;
   status: string;
+  /** true: the teams are in drawing order for an "Away at Home" game, so `home*` holds the real away team. */
+  swapped?: boolean;
 }
 
 /**
@@ -248,20 +253,32 @@ function gameCard(g: Game): KioskCard {
   return {
     id: `game:${g.id}`, title: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled,
     league, kind: g.kind ?? "clip", date, color: hex(g.color), gemini: !!g.gemini?.event,
-    // US leagues write "Away at Home"; soccer writes "Home v Away".
-    ...(home && away ? { home, away, at: sport !== "soccer" } : {}),
+    // US leagues (MLS too) write "Away at Home"; soccer elsewhere writes "Home v Away" (lib/matchup.ts).
+    ...(home && away ? { home, away, at: awayFirst(sport, typeof x.league === "string" ? x.league : league) } : {}),
   };
 }
 
+/**
+ * The scorebug. The firmware (ui.cpp scorebug) draws the `home*` fields on the left and the `away*` fields on
+ * the right, so for "Away at Home" games (US leagues, lib/matchup.ts) the two teams are swapped here: the real
+ * away team goes in `home*` and is drawn first, like the game card and the phone and TV scorebugs. `swapped`
+ * says so (true = `home*` holds the real away team); the firmware does not read it.
+ */
 function scoreOf(l: Lobby): KioskScore | undefined {
   const run = l.replay;
   if (!run) return undefined;
   const st = run.state;
+  const game = getGame(l.gameId);
+  const left = { name: k(st.home.name), short: k(st.home.short), color: hex(st.home.color), score: st.score.home };
+  const right = { name: k(st.away.name), short: k(st.away.short), color: hex(st.away.color), score: st.score.away };
+  const swapped = awayFirst(st.sport ?? game?.sport, game?.league);
+  const [a, b] = swapped ? [right, left] : [left, right];
   return {
-    home: k(st.home.name), away: k(st.away.name), homeShort: k(st.home.short), awayShort: k(st.away.short),
-    homeColor: hex(st.home.color), awayColor: hex(st.away.color),
-    homeScore: st.score.home, awayScore: st.score.away, clock: k(st.clock.display),
+    home: a.name, away: b.name, homeShort: a.short, awayShort: b.short,
+    homeColor: a.color, awayColor: b.color,
+    homeScore: a.score, awayScore: b.score, clock: k(st.clock.display),
     period: periodLabel(st.sport, st.clock.period), status: String(st.status ?? ""),
+    swapped,
   };
 }
 

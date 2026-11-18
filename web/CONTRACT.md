@@ -75,6 +75,10 @@ market.losers: { name: string; cents: number }[]  // "Cooked": backed it, got no
                                                   // first; empty until it settles and when voided
 ```
 
+Scorebug order: US leagues (NFL, NBA, MLS) put the away team first like the game card, soccer elsewhere the home
+team: `awayFirst(game.sport, game.league)` in `lib/matchup.ts`. `game.score` keeps the real home/away; the kiosk
+JSON's `score` is in drawing order instead (`swapped: true` when the real away team is in `home*`).
+
 In pool and h2h mode `market.yesCents/noCents/priceYes/history` still work: pool shows the share of the pot on
 YES (the model prior while empty), h2h shows the YES probability implied by the last matched offer.
 `me.position` in pool/h2h mode holds **dollars staked** per side (not $1 shares).

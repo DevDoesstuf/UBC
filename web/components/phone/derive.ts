@@ -2,6 +2,7 @@
 import type { LobbyData } from "@/components/client";
 import { sharesForSpend } from "@/lib/lmsr";
 import { poolPotential, takerStakeFor } from "@/lib/modes";
+import { awayFirst, inOrder } from "@/lib/matchup";
 import { standings, worthOf as worth } from "@/lib/standings";
 
 export type Side = "yes" | "no";
@@ -123,6 +124,22 @@ export function worthOf(l: Lobby, p: Lobby["players"][number]): number {
 export function ranked(l: Lobby, boughtIn = false) {
   const players = boughtIn ? l.players.filter((p) => p.deposited > 0) : l.players;
   return standings(players, (p) => worthOf(l, p));
+}
+
+type Side2 = { name: string; short?: string; score: number };
+
+/**
+ * The scorebug's two teams in drawing order (lib/matchup.ts): US leagues put the away team on the left like the
+ * game card ("49ers at Cowboys": SF 0 0 DAL), soccer the home team. null for games without a score.
+ */
+export function scoreSides(l: Lobby): { left: Side2; right: Side2; label: string } | null {
+  const s = l.game?.score;
+  if (!s) return null;
+  const home: Side2 = { name: s.home, short: s.homeShort ?? undefined, score: s.homeScore };
+  const away: Side2 = { name: s.away, short: s.awayShort ?? undefined, score: s.awayScore };
+  const at = awayFirst(l.game?.sport, l.game?.league);
+  const [left, right] = inOrder(home, away, at);
+  return { left, right, label: `${left.name} ${left.score}${at ? " at " : ", "}${right.name} ${right.score}` };
 }
 
 export const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;

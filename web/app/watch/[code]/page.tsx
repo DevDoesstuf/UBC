@@ -235,7 +235,7 @@ export default function WatchPage() {
           <b>{l.game?.title ?? "Huddle"}</b>
           {l.game?.kind === "replay" && <span className="tv-tag">Replay</span>}
         </span>
-        <span className="tv-topbar-mid">{score && <Scorebug score={score} persona={l.game?.persona} />}</span>
+        <span className="tv-topbar-mid">{score && <Scorebug score={score} persona={l.game?.persona} sport={l.game?.sport} league={l.game?.league} />}</span>
         {error && (
           <span className="hd-pop tv-offline" role="status"><Icon name="wifiOff" /> Reconnecting</span>
         )}

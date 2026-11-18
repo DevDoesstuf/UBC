@@ -335,8 +335,9 @@ function Scorebug({ s, rx, y, h, elRef }: { s: KioskScreen; rx: number; y: numbe
   const sc = s.score!;
   const live = sc.status === "live";
   const sub = sc.status === "final" ? "Final" : sc.period || (live ? "Live" : "Pre");
+  const label = `${sc.home} ${sc.homeScore}${sc.swapped ? " at " : ", "}${sc.away} ${sc.awayScore}, ${sc.clock}`;
   return (
-    <div ref={elRef} className="hk-abs hk-lift hk-scorebug hk-drop" style={{ right: 800 - rx, top: y, height: h, borderRadius: h / 2 }} aria-label={`${sc.home} ${sc.homeScore}, ${sc.away} ${sc.awayScore}, ${sc.clock}`}>
+    <div ref={elRef} className="hk-abs hk-lift hk-scorebug hk-drop" style={{ right: 800 - rx, top: y, height: h, borderRadius: h / 2 }} aria-label={label}>
       <i className="hk-bar" style={{ background: sc.homeColor ?? P.ink2 }} />
       <b className="hk-body hk-w700">{sc.homeShort || "HOME"}</b>
       <span className="hk-score hk-num hk-w700 hk-c90">{sc.homeScore}</span>

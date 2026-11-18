@@ -210,7 +210,7 @@ All JSON. Phones identify themselves with the `x-player-token` header they get f
 
 Strings sent to the kiosk are limited to Latin-1, because the firmware fonts are Latin-1.
 
-**v2 fields (optional, additive).** The box renderer also reads `palette`, `game`, `score` (scorebug), `cards` (every game for the scrolling picker; `tiles` stays the first 4), `roster` + `pot` + `calls` (lobby, "Call it!" moments), `volume`, `lockInMs`, `lockTotal`, `model`, `gemini`, `trades` (market), `winners`, `losers`, `lockYes` (result), `leaderboard`, `scorecard` (ended). The full list is at the top of `web/lib/kiosk.ts`; `web/test/kiosk.test.mts` checks both the v1 and v2 shapes.
+**v2 fields (optional, additive).** The box renderer also reads `palette`, `game`, `score` (scorebug), `cards` (every game for the scrolling picker; `tiles` stays the first 4), `roster` + `pot` + `calls` (lobby, "Call it!" moments), `volume`, `lockInMs`, `lockTotal`, `model`, `gemini`, `trades` (market), `winners`, `losers`, `lockYes` (result), `leaderboard`, `scorecard` (ended). The full list is at the top of `web/lib/kiosk.ts`; `web/test/kiosk.test.mts` checks both the v1 and v2 shapes. `score` is in drawing order (the box draws `home*` on the left): for "Away at Home" games (US leagues) the real away team is sent in `home*` with `swapped: true`, so every scorebug reads like the game card ("SF 0 0 DAL" under "49ers at Cowboys") without a firmware change. `palette.muted` is `#616D64` (4.5:1 or better on canvas, card and well; the firmware's built-in `#6C7A70` is 4.07:1 on canvas) and the firmware takes it as an override.
 
 ### Phone / watch API
 

@@ -7,7 +7,7 @@ import {
   Aurora, Avatar, Burst, GOLD_BURST, Icon, Kinetic, Mark, Roll, Wordmark, ordinal, useCoins, useFlip, useNewIds,
   useReplayClass, usd, usdShort, signedUsd, withAlpha, type IconName,
 } from "@/components/huddle";
-import { SIDE, SOLANA_ADDRESS, profitOf, ranked, type Lobby } from "./derive";
+import { SIDE, SOLANA_ADDRESS, profitOf, ranked, scoreSides, type Lobby } from "./derive";
 import { CodeTiles, Empty, InlineError, Money, SectionTitle, Sheet, cx, d } from "./ui";
 
 /** The server's lobby limit (lib/lobby.ts MAX_PLAYERS): a full lobby says so before anyone types a name. */
@@ -313,18 +313,19 @@ export function Header({ l, onMoney }: { l: Lobby; onMoney: () => void }) {
   const me = l.me!;
   const profit = profitOf(l);
   const s = l.game?.score;
+  const teams = scoreSides(l);
   const live = l.phase === "open" || (!!s && s.status === "live");
   return (
     <header className="ph-top">
       <div className="ph-top-in">
         <div className="ph-top-row">
-          {s ? (
-            <div className="ph-bug" role="group" aria-label={`${s.home} ${s.homeScore}, ${s.away} ${s.awayScore}${s.clock ? `, ${s.clock}` : ""}`}>
+          {s && teams ? (
+            <div className="ph-bug" role="group" aria-label={`${teams.label}${s.clock ? `, ${s.clock}` : ""}`}>
               <span className="ph-bug-teams" aria-hidden="true">
-                <span className="ph-team">{s.homeShort ?? s.home.slice(0, 3)}</span>
-                <Score n={s.homeScore} />
-                <Score n={s.awayScore} />
-                <span className="ph-team">{s.awayShort ?? s.away.slice(0, 3)}</span>
+                <span className="ph-team">{teams.left.short ?? teams.left.name.slice(0, 3)}</span>
+                <Score key="l" n={teams.left.score} />
+                <Score key="r" n={teams.right.score} />
+                <span className="ph-team">{teams.right.short ?? teams.right.name.slice(0, 3)}</span>
               </span>
               <span className="ph-bug-clock" aria-hidden="true">
                 {/* Same rule as the TV: before the clock starts (the pregame question) it is Pre-game, not live. */}
@@ -568,7 +569,7 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
   const mine = rows.find((p) => p.id === me.id);
   const rank = mine?.rank ?? 0;
   const tied = !!mine && rows.some((p) => p.id !== me.id && p.rank === mine.rank);
-  const s = l.game?.score;
+  const teams = scoreSides(l);
   const verdict = mine?.lead && profit > 0 ? "You won the room." : rank === 1 && tied && profit > 0 ? "Tied for the top." : profit > 0 ? "Up on the night." : profit < 0 ? "Cooked tonight." : "Broke even.";
   const pot = useRef<HTMLSpanElement>(null);
   const amount = useRef<HTMLDivElement>(null);
@@ -583,12 +584,12 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
     <div className="ph-stackgap">
       <section className="ph-ft hd-card" aria-labelledby="ft-title">
         <p id="ft-title" className="ph-kicker ph-center">Full time</p>
-        {s && (
-          <p className="ph-ft-score" aria-label={`${s.home} ${s.homeScore}, ${s.away} ${s.awayScore}`}>
-            <span className="ph-team big" aria-hidden="true">{s.homeShort ?? s.home}</span>
-            <span className="hd-num ph-score big hd-pop" aria-hidden="true">{s.homeScore}</span>
-            <span className="hd-num ph-score big hd-pop" style={d(90)} aria-hidden="true">{s.awayScore}</span>
-            <span className="ph-team big" aria-hidden="true">{s.awayShort ?? s.away}</span>
+        {teams && (
+          <p className="ph-ft-score" aria-label={teams.label}>
+            <span className="ph-team big" aria-hidden="true">{teams.left.short ?? teams.left.name}</span>
+            <span className="hd-num ph-score big hd-pop" aria-hidden="true">{teams.left.score}</span>
+            <span className="hd-num ph-score big hd-pop" style={d(90)} aria-hidden="true">{teams.right.score}</span>
+            <span className="ph-team big" aria-hidden="true">{teams.right.short ?? teams.right.name}</span>
           </p>
         )}
         <div className="ph-ft-rule" />

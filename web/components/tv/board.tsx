@@ -25,6 +25,7 @@ import {
 } from "@/components/huddle";
 import { money, payoutText, pctText, secsText, SIDE_LABEL, yesNo } from "./format";
 import { perDollar } from "@/components/phone/derive";
+import { awayFirst } from "@/lib/matchup";
 import { standings as rank, worthOf, type Standing } from "@/lib/standings";
 import { Sparkline, type Line } from "./Sparkline";
 
@@ -58,10 +59,11 @@ export function momentLabel(l: L, m: M): string | null {
 
 /* ================================================================ top bar */
 
-function TeamScore({ short, name, score, away }: { short: string; name: string; score: number; away?: boolean }) {
+/** One side of the scorebug; `right` mirrors it (score square on the inside). */
+function TeamScore({ short, name, score, right }: { short: string; name: string; score: number; right?: boolean }) {
   const beat = useReplayClass(score, "hd-beat");
   return (
-    <span className={`tv-team ${away ? "away" : ""}`}>
+    <span className={`tv-team ${right ? "away" : ""}`}>
       <span className="tv-team-name" title={name}>{short}</span>
       <span className={`hd-num tv-team-score ${beat}`}>
         <Roll text={String(score)} flash={false} duration={700} />
@@ -70,24 +72,32 @@ function TeamScore({ short, name, score, away }: { short: string; name: string; 
   );
 }
 
-/** Replay games: the scorebug pill (score squares roll and beat on a score, clock with the live dot). */
-export function Scorebug({ score, persona }: { score: Score; persona?: string }) {
+/**
+ * Replay games: the scorebug pill (score squares roll and beat on a score, clock with the live dot). US
+ * leagues put the away team first, like the game card ("49ers at Cowboys": SF on the left), soccer the home team.
+ */
+export function Scorebug({ score, persona, sport, league }: { score: Score; persona?: string; sport?: string | null; league?: string | null }) {
   const live = !!score.started && score.status !== "final";
   const period = persona === "nfl" && score.period ? `Q${score.period}` : null;
+  const at = awayFirst(sport, league);
+  const home = <TeamScore key="home" short={score.homeShort || score.home} name={score.home} score={score.homeScore} right={at} />;
+  const away = <TeamScore key="away" short={score.awayShort || score.away} name={score.away} score={score.awayScore} right={!at} />;
   return (
     <div
       className="hd-drop tv-scorebug"
       role="group"
-      aria-label={`${score.home} ${score.homeScore}, ${score.away} ${score.awayScore}, ${score.clock}`}
+      aria-label={at
+        ? `${score.away} ${score.awayScore} at ${score.home} ${score.homeScore}, ${score.clock}`
+        : `${score.home} ${score.homeScore}, ${score.away} ${score.awayScore}, ${score.clock}`}
     >
-      <TeamScore short={score.homeShort || score.home} name={score.home} score={score.homeScore} />
+      {at ? away : home}
       <span className="tv-clock">
         <span className="hd-num tv-clock-time">{period ? `${period} · ` : ""}{score.clock}</span>
         <span className="tv-clock-state">
           {score.status === "final" ? "Full time" : live ? (<><span className="live-dot" aria-hidden="true" />Replay</>) : "Pre-game"}
         </span>
       </span>
-      <TeamScore short={score.awayShort || score.away} name={score.away} score={score.awayScore} away />
+      {at ? home : away}
     </div>
   );
 }
@@ -377,6 +387,8 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
   const atLock = m.priceAtLock ?? m.yesCents / 100;
   const winShare = outcome === "yes" ? atLock : 1 - atLock;
   const pot = m.winners.reduce((a, w) => a + w.cents, 0);
+  const losers = m.losers ?? [];
+  const shown = compact ? 2 : 3;
   const bits = voided ? 0 : Math.min(48, 14 + m.winners.length * 6 + Math.round(pot / 500));
   const forecasts = [
     { id: "room", label: "Room at lock", p: atLock },
@@ -387,8 +399,6 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
   const miss = forecasts.map((f) => ({ id: f.id, d: Math.abs((outcome === "yes" ? 1 : 0) - f.p) }));
   const best = miss.length > 1 ? Math.min(...miss.map((x) => x.d)) : null;
   const closest = best !== null && miss.filter((x) => Math.abs(x.d - best) < 0.005).length === 1 ? miss.find((x) => x.d === best)?.id ?? null : null;
-  const losers = m.losers ?? [];
-  const shown = compact ? 2 : 3;
   return (
     <section className={`hd-zoom tv-stage-card tv-reveal ${outcome} ${voided ? "void" : ""} ${compact ? "compact" : ""}`} role="status" aria-label={voided ? "Market voided" : `Result: ${SIDE_LABEL[outcome]}`}>
       {voided ? (
@@ -430,19 +440,9 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
                   <span className="hd-num">{money(w.cents)} <span className="tv-paid">paid</span></span>
                 </p>
               ))}
+              {m.winners.length > shown && <p className="tv-more">+{m.winners.length - shown} more</p>}
               {m.winners.length === 0 && <p className="tv-empty">Nobody called it. Brutal.</p>}
             </div>
-            {!compact && forecasts.length > 0 && (
-              <div className="tv-reveal-card soft">
-                <p className="tv-reveal-card-h">Yes was priced at</p>
-                {forecasts.map((f) => (
-                  <p key={f.id} className="tv-forecast">
-                    <span className="grow">{f.label}</span>
-                    {closest === f.id && <span className="tv-closest">Closest</span>}
-                    <span className="hd-num">{pctText(f.p)}%</span>
-              {m.winners.length > shown && <p className="tv-more">+{m.winners.length - shown} more</p>}
-                  </p>
-                ))}
             <div className="tv-reveal-card">
               <p className="tv-reveal-card-h down"><Icon name="down" /> Cooked</p>
               {losers.slice(0, shown).map((w, i) => (
@@ -455,6 +455,16 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
               {losers.length > shown && <p className="tv-more">+{losers.length - shown} more</p>}
               {losers.length === 0 && <p className="tv-empty">Clean sweep.</p>}
             </div>
+            {!compact && forecasts.length > 0 && (
+              <div className="tv-reveal-card soft">
+                <p className="tv-reveal-card-h">Yes was priced at</p>
+                {forecasts.map((f) => (
+                  <p key={f.id} className="tv-forecast">
+                    <span className="grow">{f.label}</span>
+                    {closest === f.id && <span className="tv-closest">Closest</span>}
+                    <span className="hd-num">{pctText(f.p)}%</span>
+                  </p>
+                ))}
               </div>
             )}
           </div>
