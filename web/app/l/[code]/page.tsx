@@ -3,7 +3,7 @@
 // Light, trading-app layout: the question and its live price on top, the buy buttons in a dock at thumb reach.
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { AccountSlot } from "@/components/AccountSlot";
+import { Qr } from "@/components/Qr";
 import { Spark } from "@/components/Spark";
 import { HttpError, api, fmtClock, loadToken, saveToken, useNow, usePoll, usd, type LobbyData } from "@/components/client";
 import {
@@ -16,6 +16,7 @@ import { sharesForSpend } from "@/lib/lmsr";
 type Side = "yes" | "no";
 const SIDE: Record<Side, string> = { yes: "Yes", no: "No" };
 const ODDS = [1.5, 2, 3];
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/; // base58 public key
 
 export default function PhonePage() {
   const params = useParams<{ code: string }>();
@@ -28,6 +29,7 @@ export default function PhonePage() {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [payLink, setPayLink] = useState<{ url: string; cents: number } | null>(null);
   const [offerSide, setOfferSide] = useState<Side>("yes");
   const [offerOdds, setOfferOdds] = useState(2);
   const now = useNow(250);
@@ -210,7 +212,13 @@ export default function PhonePage() {
     no: sharesForSpend("no", amount / 100, m.yesShares, m.noShares, m.b),
   } : null;
   const coinbase = l.money.mode === "coinbase";
+  // Optional Solana Pay mode from the backend: deposits come back as a `solana:` link shown as a QR code,
+  // cash-out goes to a pasted address. Nothing here renders unless the server says money.mode === "solana".
+  const solana = (l.money.mode as string) === "solana";
   const realMoney = l.money.realMoney;
+  const payoutKind: "evm" | "solana" | null = solana ? "solana" : l.money.payouts === "onchain" ? "evm" : null;
+  const addressOk =
+    payoutKind === "solana" ? SOLANA_ADDRESS.test(address) : payoutKind === "evm" ? /^0x[0-9a-fA-F]{40}$/.test(address) : true;
   const showDock = open && mode !== "h2h";
   const live = !!m && (l.phase === "open" || l.phase === "locked" || l.phase === "result");
   const board = [...l.players].sort((a, b) => b.balance - a.balance);
@@ -218,9 +226,10 @@ export default function PhonePage() {
   const deposit = (c: number) =>
     act(async () => {
       const r = await api<{ url?: string; credited?: number }>(`/api/lobby/${code}/deposit`, { body: { cents: c }, token });
-      if (r.url) window.location.href = r.url;
+      if (r.url && r.url.startsWith("solana:")) setPayLink({ url: r.url, cents: c });
+      else if (r.url) window.location.href = r.url;
       return r;
-    }, (r) => (r.url ? "Opening checkout…" : `Added ${usd(r.credited ?? c)}`));
+    }, (r) => (r.url?.startsWith("solana:") ? "Scan or open the payment link" : r.url ? "Opening checkout…" : `Added ${usd(r.credited ?? c)}`));
 
   const buy = (side: Side) =>
     act(
@@ -239,7 +248,6 @@ export default function PhonePage() {
             <div className="k">Balance</div>
             <div className="v tnum"><Roll text={usd(me.balance)} tint={false} /></div>
           </div>
-          <AccountSlot name={me.name} />
         </div>
       </header>
 
@@ -377,7 +385,18 @@ export default function PhonePage() {
                   </button>
                 ))}
               </div>
-              {coinbase && (
+              {solana && payLink && (
+                <div className="paylink" role="group" aria-label={`Pay ${usd(payLink.cents)}`}>
+                  <span className="qr"><Qr text={payLink.url} size={132} /></span>
+                  <div className="paylink-body">
+                    <b>Add {usd(payLink.cents)}</b>
+                    <p className="hint" style={{ marginTop: 2 }}>Scan with your phone’s wallet app, or open it here.</p>
+                    <a className="btn btn-ink" href={payLink.url}>Open in wallet</a>
+                    <button className="btn-text" onClick={() => setPayLink(null)}>Done</button>
+                  </div>
+                </div>
+              )}
+              {(coinbase || solana) && (
                 <button
                   className="btn-text btn-block"
                   style={{ marginTop: 6 }}
@@ -391,24 +410,35 @@ export default function PhonePage() {
                 </button>
               )}
               <p className="hint">
-                {!coinbase && "Demo money for the party. Nothing real is charged."}
+                {!coinbase && !solana && "Demo money for the party. Nothing real is charged."}
+                {solana && "Pay from any wallet app; your balance shows in US dollars."}
                 {coinbase && !realMoney && "Test mode: no real money moves."}
                 {coinbase && realMoney && "You pay by card or bank; your balance is in US dollars."}
               </p>
             </>
           )}
           {(me.balance > 0 || l.phase === "ended") && <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-            {l.money.payouts === "onchain" && (
+            {payoutKind && (
               <label className="field" htmlFor="payout">
-                Payout address
-                <input id="payout" name="payout-address" value={address} onChange={(e) => setAddress(e.target.value.trim())} placeholder="0x…" autoComplete="off" spellCheck={false} />
+                {payoutKind === "solana" ? "Your Solana address" : "Payout address"}
+                <input
+                  id="payout"
+                  name="payout-address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value.trim())}
+                  placeholder={payoutKind === "solana" ? "Paste your address…" : "0x…"}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-invalid={address.length > 0 && !addressOk}
+                />
+                {address.length > 0 && !addressOk && <span className="err-text">That doesn’t look like a {payoutKind === "solana" ? "Solana" : "Base"} address. Paste it again.</span>}
               </label>
             )}
             <button
               className={l.phase === "ended" ? "btn-green btn-block" : "btn-text btn-block"}
-              disabled={busy || me.balance <= 0 || (l.money.payouts === "onchain" && !/^0x[0-9a-fA-F]{40}$/.test(address))}
+              disabled={busy || me.balance <= 0 || !addressOk}
               onClick={() => {
-                if (!window.confirm(`Cash out ${usd(me.balance)}${l.money.payouts === "onchain" ? ` to ${address}` : ""}?`)) return;
+                if (!window.confirm(`Cash out ${usd(me.balance)}${payoutKind ? ` to ${address}` : ""}?`)) return;
                 act(
                   () => api<{ cents: number; explorer?: string }>(`/api/lobby/${code}/cashout`, { body: { address }, token }),
                   (r) => `Cashed out ${usd(r.cents)}`,
