@@ -18,7 +18,8 @@
 // The pregame snapshot (prices one minute before kickoff) calibrates the pricing models and is the fallback.
 //
 // Register new files in lib/replay/timeline.ts (FILES) and config/games.json. The app never calls ESPN at runtime.
-import { writeFile, mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,7 +44,25 @@ const LEAGUES = {
 
 // ---------------------------------------------------------------- http
 
+// REPLAY_CACHE=<dir> keeps every response on disk (rebuild offline, or iterate on the text rules without
+// asking ESPN and Gemini again). Off by default: a normal run always fetches fresh data.
+const CACHE = process.env.REPLAY_CACHE || "";
+
 async function getJson(url, tries = 3) {
+  const file = CACHE ? join(CACHE, `${createHash("sha1").update(url).digest("hex")}.json`) : "";
+  if (file) {
+    try {
+      return JSON.parse(await readFile(file, "utf8"));
+    } catch {
+      /* not cached yet */
+    }
+  }
+  const got = await fetchJson(url, tries);
+  if (file) await mkdir(CACHE, { recursive: true }).then(() => writeFile(file, JSON.stringify(got)));
+  return got;
+}
+
+async function fetchJson(url, tries) {
   let last;
   for (let i = 0; i < tries; i++) {
     try {
@@ -75,13 +94,112 @@ async function pool(items, n, fn) {
 
 // ---------------------------------------------------------------- helpers
 
-const clean = (s) => String(s ?? "")
-  .replace(/\((No Huddle, )?Shotgun\)\s*/g, "")
-  .replace(/\(No Huddle\)\s*/g, "")
-  .replace(/\s*\[[^\]]*\]/g, "")
-  .replace(/\s+/g, " ")
-  .trim()
-  .slice(0, 160);
+// ---- text: every line we write is read on the TV, spoken by the announcer and drawn by the kiosk box (Latin-1
+// fonts, captions cut at 180 characters), so it is cleaned of feed boilerplate, kept to Latin-1 and trimmed at a
+// sentence (or, failing that, word) boundary. Never cut mid-word.
+
+/** Longest line we store (a "TOUCHDOWN! " prefix included); captions add a few characters at most. */
+export const MAX_TEXT = 150;
+
+const SPECIAL = { "Ł": "L", "ł": "l", "Đ": "D", "đ": "d", "Ħ": "H", "ħ": "h", "ı": "i", "Œ": "OE", "œ": "oe", "ẞ": "SS", "Ŋ": "N", "ŋ": "n" };
+
+/** Latin-1 only, the same rules as lib/boxText.ts boxSafe (accents outside Latin-1 are stripped: Ć -> C). */
+export function latin1(s) {
+  let out = "";
+  for (const ch of String(s ?? "").replace(/[‘’‚′]/g, "'").replace(/[“”„″]/g, '"').replace(/[–—−]/g, "-").replace(/…/g, "...")) {
+    const c = ch.codePointAt(0) ?? 0;
+    if ((c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff)) out += ch;
+    else if (c < 0x100) out += c === 0x09 || c === 0x0a ? " " : "";
+    else if (SPECIAL[ch]) out += SPECIAL[ch];
+    else {
+      const base = ch.normalize("NFD").replace(/[̀-ͯ]/g, "");
+      if (base && [...base].every((b) => b.charCodeAt(0) >= 0x20 && b.charCodeAt(0) <= 0xff)) out += base;
+    }
+  }
+  return out;
+}
+
+/** Split into sentences without breaking initials ("D.Prescott") or "Jr. makes". */
+export function sentences(s) {
+  return String(s).split(/(?<=[.!?])\s+(?=[A-Z0-9("'*])/).filter(Boolean);
+}
+
+/**
+ * Trim to `max` characters: whole sentences while they fit; when the first sentence (or the next one, while we
+ * still have less than half the room) is too long, cut it at a word boundary and end it with "...".
+ */
+export function fitText(s, max = MAX_TEXT) {
+  const t = String(s ?? "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  let out = "";
+  for (const sen of sentences(t)) {
+    const next = out ? `${out} ${sen}` : sen;
+    if (next.length <= max) {
+      out = next;
+      continue;
+    }
+    if (out.length < max / 2) {
+      const room = max - (out ? out.length + 1 : 0) - 3;
+      const cut = sen.slice(0, room + 1);
+      const at = cut.lastIndexOf(" ");
+      const head = (at > 0 ? cut.slice(0, at) : cut.slice(0, room)).replace(/[\s,;:(-]+$/, "");
+      out = `${out ? `${out} ` : ""}${head}...`;
+    }
+    break;
+  }
+  return out;
+}
+
+/** A player name in the NFL feed: "D.Prescott", "A.St. Brown", "J.Smith-Njigba". */
+const NAME = String.raw`[A-Z][A-Za-z'-]*\.(?:St\. )?[A-Z][A-Za-z'-]+`;
+const NAME_LIST = String.raw`${NAME}(?:\s*(?:;|,|and)\s*${NAME})*`;
+
+/** One ESPN play-by-play line, readable: no formations, tacklers, snappers, injury notes or enforcement spots. */
+export function tidyPlay(s) {
+  let t = latin1(s)
+    .replace(/\(\d{1,2}:\d{2}(?:\s*-\s*\d\w*(?: \w+)?)?\)\s*/g, "") // "(14:56 - 1st)" clock stamps
+    .replace(/\((?:No Huddle, )?Shotgun\)\s*/gi, "")
+    .replace(/\(No Huddle(?:, Shotgun)?\)\s*/gi, "")
+    .replace(/\((?:Punt|Field Goal|Kick|Pistol|Wildcat)(?: formation)?\)\s*/gi, "")
+    // Replay review: "<ruling>.<Team> challenged the ... ruling, and the play was REVERSED.<new ruling>" keeps the
+    // call that stood.
+    .replace(/^.*?\.\s*[A-Z][A-Za-z. ]+? challenged the [^,]+?, and the play was REVERSED\.\s*/, "After review: ")
+    .replace(/\.\s*[A-Z][A-Za-z. ]+? challenged the [^,]+?, and the (?:play|ruling) (?:was|is) (?:Upheld|confirmed|stands)\.?/i, ". The ruling stands after review.")
+    .replace(/\s*\[[^\]]*\]/g, "") // pressure / hurry notes
+    .replace(/\*\*[^*]*?(?:\*\*|$)/g, "") // "** Injury Update: ..."
+    .replace(new RegExp(String.raw`\s*\((?:sack split by )?${NAME_LIST}\)`, "g"), "") // tacklers
+    .replace(new RegExp(String.raw`,?\s*(?:Center|Holder)-${NAME}`, "g"), "")
+    .replace(new RegExp(String.raw`(?:[A-Z]{2,3}-)?${NAME} reported in as eligible\.\s*`, "g"), "")
+    .replace(new RegExp(String.raw`\s*[A-Z]{2,3}-${NAME} was injured during the play\.?`, "g"), "")
+    .replace(/([a-z0-9)])\.(?=[A-Z]{2}|Penalty)/g, "$1. ") // "...yards.PENALTY on"
+    .replace(new RegExp(String.raw`\s*Penalty on [A-Z]{2,3}-${NAME}, [^,.]+(?:\.[^,.]+)*, declined\.?`, "g"), "")
+    .replace(new RegExp(String.raw`PENALTY on ([A-Z]{2,3})-(${NAME}), ([^,]+), (\d+) yards?, enforced (?:at|between) [^.]*?( - No Play)?\.`, "gi"),
+      (_m, team, who, foul, yds, noPlay) => `Penalty on ${who} (${team}), ${foul.toLowerCase()}, ${yds} yards${noPlay ? ", no play" : ""}.`)
+    .replace(/TWO-POINT CONVERSION ATTEMPT\. .*?ATTEMPT (SUCCEEDS|FAILS)\.?\s*/g, (_m, r) => (r === "SUCCEEDS" ? "Two-point try is good. " : "Two-point try fails. "))
+    .replace(/\b(pushed|ran|sacked|stepped|forced) ob\b/g, "$1 out of bounds")
+    .replace(new RegExp(String.raw`\bby ([A-Z]{2,3})-(${NAME})`, "g"), "by $2 ($1)")
+    .replace(/\s+'s\b/g, "'s") // "Max Strus 's"
+    .replace(/\s+([.,;!?])/g, "$1")
+    .replace(/,\s*\./g, ".")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (t && !/[.!?]$/.test(t)) t += ".";
+  return t;
+}
+
+/** Soccer commentary: drop where the ball went in the goal mouth and the set-piece tail, keep who and how. */
+export function tidySoccer(s) {
+  let t = latin1(s)
+    .replace(/ (?:to|in) the (?:(?:bottom|top|high|low) )?(?:(?:left|right|centre|center) )?(?:corner|of the goal)\b/g, "")
+    .replace(/ following a (?:set piece situation|fast break|corner)\b/g, "")
+    .replace(/\s+([.,;!?])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (t && !/[.!?]$/.test(t)) t += ".";
+  return t;
+}
+
+const clean = (s) => tidyPlay(s);
 const ms = (iso) => (iso ? Date.parse(iso) : NaN);
 const clockSecs = (display) => {
   const m = /^(\d{1,2}):(\d{2})/.exec(String(display ?? ""));
@@ -370,7 +488,7 @@ function soccerEvents(sum, teams) {
     }
     if (/Yellow Card|Red Card/i.test(type)) {
       const player = /^(.+?) \(/.exec(text)?.[1];
-      raw.push({ ...base, type: "card", team, player, data: { color: /Red/i.test(type) ? "red" : "yellow" }, weight: 1, dwell: 2500, text: `${/Red/i.test(type) ? "RED card" : "Yellow card"}: ${text}` });
+      raw.push({ ...base, type: "card", team, player, data: { color: /Red/i.test(type) ? "red" : "yellow" }, weight: 1, dwell: 2500, text: `${/Red/i.test(type) ? "RED card" : "Yellow card"}: ${tidySoccer(text)}` });
       continue;
     }
     if (type === "Substitution") {
@@ -390,7 +508,7 @@ function soccerEvents(sum, teams) {
 }
 
 function shortSoccer(t) {
-  return String(t).replace(/^Goal!\s*/, "").replace(/\s+/g, " ").slice(0, 150);
+  return tidySoccer(String(t).replace(/^Goal!\s*/, ""));
 }
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -473,7 +591,7 @@ function nbaEvents(sum, teams) {
       const ball = next ? idToAbbr[next.team?.id] : team;
       // Featured timeouts say who has the ball (the engine asks "do they score next?") and leave room to trade.
       const featured = pickTimeouts.has(i) && !!ball;
-      raw.push({ type: "timeout", clock, team, score, wall, ...(featured ? { data: { ball } } : {}), dwell: featured ? 11000 : 0, weight: 0.8, text: `${clean(p.text)}.` });
+      raw.push({ type: "timeout", clock, team, score, wall, ...(featured ? { data: { ball } } : {}), dwell: featured ? 11000 : 0, weight: 0.8, text: clean(p.text) });
       return;
     }
   });
@@ -679,10 +797,10 @@ export async function buildGame(spec) {
     if (e.minute !== undefined && L.sport === "soccer") out.minute = e.minute;
     if (e.clock !== undefined && L.sport !== "soccer") out.clock = e.clock;
     if (e.team) out.team = e.team;
-    if (e.player) out.player = e.player;
+    if (e.player) out.player = latin1(e.player);
     if (e.data && Object.keys(e.data).length) out.data = Object.fromEntries(Object.entries(e.data).filter(([, v]) => v !== undefined));
     if (e.score) out.score = e.score;
-    if (e.text) out.text = e.text;
+    if (e.text) out.text = fitText(latin1(e.text));
     if (Number.isFinite(e.wall)) out.wall = new Date(e.wall).toISOString();
     return out;
   });
@@ -701,8 +819,8 @@ export async function buildGame(spec) {
     real: true,
     source: { provider: "ESPN", event: spec.event, league: spec.league, url: `https://www.espn.com/${L.sport === "soccer" ? "soccer" : L.sport}/game/_/gameId/${spec.event}`, fetchedAt: new Date().toISOString() },
     venue: teams.venue,
-    home: { name: teams.home.name, short: teams.home.short, color: teams.home.color, nick: short(teams.home) },
-    away: { name: teams.away.name, short: teams.away.short, color: teams.away.color, nick: short(teams.away) },
+    home: { name: latin1(teams.home.name), short: teams.home.short, color: teams.home.color, nick: latin1(short(teams.home)) },
+    away: { name: latin1(teams.away.name), short: teams.away.short, color: teams.away.color, nick: latin1(short(teams.away)) },
     final: teams.final,
     startsAt: kickoff,
     durationMs,
