@@ -412,7 +412,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
     if (l.phase === "open") {
       return {
         ...base, screen: "market", color: "green",
-        title: String(m.questionId).startsWith("moment") ? "Called it!" : `Question ${m.qIndex + 1} of ${total}`,
+        title: String(m.questionId).startsWith("moment") ? "Called it!" : l.replay ? `Question ${m.qIndex + 1}` : `Question ${m.qIndex + 1} of ${total}`,
         subtitle: "Buy YES or NO on your phone. A winning share pays $1",
         lockIn: Math.max(0, Math.ceil((m.lockAt - Date.now()) / 1000)),
         buttons: [{ id: "lock", label: "Lock now", style: "plain" }],

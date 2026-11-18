@@ -196,7 +196,8 @@ export function MarketStage({ l, m, clock, compact = false, chart }: { l: L; m: 
             <span key="open" className="hd-pop tv-badge live"><span className="live-dot" aria-hidden="true" /> Live question</span>
           )}
           <span className="hd-fade" style={delay(200)}>
-            Question {m.qIndex + 1}{l.questionCount > m.qIndex ? ` of ${l.questionCount}` : ""}
+            {/* Replay games ask as the plays come (and calls add more): no fixed total, same as the phone. */}
+            Question {m.qIndex + 1}{l.game?.kind !== "replay" && l.questionCount > m.qIndex ? ` of ${l.questionCount}` : ""}
           </span>
           {!compact && <span className="hd-fade" style={delay(240)}>{MODE_LABEL[m.mode]}</span>}
           <span className="hd-fade tnum" style={delay(260)}>
@@ -340,7 +341,13 @@ export function OffersCard({ m, compact = false, locked = false }: { m: M; compa
       ))}
     </ul>
   ) : (
-    <p className="tv-empty">{locked ? "Trading is closed. Unmatched stakes went back." : "No offers yet. Make one on your phone."}</p>
+    <p className="tv-empty">
+      {locked
+        ? "Trading is closed. Unmatched stakes went back."
+        : (m.offers ?? []).some((o) => o.filled > 0)
+          ? "Every offer is matched. Post another on your phone."
+          : "No offers yet. Make one on your phone."}
+    </p>
   );
   if (compact) return <div className="tv-offers compact" aria-label="Offers on the table">{list}</div>;
   return (
@@ -634,7 +641,9 @@ export function CaptionBar({ text, id, speaking, source }: { text: string | null
 
 /** Brier bars: Room (brand), Model (ink), Gemini (hatched, ink ring). Shorter bar wins; the best gets a crown. */
 export function ScorecardPanel({ card, compact = false }: { card: Card; compact?: boolean }) {
-  const SCALE = 0.36; // a coin flip (0.25) sits at about 70%
+  // A coin flip (0.25) sits at about 70% of the track; worse scores widen the scale so bars never clamp to a fake tie.
+  const worst = Math.max(0, ...[card.room, card.model, card.gemini].filter((v): v is number => typeof v === "number"));
+  const SCALE = Math.max(0.36, worst * 1.05);
   const bars = [
     { id: "room", label: "Room", v: card.room },
     { id: "model", label: "Model", v: card.model },
@@ -727,6 +736,11 @@ export function EndStage({ l, standings }: { l: L; standings: Player[] }) {
                 <span className="hd-num">{money(worth(p))}</span>
               </li>
             ))}
+            {standings.length > 7 && (
+              <li className="hd-rise tv-end-more" style={delay(1000 + 4 * 90)}>
+                <span className="grow">+{standings.length - 7} more on the phones&rsquo; board</span>
+              </li>
+            )}
           </ol>
         )}
         {standings.length === 0 && <p className="tv-empty">Nobody played this time.</p>}
