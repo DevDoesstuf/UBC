@@ -1,5 +1,15 @@
 import type { Side } from "./lmsr";
-export type { Side };
+import type { Persona } from "./announcer";
+import type { GeminiGameConfig, GeminiRef, GeminiSnapshot } from "./gemini";
+import type { ScoreEntry } from "./scorecard";
+import type { MatchedPair } from "./modes";
+import type { ReplayRun } from "./replay/run";
+import type { GeminiHint } from "./replay/types";
+export type { Side, Persona, GeminiRef, ScoreEntry, MatchedPair };
+
+/** How a question is traded. market = LMSR (default), pool = pari-mutuel pot, h2h = offers between players. */
+export type MarketMode = "market" | "pool" | "h2h";
+export const MARKET_MODES: MarketMode[] = ["market", "pool", "h2h"];
 
 /** Lobby phases. The kiosk screen, phone page and watch page are all views of this one field. */
 export type Phase = "lobby" | "open" | "locked" | "result" | "ended";
@@ -16,6 +26,10 @@ export interface Question {
   resolveAt?: number | null;
   /** Known outcome of the clip. If set, the market resolves itself at resolveAt. If null, the host taps it. */
   answer?: Side | null;
+  /** Model probability of YES (0..1). The LMSR opens at this price instead of 50/50 (clamped to 5..95%). */
+  prior?: number | null;
+  /** Comparable Gemini contract: event ticker and the contract code that means YES (e.g. "DAL"). */
+  gemini?: { event: string; contract: string } | null;
 }
 
 export interface Game {
@@ -27,6 +41,16 @@ export interface Game {
   youtubeId: string;
   b?: number;
   questions: Question[];
+  /** clip (default): YouTube clip + configured questions. replay: timeline + engine-written questions. */
+  kind?: "clip" | "replay";
+  /** Replay timeline id (config/replays/*.json), for kind=replay. */
+  replay?: string;
+  /** Default trading mode for lobbies of this game (market if unset). */
+  mode?: MarketMode;
+  /** Announcer persona for captions (nfl | soccer | calm). */
+  persona?: Persona;
+  /** Gemini Prediction Markets mapping for the game. */
+  gemini?: GeminiGameConfig;
 }
 
 export interface Player {
@@ -79,6 +103,51 @@ export interface Market {
   outcome: Side | null;
   payouts: Record<string, number>; // cents
   resolvedAt: number | null;
+  /** Trading mode (missing = market). */
+  mode?: MarketMode;
+  /** Model YES probability the market opened at (null/missing = no model, opened at 50/50). */
+  model?: number | null;
+  /** Gemini's comparable YES quote (refreshed while open, frozen at lock). */
+  gemini?: GeminiRef | null;
+  /** How to find the Gemini quote again: a hint for replay questions, or a fixed contract for clip questions. */
+  geminiKey?: { hint?: GeminiHint; yesTeam?: string; event?: string; contract?: string } | null;
+  /** YES price when trading locked (the room's forecast for the scorecard). */
+  priceAtLock?: number | null;
+  /** Pool mode: cents staked per side, and per player. */
+  pool?: { yes: number; no: number };
+  stakes?: Record<string, { yes: number; no: number }>;
+  /** Head-to-head mode: offers and matched pairs. */
+  offers?: Offer[];
+  pairs?: MatchedPair[];
+  /** Resolved as void: every stake refunded. */
+  voided?: boolean;
+  voidReason?: string | null;
+  /** Where the question came from. */
+  source?: { kind: "replay"; templateId: string; key: string; rationale: string } | { kind: "clip" };
+}
+
+export interface Offer {
+  id: string;
+  /** Maker player id. */
+  by: string;
+  name: string;
+  side: Side;
+  /** Maker stake in cents. */
+  cents: number;
+  /** Maker stake matched so far. */
+  filled: number;
+  /** Decimal odds for the maker's side (1.01..50). */
+  odds: number;
+  open: boolean;
+  at: number;
+}
+
+export interface Caption {
+  id: number;
+  at: number;
+  text: string;
+  /** Lobby event kind it narrates. */
+  kind?: string;
 }
 
 export interface LobbyEvent {
@@ -101,7 +170,7 @@ export interface DepositRecord {
   playerId: string;
   cents: number;
   at: number;
-  source: "demo" | "coinbase";
+  source: "demo" | "coinbase" | "solana";
   ref?: string;
 }
 
@@ -136,4 +205,14 @@ export interface Lobby {
   withdrawals: WithdrawalRecord[];
   /** House profit/loss in cents across resolved markets: volume in minus payouts out. */
   housePnl: number;
+  /** Trading mode for new questions (missing = the game's default, else market). */
+  mode?: MarketMode;
+  /** Announcer lines, newest last (about 10 kept). */
+  captions?: Caption[];
+  /** Resolved questions for the room / model / Gemini scorecard. */
+  scoreEntries?: ScoreEntry[];
+  /** Replay games: the running game clock and question engine state. */
+  replay?: ReplayRun;
+  /** Latest Gemini quotes for this game (copied in from the 30 s cache). */
+  gemini?: GeminiSnapshot | null;
 }

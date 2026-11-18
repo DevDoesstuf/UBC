@@ -1,11 +1,13 @@
 {
-  "_help": "One entry per game tile on the kiosk (the first 4 are shown). Adding a game is adding an entry here, not code. Set live=true to make a tile tappable. youtubeId is the 11 characters after v= in a YouTube link. All times are seconds into the video: trading opens when the host starts a question (the video jumps to startAt), locks automatically at lockAt, and if answer is set to \"yes\" or \"no\" it resolves itself at resolveAt; otherwise the host taps the result on the kiosk. b is the LMSR liquidity: smaller = jumpier prices; the house can lose at most b x ln2 dollars per question (about $6.93 at b=10).",
+  "_help": "One entry per game tile on the kiosk (the first 4 are shown). Adding a game is adding an entry here, not code. Set live=true to make a tile tappable. kind: \"clip\" (default) = a YouTube clip with the questions written below; \"replay\" = a game timeline from config/replays (replay = its id) where the question engine writes and resolves the questions as the game plays. Clip times are seconds into the video: trading opens when the host starts a question (the video jumps to startAt), locks automatically at lockAt, and if answer is set to \"yes\" or \"no\" it resolves itself at resolveAt; otherwise the host taps the result on the kiosk. prior (0..1, optional) = model probability of YES: the market opens at that price instead of 50/50 (clamped to 5..95%). gemini (optional): on a game, { event: <Gemini ticker base>, home, away } compares replay questions with Gemini Prediction Markets; on a clip question, { event: <full event ticker>, contract: <contract code meaning YES> }. mode (optional): market (LMSR, default), pool (winners split the pot) or h2h (players make and take offers). persona: nfl | soccer | calm (announcer voice). b is the LMSR liquidity: smaller = jumpier prices; the house can lose at most b x ln(1/p) dollars per question when it opens at prior p (b x ln2 = $6.93 at 50/50, b=10).",
   "games": [
     {
       "id": "football",
       "title": "Football",
       "subtitle": "4th quarter: defense on the field",
       "live": true,
+      "kind": "clip",
+      "persona": "nfl",
       "color": "#1d9e75",
       "youtubeId": "PASTE_YOUTUBE_ID",
       "b": 10,
@@ -17,7 +19,8 @@
           "startAt": 0,
           "lockAt": 45,
           "resolveAt": 60,
-          "answer": null
+          "answer": null,
+          "prior": 0.05
         },
         {
           "id": "td",
@@ -26,9 +29,71 @@
           "startAt": 60,
           "lockAt": 100,
           "resolveAt": 130,
-          "answer": null
+          "answer": null,
+          "prior": 0.22
         }
       ]
+    },
+    {
+      "id": "nfl-replay",
+      "title": "Titans at Cowboys",
+      "subtitle": "Full game replay, live questions",
+      "live": true,
+      "kind": "replay",
+      "replay": "replay-ten-dal",
+      "persona": "nfl",
+      "color": "#003594",
+      "youtubeId": "",
+      "b": 10,
+      "gemini": {
+        "event": "NFL-2611221800-TEN-DAL",
+        "home": "DAL",
+        "away": "TEN",
+        "snapshot": {
+          "asOf": "2026-11-16T18:07:25.241Z",
+          "events": [
+            {
+              "ticker": "NFL-2611221800-TEN-DAL-M",
+              "title": "Tennessee vs Dallas",
+              "contracts": [
+                { "ticker": "DAL", "label": "Dallas", "bestBid": "0.79", "bestAsk": "0.80", "lastTradePrice": "0.80" },
+                { "ticker": "TEN", "label": "Tennessee", "bestBid": "0.20", "bestAsk": "0.21" }
+              ]
+            },
+            {
+              "ticker": "NFL-2611221800-TEN-DAL-T",
+              "title": "Tennessee vs Dallas: Total Points",
+              "contracts": [
+                { "ticker": "O53", "label": "More than 53.5 points scored", "bestBid": "0.50", "bestAsk": "0.60" }
+              ]
+            }
+          ]
+        }
+      },
+      "questions": []
+    },
+    {
+      "id": "soccer-replay",
+      "title": "Portugal v Spain",
+      "subtitle": "Full match replay, live questions",
+      "live": true,
+      "kind": "replay",
+      "replay": "replay-por-esp",
+      "persona": "soccer",
+      "color": "#C8102E",
+      "youtubeId": "",
+      "b": 10,
+      "questions": []
+    },
+    {
+      "id": "tennis",
+      "title": "Tennis",
+      "subtitle": "Match point rally",
+      "live": false,
+      "color": "#ba7517",
+      "youtubeId": "",
+      "b": 10,
+      "questions": []
     },
     {
       "id": "basketball",
@@ -46,16 +111,6 @@
       "subtitle": "Penalty shootout",
       "live": false,
       "color": "#378add",
-      "youtubeId": "",
-      "b": 10,
-      "questions": []
-    },
-    {
-      "id": "tennis",
-      "title": "Tennis",
-      "subtitle": "Match point rally",
-      "live": false,
-      "color": "#ba7517",
       "youtubeId": "",
       "b": 10,
       "questions": []

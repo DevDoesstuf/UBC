@@ -1,0 +1,295 @@
+{
+ "trained": true,
+ "source": "StatsBomb open data (github.com/statsbomb/open-data): FIFA World Cup 2022 (64 matches); FIFA World Cup 2018 (64 matches); UEFA Euro 2024 (51 matches); UEFA Euro 2020 (51 matches); Copa America 2024 (32 matches); La Liga 2015/16 (380 matches); Premier League 2015/16 (380 matches); Serie A 2015/16 (380 matches); Bundesliga 2015/16 (34 matches); Ligue 1 2015/16 (377 matches)",
+ "generatedAt": "2026-11-16T08:02:33+00:00",
+ "script": "ml/train_soccer.py",
+ "matches": 1813,
+ "penalty": {
+  "base_rate": 0.7405,
+  "attempts": 501,
+  "scored": 371,
+  "shrinkage_k": 20,
+  "note": "in-play penalties only (shootouts excluded)",
+  "takers_in_sample": {
+   "Cristiano Ronaldo dos Santos Aveiro": {
+    "attempts": 16,
+    "scored": 11
+   },
+   "Lionel Andrés Messi Cuccittini": {
+    "attempts": 13,
+    "scored": 7
+   },
+   "Harry Kane": {
+    "attempts": 12,
+    "scored": 10
+   },
+   "Neymar da Silva Santos Junior": {
+    "attempts": 8,
+    "scored": 6
+   },
+   "Antonio Candreva": {
+    "attempts": 8,
+    "scored": 6
+   },
+   "Youssef El-Arabi": {
+    "attempts": 7,
+    "scored": 7
+   },
+   "Troy Deeney": {
+    "attempts": 7,
+    "scored": 6
+   },
+   "Josip Iličić": {
+    "attempts": 7,
+    "scored": 7
+   },
+   "Riyad Mahrez": {
+    "attempts": 6,
+    "scored": 4
+   },
+   "Jamie Vardy": {
+    "attempts": 6,
+    "scored": 5
+   },
+   "Paulo Bruno Exequiel Dybala": {
+    "attempts": 6,
+    "scored": 6
+   },
+   "Fábio Henrique Tavares": {
+    "attempts": 6,
+    "scored": 6
+   },
+   "Zlatan Ibrahimović": {
+    "attempts": 6,
+    "scored": 5
+   },
+   "Gylfi Þór Sigurðsson": {
+    "attempts": 5,
+    "scored": 4
+   },
+   "Antoine Griezmann": {
+    "attempts": 5,
+    "scored": 4
+   },
+   "Kevin Gameiro": {
+    "attempts": 5,
+    "scored": 4
+   },
+   "Jonathan Viera Ramos": {
+    "attempts": 5,
+    "scored": 4
+   },
+   "Aritz Aduriz Zubeldia": {
+    "attempts": 5,
+    "scored": 3
+   },
+   "Luis Alberto Suárez Díaz": {
+    "attempts": 5,
+    "scored": 3
+   },
+   "Sergio Leonel Agüero del Castillo": {
+    "attempts": 5,
+    "scored": 4
+   },
+   "Domenico Berardi": {
+    "attempts": 5,
+    "scored": 3
+   },
+   "Andy Delort": {
+    "attempts": 5,
+    "scored": 4
+   },
+   "Thomas Mangani": {
+    "attempts": 5,
+    "scored": 3
+   },
+   "Wissam Ben Yedder": {
+    "attempts": 5,
+    "scored": 2
+   },
+   "Hatem Ben Arfa": {
+    "attempts": 5,
+    "scored": 5
+   },
+   "Benjamin Moukandjo Bilé": {
+    "attempts": 5,
+    "scored": 5
+   },
+   "Marko Arnautović": {
+    "attempts": 4,
+    "scored": 4
+   },
+   "Rubén Castro Martín": {
+    "attempts": 4,
+    "scored": 3
+   },
+   "Saúl Berjón Pérez": {
+    "attempts": 4,
+    "scored": 3
+   },
+   "Yohan Cabaye": {
+    "attempts": 4,
+    "scored": 3
+   },
+   "Andrea Belotti": {
+    "attempts": 4,
+    "scored": 4
+   },
+   "Luca Toni": {
+    "attempts": 4,
+    "scored": 3
+   },
+   "Robert Lewandowski": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Kylian Mbappé Lottin": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Bruno Miguel Borges Fernandes": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Luka Modrić": {
+    "attempts": 3,
+    "scored": 1
+   },
+   "Romelu Lukaku Menama": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Borja González Tomás": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Francisco Alcácer García": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Bruno Soriano Llido": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Roberto Trashorras Gayoso": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Mark Noble": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Giampaolo Pazzini": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Eder Citadin Martins": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Alberto Paloschi": {
+    "attempts": 3,
+    "scored": 1
+   },
+   "Valter Birsa": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Alessio Cerci": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Gonzalo Gerardo Higuaín": {
+    "attempts": 3,
+    "scored": 3
+   },
+   "Ciro Immobile": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Maximiliano Gastón López": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Jerry Uche Mbakogu": {
+    "attempts": 3,
+    "scored": 1
+   },
+   "Mattia Destro": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Alexandre Lacazette": {
+    "attempts": 3,
+    "scored": 2
+   },
+   "Martin Braithwaite Christensen": {
+    "attempts": 3,
+    "scored": 2
+   }
+  },
+  "career": {
+   "_note": "Approximate public career tallies (club + country, shootouts excluded), hand-entered; used only through empirical-Bayes shrinkage toward the base rate.",
+   "Ronaldo": {
+    "attempts": 205,
+    "scored": 172,
+    "aliases": [
+     "Cristiano Ronaldo",
+     "C. Ronaldo",
+     "Cristiano Ronaldo dos Santos Aveiro"
+    ]
+   },
+   "Messi": {
+    "attempts": 141,
+    "scored": 110,
+    "aliases": [
+     "Lionel Messi",
+     "L. Messi",
+     "Lionel Andrés Messi Cuccittini"
+    ]
+   },
+   "Kane": {
+    "attempts": 98,
+    "scored": 87,
+    "aliases": [
+     "Harry Kane",
+     "H. Kane"
+    ]
+   },
+   "Lewandowski": {
+    "attempts": 104,
+    "scored": 93,
+    "aliases": [
+     "Robert Lewandowski",
+     "R. Lewandowski"
+    ]
+   },
+   "Bruno Fernandes": {
+    "attempts": 75,
+    "scored": 66,
+    "aliases": [
+     "B. Fernandes",
+     "Bruno Miguel Borges Fernandes"
+    ]
+   }
+  }
+ },
+ "corner": {
+  "shot_on_target_rate": 0.0889,
+  "corners": 18218,
+  "window_secs": 20,
+  "note": "attacking team has a shot on target (goal or saved) within 20 s of the corner"
+ },
+ "cards": {
+  "per_match_first_half": 1.611,
+  "per_match_second_half": 2.886,
+  "note": "yellow + red cards, both teams"
+ },
+ "goals": {
+  "default_home": 1.35,
+  "default_away": 1.1,
+  "note": "PRD section 6 defaults for the independent Poisson model; overridden when win/draw/loss odds are supplied (solved rates)",
+  "sample_mean_home": 1.489,
+  "sample_mean_away": 1.138
+ }
+}
