@@ -284,25 +284,27 @@ export function PriceChart({ m, compact = false, className = "" }: { m: M; compa
   );
 }
 
-/** Head-to-head: the open offers on the table. */
-export function OffersCard({ m }: { m: M }) {
-  const offers = (m.offers ?? []).filter((o) => o.open && o.remaining > 0).slice(0, 4);
+/** Head-to-head: the open offers on the table (`compact`: just the list, for the side column next to a clip). */
+export function OffersCard({ m, compact = false, locked = false }: { m: M; compact?: boolean; locked?: boolean }) {
+  const offers = (m.offers ?? []).filter((o) => o.open && o.remaining > 0).slice(0, compact ? 2 : 4);
+  const list = offers.length ? (
+    <ul>
+      {offers.map((o) => (
+        <li key={o.id} className="hd-slide-r">
+          <Avatar name={o.name} size={compact ? "1.5rem" : "1.75rem"} />
+          <span className="grow"><b>{o.name}</b> backs <span className={`tv-side-word ${o.side}`}>{SIDE_LABEL[o.side]}</span></span>
+          <span className="hd-num">{money(o.remaining)} at {o.odds.toFixed(2)}</span>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p className="tv-empty">{locked ? "Trading is closed. Unmatched stakes went back." : "No offers yet. Make one on your phone."}</p>
+  );
+  if (compact) return <div className="tv-offers compact" aria-label="Offers on the table">{list}</div>;
   return (
     <section className="hd-rise tv-card tv-offers" aria-labelledby="tv-offers-h">
       <h2 id="tv-offers-h" className="tv-card-title"><Icon name="handshake" /> Offers on the table</h2>
-      {offers.length ? (
-        <ul>
-          {offers.map((o) => (
-            <li key={o.id} className="hd-slide-r">
-              <Avatar name={o.name} size="1.75rem" />
-              <span className="grow"><b>{o.name}</b> backs <span className={`tv-side-word ${o.side}`}>{SIDE_LABEL[o.side]}</span></span>
-              <span className="hd-num">{money(o.remaining)} at {o.odds.toFixed(2)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="tv-empty">No offers yet. Make one on your phone.</p>
-      )}
+      {list}
     </section>
   );
 }

@@ -222,7 +222,7 @@ export default function WatchPage() {
       </>
     );
   } else if (layout === "video") {
-    if (live && m) side = <MarketStage key={marketKey} l={l} m={m} clock={clock} compact chart={<PriceChart key={marketKey} m={m} compact />} />;
+    if (live && m) side = <MarketStage key={marketKey} l={l} m={m} clock={clock} compact chart={m.mode === "h2h" ? <OffersCard m={m} compact locked={l.phase !== "open"} /> : <PriceChart key={marketKey} m={m} compact />} />;
     else if (showResult && m) side = <ResultReveal key={`r${marketKey}`} m={m} compact />;
     else side = <IdleStage key={`idle${l.qIndex}`} l={l} compact />;
   }
