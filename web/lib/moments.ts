@@ -12,7 +12,7 @@ export type MomentSport = "nfl" | "soccer";
 
 export interface MomentKind {
   kind: string;
-  /** Kiosk button label, Latin-1, <= 12 chars. */
+  /** Kiosk button label, Latin-1, <= 11 chars (the box fits 4 buttons of 180 px). */
   label: string;
   /** Caption opener, e.g. "Penalty called!" */
   call: string;
@@ -76,7 +76,7 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
       },
     },
     {
-      kind: "big_play", label: "Big play?", call: "Big play watch!", lockSecs: 15, templates: [],
+      kind: "big_play", label: "Big play", call: "Big play watch!", lockSecs: 15, templates: [],
       write: () => ({
         text: "20+ yard gain on this snap?", short: "20+ yard play?", prior: 0.08,
         rationale: "Roughly 1 snap in 12 gains 20 yards or more in the NFL (league-wide estimate).",

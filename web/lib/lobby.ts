@@ -607,7 +607,7 @@ export function momentsFor(l: Lobby): { id: string; label: string }[] {
   return (game?.moments ?? [])
     .map((k) => findMoment(sport, k))
     .filter((m): m is NonNullable<typeof m> => !!m)
-    .map((m) => ({ id: `moment:${m.kind}`, label: kioskSafe(m.label).slice(0, 12) }));
+    .map((m) => ({ id: `moment:${m.kind}`, label: kioskSafe(m.label).slice(0, 11) }));
 }
 
 /**

@@ -68,6 +68,10 @@ export interface Player {
   withdrawn: number;
   joinedAt: number;
   lastSyncAt?: number;
+  /** Solana wallet the player paid from or got faucet money at (default cash-out address). */
+  solanaAddress?: string;
+  /** Faucet already used in this lobby. */
+  fauceted?: boolean;
 }
 
 export interface Position {
@@ -222,4 +226,6 @@ export interface Lobby {
   replay?: ReplayRun;
   /** Latest Gemini quotes for this game (copied in from the 30 s cache). */
   gemini?: GeminiSnapshot | null;
+  /** MONEY_MODE=solana: open Solana Pay deposit requests by reference key. */
+  solanaRefs?: Record<string, { playerId: string; cents: number; at: number }>;
 }

@@ -23,6 +23,27 @@ const { buildScorecard } = await import("../lib/scorecard.ts");
 const lmsr = await import("../lib/lmsr.ts");
 const lobby = await import("../lib/lobby.ts");
 const { kioskScreen, kioskTouch } = await import("../lib/kiosk.ts");
+const solana = await import("../lib/solana.ts");
+const moneyLib = await import("../lib/money.ts");
+
+test("Solana Pay transfer request URL follows the spec; unconfigured solana falls back to demo", async () => {
+  const ref = await solana.newReference();
+  const url = solana.transferRequestUrl({ recipient: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", cents: 500, mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", reference: ref, message: "Huddle lobby ABCD" });
+  const u = new URL(url);
+  assert.equal(u.protocol, "solana:");
+  assert.equal(u.pathname, "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
+  assert.equal(u.searchParams.get("amount"), "5");
+  assert.equal(u.searchParams.get("spl-token"), "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+  assert.equal(u.searchParams.get("reference"), ref);
+  assert.equal(u.searchParams.get("label"), "Huddle");
+  assert.ok(!url.includes("+"), "spaces are %20");
+  assert.equal(solana.transferRequestUrl({ recipient: "x", cents: 1050, mint: "m", reference: "r" }).match(/amount=([^&]+)/)![1], "10.5");
+  assert.equal(await solana.isSolanaAddress(ref), true);
+  assert.equal(await solana.isSolanaAddress("0xabc"), false);
+  // No MONEY_MODE in tests: demo, no problems reported.
+  assert.equal(moneyLib.MONEY_MODE, "demo");
+  assert.ok(solana.solanaProblems().length >= 2);
+});
 
 type L = Awaited<ReturnType<typeof lobby.createLobby>>;
 let kioskN = 100;
@@ -312,7 +333,7 @@ test("moments: table per sport, short Latin-1 labels, momentsFor ids", async () 
     const kinds = lobby.MOMENT_KINDS[sport];
     assert.ok(kinds.length >= 3 && kinds.length <= 4);
     for (const k of kinds) {
-      assert.ok(k.label.length <= 12 && /^[\x20-\x7E\xA0-\xFF]+$/.test(k.label), k.label);
+      assert.ok(k.label.length <= 11 && /^[\x20-\x7E\xA0-\xFF]+$/.test(k.label), k.label);
       const w = k.write({ state: null });
       assert.ok(w.prior > 0 && w.prior < 1, `${k.kind} prior ${w.prior}`);
     }
