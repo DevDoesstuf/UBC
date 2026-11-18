@@ -23,7 +23,7 @@ Everything runs on **one website** (Next.js on Vercel, Upstash Redis). The kiosk
 | **Announcer** | One caption per event in the game's voice; ElevenLabs TTS when `ELEVENLABS_API_KEY` is set (served to the TV and to the speaker ESP32 through `/api/kiosk/audio`), browser voice otherwise | `lib/announcer.ts`, `lib/tts.ts` |
 | **Three ways to play** | LMSR market (default), pool (winners split the pot), head-to-head offers between friends | `lib/modes.ts` |
 | **Solana money, invisible** | Demo money by default. `MONEY_MODE=solana`: buy in with **Solana Pay** (scan a QR with any Solana wallet, devnet USDC), cash out to any Solana address; the treasury pays all fees | `lib/solana.ts` |
-| **New UI** | Kalshi-style light phones, dark TV page, calm motion (one thing moves at a time), green Huddle screens on the box | `app/`, `components/` |
+| **Kickoff design, green + ivory** | The original Huddle "Kickoff" look and motion (kinetic questions, rolling odds, LED-ring countdown, split bar, result flood, confetti, podium) recoloured green on ivory. One kit and one set of tokens for the phones, the TV page and the box preview; the box firmware draws the same design | `components/huddle/` (kit), `app/globals.css` (tokens), `components/phone/`, `components/tv/`, `firmware/kiosk_screen/ui.cpp` |
 
 Data contract, env vars and human setup steps: [`web/CONTRACT.md`](web/CONTRACT.md).
 
@@ -64,7 +64,7 @@ web/                       <- the website (Next.js 16, TypeScript). Vercel root 
   app/watch/[code]         <- laptop/TV page
   app/kiosk                <- web version of the kiosk screen (same JSON as the ESP32)
   app/k/[kiosk]            <- NFC entry point (redirects to the kiosk's current lobby)
-  components/              <- KioskView (same layout as firmware), Qr, Spark, client helpers
+  components/              <- huddle/ (the shared kit: Roll, LockRing, SplitBar, Kinetic, Burst, Avatar, motion), phone/, tv/, KioskView (same layout as firmware), Qr, client helpers
   public/sounds/*.wav      <- join, start, lock, win, tap (from the TapBet prototype)
   test/lmsr.test.mts       <- pricing tests
 firmware/kiosk_screen/     <- Arduino sketch for the Waveshare ESP32-S3-Touch-LCD-4.3
