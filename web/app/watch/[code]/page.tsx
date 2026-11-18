@@ -1,54 +1,45 @@
 "use client";
-// Laptop / TV page: /watch/ABCD. Plays the game's YouTube clip in sync with the market (the video jumps to the
-// question's startAt when trading opens) next to the live price, the countdown and the leaderboard. With
-// "Sound on" it plays the announcement sounds and reads the announcer (or the result) out loud.
-// Dark, readable from across a room; one thing moves at a time and only when the game state changes.
+// Laptop / TV page: /watch/ABCD. The room's big screen, after the original Huddle box (Kickoff design, green
+// and ivory): a broadcast-style market takeover with the LED-ring countdown, rolling odds, the split bar and
+// the live price line, the trade ticker and leaderboard, the announcer's caption bar (read out with "Sound on"),
+// the result flood, "Who's smarter?" and the podium. Clip games play the YouTube clip in sync with the market.
+// Readable from across a room at 1280x720 and 1920x1080 (the layout scales with the viewport, no scroll).
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Qr } from "@/components/Qr";
-import { Spark } from "@/components/Spark";
-import { HttpError, api, fmtClock, useNow, usePoll, usd, type LobbyData } from "@/components/client";
-import { gameScore, latestCaption, marketGemini, marketMode, marketModel, marketPool, probCents, scorecard } from "@/components/extras";
-import { Avatar, CountUp, Icon, Roll, Wordmark, useNewIds } from "@/components/ui";
+import { HttpError, api, useNow, usePoll, type LobbyData } from "@/components/client";
+import { useAnnouncer } from "@/components/tv/announcer";
+import {
+  CaptionBar,
+  EndStage,
+  IdleStage,
+  JoinChip,
+  LeaderRail,
+  Leaderboard,
+  LobbyStage,
+  MarketStage,
+  OffersCard,
+  PriceChart,
+  ResultReveal,
+  Scorebug,
+  ScorecardPanel,
+  SoundToggle,
+  TradeTicker,
+  ranked,
+  type Clock,
+  type Player,
+} from "@/components/tv/board";
+import { Aurora, Kinetic, type AuroraBlob } from "@/components/tv/Fx";
+import { Icon } from "@/components/tv/Icon";
+import { Mark, Wordmark } from "@/components/tv/Mark";
+import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
 
-type YTPlayer = {
-  playVideo(): void;
-  pauseVideo(): void;
-  seekTo(s: number, allowSeekAhead: boolean): void;
-  getCurrentTime(): number;
-  getPlayerState(): number;
-  unMute(): void;
-  mute(): void;
-  setVolume(v: number): void;
-  destroy(): void;
-};
-type YTNamespace = { Player: new (el: HTMLElement, opts: Record<string, unknown>) => YTPlayer };
-declare global {
-  interface Window {
-    YT?: YTNamespace;
-    onYouTubeIframeAPIReady?: () => void;
-  }
+/** "#003594" + alpha -> rgba(); unknown colours fall back to the brand green. */
+function hexA(hex: string | undefined, a: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? "");
+  if (!m) return `rgba(18,161,80,${a})`;
+  const n = Number.parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
-
-let ytPromise: Promise<YTNamespace> | null = null;
-function loadYouTube(): Promise<YTNamespace> {
-  if (window.YT?.Player) return Promise.resolve(window.YT);
-  if (!ytPromise) {
-    ytPromise = new Promise((resolve) => {
-      const prev = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        prev?.();
-        resolve(window.YT as YTNamespace);
-      };
-      const s = document.createElement("script");
-      s.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(s);
-    });
-  }
-  return ytPromise;
-}
-
-const SIDE = { yes: "Yes", no: "No" } as const;
 
 export default function WatchPage() {
   const params = useParams<{ code: string }>();
@@ -61,8 +52,9 @@ export default function WatchPage() {
   const player = useRef<YTPlayer | null>(null);
   const lastEvent = useRef<number | null>(null);
   const lastCaption = useRef<number | null>(null);
+  const standings = useRef<{ code: string; rows: Player[] } | null>(null);
   const videoId = l?.game?.youtubeId ?? null;
-  const freshPlayers = useNewIds(l?.players.map((p) => p.id) ?? []);
+  const announcer = useAnnouncer(code, sound);
 
   // Create the YouTube player once we know the clip.
   useEffect(() => {
@@ -104,13 +96,15 @@ export default function WatchPage() {
     }
   }, [l, playerReady, lastOk]);
 
-  // Sounds, spoken results and spoken announcer lines for new events (only with sound on).
+  // Sounds and the announcer for new events (only with sound on). Old events are never replayed on open.
+  const { say } = announcer;
   useEffect(() => {
     if (!l) return;
     const newest = l.events.length ? l.events[l.events.length - 1].id : 0;
-    const cap = latestCaption(l);
+    const caps = l.captions ?? [];
+    const cap = caps.length ? caps.reduce((a, b) => (b.id > a.id ? b : a)) : null;
     if (lastEvent.current === null) {
-      lastEvent.current = newest; // do not replay old events when the page opens
+      lastEvent.current = newest;
       lastCaption.current = cap?.id ?? 0;
       return;
     }
@@ -119,18 +113,15 @@ export default function WatchPage() {
     const newCaption = cap && cap.id > (lastCaption.current ?? 0) ? cap : null;
     if (cap) lastCaption.current = Math.max(lastCaption.current ?? 0, cap.id);
     if (!sound) return;
-    const speak = (text: string, delay: number) => {
-      if (!("speechSynthesis" in window)) return;
-      const u = new SpeechSynthesisUtterance(text.replace(/\$(\d+)\.(\d\d)/g, "$1 dollars $2"));
-      setTimeout(() => window.speechSynthesis.speak(u), delay);
-    };
-    for (const e of fresh) {
-      if (e.sound) new Audio(`/sounds/${e.sound}.wav`).play().catch(() => {});
-      // The announcer speaks when there is one; otherwise read the result out.
-      if (e.kind === "result" && !cap) speak(e.text, 900);
+    for (const e of fresh) if (e.sound) new Audio(`/sounds/${e.sound}.wav`).play().catch(() => {});
+    if (newCaption) {
+      const t = setTimeout(() => say({ id: newCaption.id, text: newCaption.text }), fresh.some((e) => e.sound) ? 700 : 0);
+      return () => clearTimeout(t);
     }
-    if (newCaption) speak(newCaption.text, fresh.length ? 700 : 0);
-  }, [l, sound]);
+    // No announcer lines in this game: read the result out instead.
+    const result = !caps.length ? fresh.find((e) => e.kind === "result") : undefined;
+    if (result) say({ id: result.id, text: result.text });
+  }, [l, sound, say]);
 
   function toggleSound() {
     const on = !sound;
@@ -142,7 +133,7 @@ export default function WatchPage() {
         new Audio("/sounds/tap.wav").play().catch(() => {});
       } else {
         player.current?.mute();
-        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        announcer.stop();
       }
     } catch {
       /* player not ready yet */
@@ -151,14 +142,14 @@ export default function WatchPage() {
 
   if (!l) {
     const notFound = error instanceof HttpError && error.status === 404;
+    const head = error ? (notFound ? `No game called ${code}` : "Can’t reach Huddle") : "Getting the game on screen";
     return (
-      <div className="tv">
-        <div className="tv-top"><Wordmark size={28} /></div>
-        <div className="tv-center" role="status">
-          <div>
-            <h1 style={{ color: "var(--ink)", fontSize: "2em" }}>{error ? (notFound ? `No lobby called ${code}` : "Can’t reach Huddle") : "Loading…"}</h1>
-            {error && <p style={{ marginTop: "0.4em" }}>{notFound ? "Pick a game on the box first, then open this page again." : `${error.message}. Retrying…`}</p>}
-          </div>
+      <div className="tvk tvk-state">
+        <Aurora />
+        <div className="tvk-state-body" role="status">
+          <Mark size="5rem" lit={3} spin={!error} className="tv-state-mark" />
+          <h1 className="tvq"><Kinetic text={head} /></h1>
+          {error && <p>{notFound ? "Pick a game on the box first, then open this page again." : `${error.message}. Trying again every second.`}</p>}
         </div>
       </div>
     );
@@ -166,248 +157,125 @@ export default function WatchPage() {
 
   const m = l.market;
   const serverNow = now + (l.now - lastOk);
-  const lockIn = m ? Math.max(0, Math.ceil((m.lockAt - serverNow) / 1000)) : 0;
-  const window_ = m ? Math.max(1, Math.round((m.lockAt - m.openedAt) / 1000)) : 1;
-  const live = !!m && (l.phase === "open" || l.phase === "locked" || l.phase === "result");
-  const caption = latestCaption(l);
-  const lastEventText = l.events.length ? l.events[l.events.length - 1] : null;
-  const score = gameScore(l);
-  const mode = marketMode(l);
-  const pool = marketPool(l);
-  const model = marketModel(l);
-  const gemini = marketGemini(l);
-  const card = scorecard(l);
-  const board = [...l.players].sort((a, b) => b.balance - a.balance);
+  const score = l.game?.score ?? null;
+  const live = !!m && (l.phase === "open" || l.phase === "locked");
+  const showResult = !!m && l.phase === "result" && (!!m.outcome || !!m.voided);
+  const preGame = l.phase === "lobby" && !m && !l.parked && l.results.length === 0 && !score?.started;
+  const takeover = preGame ? "lobby" : l.phase === "ended" ? "end" : null;
+  const layout = takeover ? "full" : videoId ? "video" : "board";
+  const players = l.players;
+
+  // Freeze the final standings when the game ends, so cash-outs do not reshuffle the podium.
+  if (l.phase === "ended") {
+    if (!standings.current || standings.current.code !== code) standings.current = { code, rows: ranked(players) };
+    else {
+      const have = new Set(standings.current.rows.map((p) => p.id));
+      const late = players.filter((p) => !have.has(p.id));
+      if (late.length) standings.current = { code, rows: [...standings.current.rows, ...late] };
+    }
+  } else if (standings.current) standings.current = null;
+
+  const clock: Clock = (() => {
+    if (!m) return { lockIn: 0, fraction: 0, state: "locked" };
+    const left = m.lockAt - serverNow;
+    const span = Math.max(1000, m.lockAt - m.openedAt);
+    const lockIn = Math.max(0, Math.ceil(left / 1000));
+    if (l.phase !== "open") return { lockIn: 0, fraction: 0, state: "locked" };
+    return { lockIn, fraction: Math.max(0, left / span), state: lockIn <= 5 ? "urgent" : "open" };
+  })();
+
+  const caps = l.captions ?? [];
+  const cap = caps.length ? caps.reduce((a, b) => (b.id > a.id ? b : a)) : null;
+  const lastEv = l.events.length ? l.events[l.events.length - 1] : null;
+  const captionText = cap?.text ?? lastEv?.text ?? null;
+  const captionId = cap ? `c${cap.id}` : lastEv ? `e${lastEv.id}` : "none";
+
+  const blobs: AuroraBlob[] | undefined = live
+    ? [
+        { c: hexA(l.game?.color, 0.16), x: "-14vmax", y: "-10vmax", s: "58vmax", mx: "6vmax", my: "5vmax", dur: "18s" },
+        { c: "rgba(124,203,78,0.18)", x: "58vw", y: "20vh", s: "58vmax", mx: "-6vmax", my: "-5vmax", dur: "22s", d: "-5s" },
+        { c: "rgba(18,161,80,0.14)", x: "20vw", y: "50vh", s: "48vmax", mx: "5vmax", my: "-4vmax", dur: "26s", d: "-9s" },
+      ]
+    : l.phase === "ended"
+      ? [
+          { c: "rgba(232,163,61,0.20)", x: "5vw", y: "-25vmax", s: "60vmax", mx: "6vmax", my: "6vmax", dur: "24s" },
+          { c: "rgba(18,161,80,0.16)", x: "-15vmax", y: "35vh", s: "55vmax", mx: "8vmax", my: "-5vmax", dur: "28s", d: "-6s" },
+        ]
+      : undefined;
+
+  const marketKey = m ? `${m.qIndex}:${m.openedAt}` : "none";
+  let stage: React.ReactNode = null;
+  let side: React.ReactNode = null;
+  if (layout === "board") {
+    if (live && m) stage = <MarketStage key={marketKey} l={l} m={m} clock={clock} />;
+    else if (showResult && m) stage = <ResultReveal key={`r${marketKey}`} m={m} />;
+    else stage = <IdleStage key={`idle${l.qIndex}`} l={l} />;
+    side = (
+      <>
+        {m && (live || showResult) ? (
+          <section className="hd-rise tv-card tv-chart-card"><PriceChart key={marketKey} m={m} /></section>
+        ) : l.scorecard && l.scorecard.n > 0 ? (
+          <section className="hd-rise tv-card"><ScorecardPanel card={l.scorecard} compact /></section>
+        ) : null}
+        {m && live && m.mode === "h2h" && <OffersCard m={m} />}
+        <Leaderboard players={players} max={m && live && m.mode === "h2h" ? 3 : 5} />
+      </>
+    );
+  } else if (layout === "video") {
+    if (live && m) side = <MarketStage key={marketKey} l={l} m={m} clock={clock} compact chart={<PriceChart key={marketKey} m={m} compact />} />;
+    else if (showResult && m) side = <ResultReveal key={`r${marketKey}`} m={m} compact />;
+    else side = <IdleStage key={`idle${l.qIndex}`} l={l} compact />;
+  }
+
+  const trades = m && (live || showResult) ? m.trades : [];
+  const lastPlay = score?.lastPlay ?? null;
 
   return (
-    <div className="tv">
-      <header className="tv-top">
-        <Wordmark size={28} />
-        {l.game && <span className="game">{l.game.title}</span>}
-        <span className="chip code" translate="no">{l.code}</span>
-        {score && (
-          <span className="scorebug" aria-label={`${score.home} ${score.homeScore}, ${score.away} ${score.awayScore}`}>
-            <span>{score.home}</span><span className="sc">{score.homeScore} – {score.awayScore}</span><span>{score.away}</span>
-            {score.clock && <span className="clk tnum">{score.clock}</span>}
-          </span>
+    <div className={`tvk layout-${layout}`}>
+      <Aurora key={live ? "live" : l.phase === "ended" ? "end" : "calm"} blobs={blobs} className="hd-fade" />
+      <header className="tv-topbar">
+        <Wordmark className="tv-wordmark" lit={Math.max(1, Math.min(12, players.length))} />
+        <span className="tv-title">
+          <b>{l.game?.title ?? "Huddle"}</b>
+          {l.game?.kind === "replay" && <span className="tv-tag">Replay</span>}
+        </span>
+        <span className="tv-topbar-mid">{score && <Scorebug score={score} persona={l.game?.persona} />}</span>
+        {error && (
+          <span className="hd-pop tv-offline" role="status"><Icon name="wifiOff" /> Reconnecting</span>
         )}
-        <span className="spacer" />
-        <button className="tv-sound" aria-pressed={sound} onClick={toggleSound}>
-          <Icon name={sound ? "sound" : "mute"} size={18} /> {sound ? "Sound on" : "Sound off"}
-        </button>
+        {!preGame && <JoinChip code={l.code} joinUrl={l.joinUrl} />}
+        <SoundToggle on={sound} onToggle={toggleSound} />
       </header>
 
-      {/* ---------------- stage: the clip (or the game card), with the join panel / final board over it */}
-      <main className="stage" id="main">
-        <div className="screen">
-          <div className="player" ref={holder} />
-          {!videoId && (
-            <div className="card-fill">
-              <div>
-                <h2>{l.game?.title ?? "Huddle"}</h2>
-                <p>{l.game?.subtitle || "Watch along on the big screen."}</p>
-              </div>
-            </div>
-          )}
-          {l.phase === "lobby" && (
-            <div className="over">
-              <div className="joinpanel">
-                <div className="qr"><Qr text={l.joinUrl} size={260} /></div>
-                <div>
-                  <h1>Join the huddle</h1>
-                  <p className="lead">Scan the code or tap your phone on the box.</p>
-                  <div className="code"><span className="mute">Code</span><b translate="no">{l.code}</b></div>
-                  <div className="url">{l.joinUrl.replace(/^https?:\/\//, "")}</div>
-                  <div className="people" aria-live="polite">
-                    {l.players.length ? (
-                      l.players.map((p) => (
-                        <span key={p.id} className={`person ${freshPlayers.has(p.id) ? "new" : ""}`}>
-                          <Avatar name={p.name} size={24} />{p.name}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="mute">Waiting for the first player…</span>
-                    )}
-                  </div>
-                  {l.nextQuestion && <p className="first"><b>First up:</b> {l.nextQuestion}</p>}
-                </div>
-              </div>
-            </div>
-          )}
-          {l.phase === "ended" && (
-            <div className="over">
-              <div className="final">
-                <h1>Final standings</h1>
-                <p className="lead">Thanks for playing. Cash out on your phone.</p>
-                <ol className="rows">
-                  {[...l.players].sort((a, b) => b.balance - a.balance).map((p, i) => (
-                    <li key={p.id}>
-                      <span className="rank">{i + 1}</span>
-                      {i === 0 && <Icon name="trophy" size={20} className="ink2" />}
-                      <span className="grow">{p.name}</span>
-                      <span className="amt">{usd(p.balance)}</span>
-                    </li>
-                  ))}
-                </ol>
-                {card && (
-                  <div className="scorecard">
-                    <div className="compare">
-                      <div className="me"><div className="k">Room</div><div className="v tnum">{card.room === null ? "–" : card.room.toFixed(3)}</div></div>
-                      <div><div className="k">Model</div><div className="v tnum">{card.model === null ? "–" : card.model.toFixed(3)}</div></div>
-                      <div><div className="k">Gemini</div><div className="v tnum">{card.gemini === null ? "–" : card.gemini.toFixed(3)}</div></div>
-                    </div>
-                    <p className="verdict">{card.verdict ? `${card.verdict} ` : ""}Brier score over {card.n} {card.n === 1 ? "question" : "questions"}, lower is better.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+      <main className="tv-main" id="main">
+        {videoId && (
+          <div className={`tv-video ${layout === "video" ? "" : "off"}`} aria-hidden={layout !== "video"}>
+            <div className="tv-video-frame" ref={holder} />
+          </div>
+        )}
+        {takeover === "lobby" && <LobbyStage l={l} />}
+        {takeover === "end" && <EndStage l={l} standings={standings.current?.rows ?? ranked(players)} />}
+        {layout === "board" && <div className="tv-stage">{stage}</div>}
+        {layout !== "full" && <aside className="tv-side" aria-label="Market details">{side}</aside>}
       </main>
 
-      {/* ---------------- rail: market, leaderboard, join */}
-      <aside className="rail" aria-label="Market">
-        {live && m ? (
-          <section className="rcard" aria-labelledby="tvq">
-            <div className="meta">
-              <span>Question {m.qIndex + 1} of {l.questionCount}</span>
-              {l.phase === "open" && <span className={`status ${lockIn <= 10 ? "soon" : "open"}`}><Icon name="clock" size={14} /> Live</span>}
-              {l.phase === "locked" && <span className="status closed snap"><Icon name="lock" size={14} /> Closed</span>}
-              {l.phase === "result" && m.outcome && <span className="status closed"><Icon name="check" size={14} /> {SIDE[m.outcome]} won</span>}
-            </div>
-            <h1 className="q" id="tvq">{m.text}</h1>
+      {layout !== "full" && (
+        <footer className="tv-rail">
+          {layout === "video" ? (
+            <LeaderRail players={players} />
+          ) : lastPlay ? (
+            <span key={lastPlay} className="hd-slide-l tv-lastplay"><span className="live-dot" aria-hidden="true" /><span>{lastPlay}</span></span>
+          ) : null}
+          <TradeTicker trades={trades} mode={m?.mode} />
+        </footer>
+      )}
 
-            {l.phase === "result" && m.outcome ? (
-              <>
-                <div className="outcome">
-                  {(["yes", "no"] as const).map((side) => {
-                    const win = side === m.outcome;
-                    return (
-                      <div key={side} className={`orow ${side} ${win ? "win" : "lose"}`}>
-                        {win && <span className="fill" aria-hidden="true" />}
-                        <span className="lbl">{win ? <Icon name="check" size={18} /> : <Icon name="x" size={18} />} {SIDE[side]}</span>
-                        <span className="tag">{win ? "Pays $1" : "$0"}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <ul className="rows" style={{ marginTop: "0.8em" }} aria-live="polite">
-                  {m.winners.length ? (
-                    m.winners.slice(0, 4).map((w) => (
-                      <li key={w.name}>
-                        <span className="grow">{w.name}</span>
-                        <span className="amt" style={{ color: "var(--green-ink)" }}>+<CountUp cents={w.cents} format={usd} /></span>
-                      </li>
-                    ))
-                  ) : (
-                    <li><span className="grow mute">Nobody called it this time.</span></li>
-                  )}
-                </ul>
-              </>
-            ) : (
-              <>
-                <div className="prices" aria-live="polite">
-                  <div className="tprice yes">
-                    <div className="k"><span className="sw" aria-hidden="true" />Yes</div>
-                    <div className="v"><Roll text={String(m.yesCents)} value={m.yesCents} arrow label={`Yes ${m.yesCents} cents`} /><span className="c">¢</span></div>
-                    <div className="p">{m.yesCents}% chance</div>
-                  </div>
-                  <div className="tprice no">
-                    <div className="k"><span className="sw" aria-hidden="true" />No</div>
-                    <div className="v"><Roll text={String(m.noCents)} value={m.noCents} label={`No ${m.noCents} cents`} /><span className="c">¢</span></div>
-                    <div className="p">{mode === "pool" ? "Winners split the pot" : "A winning share pays $1"}</div>
-                  </div>
-                </div>
-                <div className="chart"><Spark points={m.history} height={72} /></div>
-                {l.phase === "open" ? (
-                  <>
-                    <div className={`countdown ${lockIn <= 10 ? "urgent" : ""}`}>
-                      <span className="k">Trading locks in</span>
-                      <span className="v">{fmtClock(lockIn)}</span>
-                    </div>
-                    <div className="track" aria-hidden="true"><span style={{ transform: `scaleX(${Math.min(1, lockIn / window_)})` }} /></div>
-                  </>
-                ) : (
-                  <div className="countdown"><span className="k">Trading closed. Watch the play.</span><Icon name="lock" size={22} /></div>
-                )}
-              </>
-            )}
-
-            {mode === "pool" && pool && (
-              <div className="pool">
-                <div className="bar" aria-hidden="true">
-                  <span className="y" style={{ width: `${(pool.yesCents / Math.max(1, pool.yesCents + pool.noCents)) * 100}%` }} />
-                  <span className="n" style={{ flex: 1 }} />
-                </div>
-                <div className="legend"><span className="tnum">Yes {usd(pool.yesCents)}</span><span className="tnum">No {usd(pool.noCents)}</span></div>
-              </div>
-            )}
-            {(model !== null || gemini) && (
-              <div className="compare" aria-label="Room, model and Gemini prices for Yes">
-                <div className="me"><div className="k">Room</div><div className="v tnum">{m.yesCents}¢</div></div>
-                <div><div className="k">Model</div><div className="v tnum">{model !== null ? `${probCents(model)}¢` : "–"}</div></div>
-                <div><div className="k">Gemini</div><div className="v tnum">{gemini ? `${probCents(gemini.prob)}¢` : "–"}</div></div>
-              </div>
-            )}
-            <div className="stats"><span><b className="tnum">{usd(m.volume)}</b> traded</span><span>{m.trades.length} trades</span></div>
-          </section>
-        ) : l.phase === "ended" ? (
-          <section className="rcard" aria-labelledby="tvresults">
-            <h2 id="tvresults">Results</h2>
-            <ul className="rows" style={{ marginTop: "0.4em" }}>
-              {l.results.map((r, i) => (
-                <li key={i}>
-                  <span className="grow" style={{ whiteSpace: "normal" }}>{r.text}</span>
-                  <span className={`side-tag ${r.outcome}`}><Icon name="check" size={12} />&nbsp;{SIDE[r.outcome]}</span>
-                </li>
-              ))}
-              {l.results.length === 0 && <li><span className="grow mute">No questions were played.</span></li>}
-            </ul>
-          </section>
-        ) : (
-          <section className="rcard">
-            <h2>Up next</h2>
-            <p className="q" style={{ fontSize: "1.25em" }}>{l.nextQuestion ?? "The host starts the next question from the box."}</p>
-          </section>
-        )}
-
-        {l.phase !== "ended" && <section className="rcard board" aria-labelledby="tvboard">
-          <h2 id="tvboard">Leaderboard</h2>
-          <ol className="rows" style={{ marginTop: "0.4em" }}>
-            {board.slice(0, 8).map((p, i) => (
-              <li key={p.id} className={freshPlayers.has(p.id) ? "new" : ""}>
-                <span className="rank">{i + 1}</span>
-                <span className="grow">{p.name}</span>
-                <span className="amt">{usd(p.balance)}</span>
-              </li>
-            ))}
-            {board.length === 0 && <li><span className="grow mute">Nobody yet</span></li>}
-          </ol>
-        </section>}
-
-        {l.phase !== "lobby" && l.phase !== "ended" && (
-          <section className="rcard mini-join">
-            <span className="qr"><Qr text={l.joinUrl} size={72} /></span>
-            <div>
-              <h2>Join on your phone</h2>
-              <b translate="no">{l.code}</b>
-            </div>
-          </section>
-        )}
-      </aside>
-
-      {/* ---------------- one caption line: the announcer, or the latest thing that happened */}
-      <footer className="tv-caption" aria-live="polite">
-        <Icon name={caption ? "sound" : "arrow-right"} size={20} className="mute" />
-        {caption ? (
-          <span key={`c${caption.id}`} className="txt fresh">{caption.text}</span>
-        ) : lastEventText ? (
-          <span key={`e${lastEventText.id}`} className="txt fresh">{lastEventText.text}</span>
-        ) : (
-          <span className="txt mute">Waiting for the host…</span>
-        )}
-        {caption && <span className="src">Announcer</span>}
-      </footer>
+      <CaptionBar
+        text={captionText}
+        id={captionId}
+        speaking={!!cap && announcer.speakingId === cap.id}
+        source={cap ? "announcer" : lastEv ? "event" : null}
+      />
     </div>
   );
 }
