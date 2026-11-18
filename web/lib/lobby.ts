@@ -14,7 +14,7 @@ import * as lmsr from "./lmsr";
 import { captionLine, isBigTrade, type CaptionEvent, type Persona } from "./announcer";
 import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTrack, replaySnapshotAt, sourceOf, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot } from "./gemini";
 import { buildScorecard } from "./scorecard";
-import { openValues, standings } from "./standings";
+import { losersOf, openValues, standings } from "./standings";
 import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePairs, settlePool, takerStakeFor, MAX_ODDS, MIN_ODDS } from "./modes";
 import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
 import { findMoment, kioskSafe, MOMENT_KINDS, type MomentKind, type MomentSport } from "./moments";
@@ -996,6 +996,8 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
           lockIn: Math.max(0, Math.ceil((m.lockAt - now) / 1000)),
           outcome: m.outcome,
           winners: Object.entries(m.payouts).sort((a, b) => b[1] - a[1]).map(([id, cents]) => ({ name: name(id), cents })),
+          /** "Cooked": backed it and got nothing back (cents = stake), biggest first; empty until it settles. */
+          losers: losersOf(m).map((x) => ({ name: name(x.id), cents: x.cents })),
           trades: m.trades.slice(-10).reverse().map((t) => ({ name: t.name, side: t.side, cents: t.cents, at: t.at })),
           ...marketExtras(l, m),
         }

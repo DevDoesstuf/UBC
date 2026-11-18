@@ -33,7 +33,7 @@ import {
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
 import { boxName, boxSafe } from "./boxText";
-import { openValues, standings } from "./standings";
+import { losersOf, openValues, standings } from "./standings";
 import type { Game, Lobby } from "./types";
 
 // ---------------------------------------------------------------- "Call it!" moments
@@ -333,10 +333,7 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       .filter(([, c]) => c > 0)
       .sort((a, b) => b[1] - a[1])
       .map(([id, c]) => ({ name: kn(l.players[id]?.name ?? "?"), cents: c, profit: c - (m.positions[id]?.spent ?? 0) }));
-    const losers = Object.entries(m.positions)
-      .filter(([id, pos]) => pos.spent > 0 && !(m.payouts[id] > 0))
-      .sort((a, b) => b[1].spent - a[1].spent)
-      .map(([id, pos]) => ({ name: kn(l.players[id]?.name ?? "?"), cents: pos.spent }));
+    const losers = losersOf(m).map((x) => ({ name: kn(l.players[x.id]?.name ?? "?"), cents: x.cents }));
     return {
       ...base,
       winners, losers, volume: m.volume,

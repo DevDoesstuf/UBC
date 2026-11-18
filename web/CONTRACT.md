@@ -71,6 +71,8 @@ players[].open: number                            // cents in the running (or pa
                                                   // cost (h2h includes unmatched offers); 0 once it settles
                                                   // Boards rank by balance + withdrawn + open (lib/standings.ts
                                                   // standings(): shared rank on a tie, `lead` only for a sole leader)
+market.losers: { name: string; cents: number }[]  // "Cooked": backed it, got nothing back (cents = stake), biggest
+                                                  // first; empty until it settles and when voided
 ```
 
 In pool and h2h mode `market.yesCents/noCents/priceYes/history` still work: pool shows the share of the pot on

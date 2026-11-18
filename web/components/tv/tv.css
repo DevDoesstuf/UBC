@@ -270,6 +270,10 @@ body:has(.tvk) { background: var(--k-canvas); overflow: hidden; }
 .tv-reveal-card.soft { background: rgba(255, 253, 248, 0.9); box-shadow: var(--shadow-lift); }
 .tv-reveal-card-h { display: flex; align-items: center; gap: 0.5rem; font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem; color: var(--ink-2); }
 .tv-reveal-card-h.up { color: var(--green-deep); }
+.tv-reveal-card-h.down { color: var(--no-600); }
+.tv-reveal-cards.three { grid-template-columns: 1fr 1fr 0.9fr; }
+.tv-winner.tv-loser .hd-num { color: var(--ink-2); }
+.tv-more { font-size: 1rem; font-weight: 600; color: var(--ink-2); }
 .tv-reveal-card-h svg { width: 0.7em; height: 0.7em; }
 .tv-winner { display: flex; align-items: center; gap: 0.625rem; padding: 0.125rem 0; font-family: var(--k-font-head); font-weight: 700; font-size: 1.5rem; }
 .tv-winner .hd-num { color: var(--green-deep); font-size: 1.5rem; }

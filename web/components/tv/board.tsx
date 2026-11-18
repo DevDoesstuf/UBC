@@ -368,7 +368,8 @@ export function OffersCard({ m, compact = false, locked = false }: { m: M; compa
 
 /**
  * result-flood: the winner's colour floods the stage from its own share of the split, the split drains, the
- * winner word stamps in, confetti sized to the moment, and the callers' card rises with a glint on each name.
+ * winner word stamps in, confetti sized to the moment, and the callers' card rises with a glint on each name,
+ * next to who got cooked (backed the other side and got nothing back), like the box's result screen.
  */
 export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }) {
   const voided = !!m.voided;
@@ -386,6 +387,8 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
   const miss = forecasts.map((f) => ({ id: f.id, d: Math.abs((outcome === "yes" ? 1 : 0) - f.p) }));
   const best = miss.length > 1 ? Math.min(...miss.map((x) => x.d)) : null;
   const closest = best !== null && miss.filter((x) => Math.abs(x.d - best) < 0.005).length === 1 ? miss.find((x) => x.d === best)?.id ?? null : null;
+  const losers = m.losers ?? [];
+  const shown = compact ? 2 : 3;
   return (
     <section className={`hd-zoom tv-stage-card tv-reveal ${outcome} ${voided ? "void" : ""} ${compact ? "compact" : ""}`} role="status" aria-label={voided ? "Market voided" : `Result: ${SIDE_LABEL[outcome]}`}>
       {voided ? (
@@ -417,11 +420,11 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
           </div>
         </div>
         {!voided && (
-          <div className="hd-rise tv-reveal-cards" style={delay(760)}>
+          <div className={`hd-rise tv-reveal-cards ${!compact && forecasts.length > 0 ? "three" : ""}`} style={delay(760)}>
             <div className="tv-reveal-card">
               <p className="tv-reveal-card-h up"><Icon name="up" /> Called it</p>
-              {m.winners.slice(0, compact ? 2 : 3).map((w, i) => (
-                <p key={w.name} className="hd-shine tv-winner" style={delay(1000 + i * 180)}>
+              {m.winners.slice(0, shown).map((w, i) => (
+                <p key={`${w.name}-${i}`} className="hd-shine tv-winner" style={delay(1000 + i * 180)}>
                   <Avatar name={w.name} size="1.9rem" />
                   <span className="grow">{w.name}</span>
                   <span className="hd-num">{money(w.cents)} <span className="tv-paid">paid</span></span>
@@ -437,8 +440,21 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
                     <span className="grow">{f.label}</span>
                     {closest === f.id && <span className="tv-closest">Closest</span>}
                     <span className="hd-num">{pctText(f.p)}%</span>
+              {m.winners.length > shown && <p className="tv-more">+{m.winners.length - shown} more</p>}
                   </p>
                 ))}
+            <div className="tv-reveal-card">
+              <p className="tv-reveal-card-h down"><Icon name="down" /> Cooked</p>
+              {losers.slice(0, shown).map((w, i) => (
+                <p key={`${w.name}-${i}`} className="hd-fade tv-winner tv-loser" style={delay(1100 + i * 180)}>
+                  <Avatar name={w.name} size="1.9rem" />
+                  <span className="grow">{w.name}</span>
+                  <span className="hd-num">{money(w.cents)} <span className="tv-paid">lost</span></span>
+                </p>
+              ))}
+              {losers.length > shown && <p className="tv-more">+{losers.length - shown} more</p>}
+              {losers.length === 0 && <p className="tv-empty">Clean sweep.</p>}
+            </div>
               </div>
             )}
           </div>

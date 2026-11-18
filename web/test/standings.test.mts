@@ -7,7 +7,7 @@ process.env.GEMINI_API_BASE = "http://127.0.0.1:9";
 delete process.env.KV_REST_API_URL;
 delete process.env.UPSTASH_REDIS_REST_URL;
 
-const { openValue, openValues, standings, worthOf } = await import("../lib/standings.ts");
+const { openValue, openValues, standings, worthOf, losersOf } = await import("../lib/standings.ts");
 const lmsr = await import("../lib/lmsr.ts");
 const lobby = await import("../lib/lobby.ts");
 const { kioskScreen, kioskTouch } = await import("../lib/kiosk.ts");
@@ -55,6 +55,14 @@ test("standings: best first, shared rank on a tie, a leader only when one player
   assert.deepEqual(solo.map((r) => [r.id, r.rank, r.lead]), [["b", 1, true], ["a", 2, false], ["c", 2, false]]);
   assert.equal(standings([{ id: "a", balance: 0 }])[0].lead, false, "nobody leads on $0");
   assert.equal(worthOf({ balance: 1, withdrawn: 2, open: 3 }), 6);
+});
+
+test("losersOf: backed it and got nothing back, biggest first; nobody before it settles or when voided", () => {
+  const m = market({ outcome: "yes", payouts: { a: 500 } });
+  m.positions = { a: { yes: 5, no: 0, spent: 300 }, b: { yes: 0, no: 2, spent: 200 }, c: { yes: 0, no: 5, spent: 450 }, d: { yes: 0, no: 0, spent: 0 } };
+  assert.deepEqual(losersOf(m), [{ id: "c", cents: 450 }, { id: "b", cents: 200 }]);
+  assert.deepEqual(losersOf({ ...m, outcome: null }), []);
+  assert.deepEqual(losersOf({ ...m, voided: true }), []);
 });
 
 test("a live question: the buyer is not ranked below a player who sat out, everywhere", async () => {
