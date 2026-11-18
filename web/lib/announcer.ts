@@ -116,9 +116,9 @@ function variants(ev: CaptionEvent, p: Persona): string[] {
       const upset = typeof ev.atLockPct === "number" && ev.atLockPct > 0 && ev.atLockPct < 30 ? pct(ev.atLockPct) : null;
       if (!w) {
         const t: ByPersona = {
-          nfl: [`It's ${o}! Nobody had action on that one.`, `${o} it is. No winners this time.`],
-          soccer: [`It's ${o}! Nobody called it.`, `${o} it is! No winners this time.`],
-          calm: [`It's ${o}. No winners this time.`, `${o}. Quiet one.`],
+          nfl: [`It's ${o}! Nobody had action on that one.`, `The answer is ${o}. No winners this time.`],
+          soccer: [`It's ${o}! Nobody called it.`, `The answer is ${o}! No winners this time.`],
+          calm: [`It's ${o}. No winners this time.`, `The answer is ${o}. Quiet one.`],
         };
         return t[p];
       }
