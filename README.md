@@ -1,14 +1,30 @@
-# Live Lines
+# Huddle
 
-Live Lines turns a watch party into a small prediction market that friends run themselves.
+Huddle turns a watch party into a small prediction market that friends run themselves, around a box on the coffee table.
 
-1. A group picks a game on the kiosk touchscreen.
-2. Everyone taps a phone on the kiosk (NFC) or scans its QR code to join the lobby.
-3. A laptop or TV plays the game clip with the live price on top.
-4. Everyone deposits money and buys YES or NO on one question at a time, for example *"Will the defense intercept on the next play?"*
-5. Prices move with every trade (LMSR, Kalshi style). Trading locks before the play, the result comes in, and winning shares pay $1.
+1. A group picks a game on the kiosk touchscreen (a real clip, or a replayed game).
+2. Everyone taps a phone on the kiosk (NFC) or scans its QR code to join.
+3. A laptop or TV plays the game with the live price, the leaderboard and an announcer on top.
+4. Everyone buys YES or NO on one question at a time. Prices move with every trade (LMSR, Kalshi style), trading locks before the play, and winning shares pay $1.
+5. **The box runs the game:** when something happens on TV, someone slams a **Call it!** button on the kiosk (Penalty!, 3rd down, Big play...) and a market opens on every phone instantly, priced by a model, with the announcer calling it.
 
-Everything runs on **one website** (Next.js on Vercel). The kiosk, the phones and the watch page are all views of the same lobby. **All logic lives on the site**: the kiosk firmware only draws what the site sends and reports taps.
+Everything runs on **one website** (Next.js on Vercel, Upstash Redis). The kiosk, the phones and the TV page are all views of the same lobby. **All logic lives on the site**: the kiosk firmware only draws what the site sends and reports taps, so new screens, buttons and colours ship without reflashing.
+
+**Live:** https://huddle-live-eight.vercel.app (TV: `/watch/CODE`, phones: `/l/CODE`, box preview: `/kiosk?id=1`).
+
+## What Huddle adds on top of the original Live Lines build
+
+| Feature | How | Where |
+|---|---|---|
+| **Call it! moments** | Kiosk buttons open an instant market for the moment on TV, priced from real data (nflverse, StatsBomb) | `lib/moments.ts`, `lib/kiosk.ts` |
+| **AI-written questions from the game** | Replay games (Titans at Cowboys, Portugal v Spain) fold play-by-play events on every read and open the next question automatically; resolvers settle them from the plays | `lib/replay/` |
+| **Model prices + Gemini odds** | Each market opens at the model's probability; live Gemini Prediction Markets odds sit beside the room's price; end-of-game Brier scorecard (Room vs Model vs Gemini) | `lib/gemini.ts`, `lib/lobby.ts` |
+| **Announcer** | One caption per event in the game's voice; ElevenLabs TTS when `ELEVENLABS_API_KEY` is set (served to the TV and to the speaker ESP32 through `/api/kiosk/audio`), browser voice otherwise | `lib/announcer.ts`, `lib/tts.ts` |
+| **Three ways to play** | LMSR market (default), pool (winners split the pot), head-to-head offers between friends | `lib/modes.ts` |
+| **Solana money, invisible** | Demo money by default. `MONEY_MODE=solana`: buy in with **Solana Pay** (scan a QR with any Solana wallet, devnet USDC), cash out to any Solana address; the treasury pays all fees | `lib/solana.ts` |
+| **New UI** | Kalshi-style light phones, dark TV page, calm motion (one thing moves at a time), green Huddle screens on the box | `app/`, `components/` |
+
+Data contract, env vars and human setup steps: [`web/CONTRACT.md`](web/CONTRACT.md).
 
 This README is the single source of context for people and agents working on the repo. The original spec is in [docs/](docs/Live%20Lines%20-%20Kiosk%20&%20Watch-Party%20Flow.pdf).
 
