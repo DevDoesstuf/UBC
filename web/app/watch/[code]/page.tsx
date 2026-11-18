@@ -28,18 +28,12 @@ import {
   type Clock,
   type Player,
 } from "@/components/tv/board";
-import { Aurora, Kinetic, type AuroraBlob } from "@/components/tv/Fx";
-import { Icon } from "@/components/tv/Icon";
-import { Mark, Wordmark } from "@/components/tv/Mark";
+import { Aurora, Icon, Kinetic, Mark, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
 import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
 
 /** "#003594" + alpha -> rgba(); unknown colours fall back to the brand green. */
-function hexA(hex: string | undefined, a: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? "");
-  if (!m) return `rgba(18,161,80,${a})`;
-  const n = Number.parseInt(m[1], 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-}
+const hexA = (hex: string | undefined, a: number) =>
+  /^#?[0-9a-f]{6}$/i.test(hex ?? "") ? withAlpha(hex!, a) : `rgba(18,161,80,${a})`;
 
 export default function WatchPage() {
   const params = useParams<{ code: string }>();

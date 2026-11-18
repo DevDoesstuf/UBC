@@ -5,14 +5,27 @@
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import type { LobbyData } from "@/components/client";
 import { Qr } from "@/components/Qr";
-import { Avatar, Burst, Kinetic, Sparkline, type Line } from "./Fx";
-import { money, payoutText, pctText, secsText, SIDE_LABEL } from "./format";
-import { Icon } from "./Icon";
-import { LockRing, type LockState } from "./LockRing";
-import { Mark } from "./Mark";
-import { delay, useFlip, useFresh, useReplayClass } from "./motion";
-import { Pct, Roll } from "./Roll";
-import { MarkerShape, SplitBar, SplitMarkers } from "./SplitBar";
+import {
+  Avatar,
+  Burst,
+  Icon,
+  Kinetic,
+  LockRing,
+  Mark,
+  MarkerShape,
+  Pct,
+  Roll,
+  SplitBar,
+  SplitMarkers,
+  delay,
+  useFlip,
+  useNewIds,
+  useReplayClass,
+  type LockState,
+} from "@/components/huddle";
+import { money, payoutText, pctText, secsText, SIDE_LABEL, yesNo } from "./format";
+import { perDollar } from "@/components/phone/derive";
+import { Sparkline, type Line } from "./Sparkline";
 
 export type L = LobbyData;
 export type M = NonNullable<LobbyData["market"]>;
@@ -119,6 +132,12 @@ export function ProsLegend({ m, compact = false }: { m: M; compact?: boolean }) 
   );
 }
 
+/** "$1 pays $X": what $1 on `side` returns right now after the price moves (the phones' number exactly). */
+function payoutPerDollar(m: M, side: "yes" | "no"): string {
+  const per = perDollar(m, side);
+  return per ? payoutText(1 / per) : payoutText((side === "yes" ? m.yesCents : m.noCents) / 100);
+}
+
 function OutcomeTile({ m, side, locked, won, d }: { m: M; side: "yes" | "no"; locked: boolean; won?: boolean; d: number }) {
   const cents = side === "yes" ? m.yesCents : m.noCents;
   const kick = useReplayClass(cents, "tile-kick");
@@ -129,7 +148,7 @@ function OutcomeTile({ m, side, locked, won, d }: { m: M; side: "yes" | "no"; lo
       ? `${money(side === "yes" ? pool.yesCents : pool.noCents)} in the pot`
       : m.mode === "h2h"
         ? `${offers.filter((o) => o.side === side).length} open ${offers.filter((o) => o.side === side).length === 1 ? "offer" : "offers"}`
-        : payoutText(cents / 100);
+        : payoutPerDollar(m, side);
   return (
     <div className="hd-pop tv-tile-wrap" style={delay(d)}>
       <div className={`tv-tile ${side} on-fill ${kick}`}>
@@ -138,7 +157,7 @@ function OutcomeTile({ m, side, locked, won, d }: { m: M; side: "yes" | "no"; lo
           {SIDE_LABEL[side]}
         </span>
         <span className="hd-num tv-tile-price">
-          <Pct p={cents / 100} unit={m.mode === "pool" ? "%" : "¢"} arrow />
+          <Pct p={cents / 100} arrow />
         </span>
         <span className="tv-tile-line">{line}</span>
         {locked && <span className="lock-veil" aria-hidden="true" />}
@@ -193,11 +212,11 @@ export function MarketStage({ l, m, clock, compact = false, chart }: { l: L; m: 
             <SplitMarkers
               className="tv-split-markers"
               markers={[
-                { id: "model", p: m.model, shape: "solid" },
-                { id: "gemini", p: m.gemini?.prob ?? null, shape: "hollow" },
+                { id: "model", label: "Model", p: m.model, shape: "solid" },
+                { id: "gemini", label: "Gemini", p: m.gemini?.prob ?? null, shape: "hollow" },
               ]}
             />
-            <SplitBar yes={m.yesCents / 100} className="tv-split" />
+            <SplitBar parts={yesNo(m.yesCents / 100)} className="tv-split" />
           </div>
           {compact ? (
             <div className="hd-fade tv-compact-row" style={delay(640)}>
@@ -247,24 +266,44 @@ export function useGeminiTrail(key: string, len: number, g: number | null): numb
   return pts;
 }
 
+/** market.trail as two point lists in cents (Gemini gaps filled from its nearest price), or null without Gemini. */
+function serverTrail(m: M): { room: number[]; gemini: number[] } | null {
+  const t = m.trail ?? [];
+  if (t.length < 2 || !t.some((x) => x.gemini !== null)) return null;
+  const room = t.map((x) => Math.round(x.room * 100));
+  const first = t.find((x) => x.gemini !== null)!.gemini!;
+  let last = first;
+  const gemini = t.map((x) => (last = x.gemini === null ? last : x.gemini)).map((g) => Math.round(g * 100));
+  if (room[room.length - 1] !== m.yesCents) {
+    room.push(m.yesCents);
+    gemini.push(gemini[gemini.length - 1]);
+  }
+  return { room, gemini };
+}
+
 /** price-draw: the room's YES price since the market opened, against Gemini when it prices the same question. */
 export function PriceChart({ m, compact = false, className = "" }: { m: M; compact?: boolean; className?: string }) {
   const hist = m.history.length ? m.history : [m.yesCents];
   const gem = m.gemini ? Math.round(m.gemini.prob * 100) : null;
-  const trail = useGeminiTrail(`${m.qIndex}:${m.openedAt}`, hist.length, gem);
+  const local = useGeminiTrail(`${m.qIndex}:${m.openedAt}`, hist.length, gem);
+  // The server's room-vs-Gemini trail (market.trail) carries Gemini's real moves (replayed games); use it when
+  // Gemini prices this question, else the room's trade history with Gemini held level beside it.
+  const server = serverTrail(m);
+  const trail = server ? server.gemini : local;
+  const roomPts = server ? server.room : hist;
   const start = hist[0];
   const diff = m.yesCents - start;
-  const lines: Line[] = [{ id: "room", points: hist, stroke: "var(--green)", fill: "rgba(18,161,80,0.12)" }];
+  const lines: Line[] = [{ id: "room", points: roomPts, stroke: "var(--green)", fill: "rgba(18,161,80,0.12)" }];
   if (trail) lines.push({ id: "gemini", points: trail, stroke: "var(--ink)", dash: true });
   const moves = hist.length - 1;
-  const u = m.mode === "pool" ? "%" : "¢";
+  const u = "%";
   return (
     <div className={`tv-chart ${compact ? "compact" : ""} ${className}`}>
       <p className="tv-chart-head">
         <span>{trail ? "Room vs Gemini, Yes price" : m.mode === "pool" ? "Yes share of the pot" : m.mode === "h2h" ? "Yes odds from matched offers" : "Yes price"}</span>
         <span className={`hd-num tv-chart-diff ${diff > 0 ? "up" : diff < 0 ? "down" : ""}`}>
           {diff !== 0 && <Icon name={diff > 0 ? "up" : "down"} />}
-          {diff === 0 ? "Flat" : `${diff > 0 ? "+" : ""}${diff}${m.mode === "pool" ? " pts" : "¢"}`}
+          {diff === 0 ? "Flat" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)} pts`}
         </span>
       </p>
       <Sparkline lines={lines} className="tv-chart-plot" />
@@ -347,7 +386,7 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
         <p className="hd-fade tv-reveal-kicker">{voided ? "Voided" : `Result · question ${m.qIndex + 1}`}</p>
         <p className="tvq hd-fade tv-reveal-q">{m.text}</p>
         <div className="tv-reveal-track" aria-hidden="true">
-          <SplitBar yes={atLock} className="hd-drain tv-reveal-split" />
+          <SplitBar parts={yesNo(atLock)} className="hd-drain tv-reveal-split" />
         </div>
         <div className="tv-reveal-word-row">
           <div className="hd-stamp tv-reveal-word" style={delay(380)}>
@@ -445,7 +484,7 @@ export function IdleStage({ l, compact = false }: { l: L; compact?: boolean }) {
 
 export function LobbyStage({ l }: { l: L }) {
   const players = l.players;
-  const fresh = useFresh(players.map((p) => p.id));
+  const fresh = useNewIds(players.map((p) => p.id));
   const pot = players.reduce((a, p) => a + p.deposited, 0);
   const replay = l.game?.kind === "replay";
   const meta = [`${MODE_LABEL[l.mode ?? "market"]} mode`, replay ? "Full game replay, questions written live" : "Clip with questions", l.money.mode === "solana" ? "Test USDC on Solana" : "Test money"];
