@@ -775,8 +775,11 @@ export class HuddleQuestionEngine {
       case 'penalty_result': {
         if (event.type === 'penalty_result' && sameTeam) {
           if (typeof event.data.scored !== 'boolean') return { void: true, reason: 'penalty result was ambiguous in the feed' };
-          return pick(event.data.scored ? 'yes' : 'no');
+          // A scored penalty settles on the goal itself (the feed's "steps up..." line comes half a second
+          // earlier), so the room never sees "It's YES!" while the scorebug still reads 0-0.
+          return event.data.scored ? null : pick('no');
         }
+        if (event.type === 'goal' && sameTeam) return pick('yes');
         if (event.type === 'period_end' || isFinal) return { void: true, reason: 'no penalty result arrived from the feed' };
         return null;
       }

@@ -832,7 +832,8 @@ export function takeOffer(l: Lobby, p: Player, offerId: string, cents: number, n
   if (!o || !o.open) throw new ApiError(400, "That offer is gone");
   if (o.by === p.id) throw new ApiError(400, "That's your own offer");
   if (!Number.isInteger(cents) || cents < 1) throw new ApiError(400, "Enter an amount");
-  if (p.balance < Math.min(cents, takerStakeFor(o.cents - o.filled, o.odds))) throw new ApiError(400, "Not enough balance. Add money first.");
+  // Partial takes: fill up to what the taker has (CONTRACT "Partial takes OK"); refuse only an empty balance.
+  if (p.balance < 1) throw new ApiError(400, "Not enough balance. Add money first.");
   let fill;
   try {
     fill = fillOffer(o, Math.min(cents, p.balance));

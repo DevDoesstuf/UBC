@@ -20,11 +20,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     if (!DEPOSIT_OPTIONS.includes(cents)) throw new ApiError(400, "Pick one of the listed amounts");
 
     if (MONEY_MODE === "demo") {
+      let credited = 0;
       await mutate(code, (l, now) => {
         const p = requirePlayer(l, token);
-        creditDeposit(l, p.id, cents, "demo", `demo-${p.id}-${now}`, now);
+        if (l.phase === "ended") throw new ApiError(400, "This session has ended. Cash out instead");
+        if (creditDeposit(l, p.id, cents, "demo", `demo-${p.id}-${now}`, now)) credited = cents;
       });
-      return json({ ok: true, credited: cents });
+      return json({ ok: true, credited });
     }
 
     if (MONEY_MODE === "solana") {
@@ -34,6 +36,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
       let code4 = "";
       await mutate(code, (l, now) => {
         const p = requirePlayer(l, token);
+        if (l.phase === "ended") throw new ApiError(400, "This session has ended. Cash out instead");
         code4 = l.code;
         addSolanaRef(l, p.id, reference, cents, now);
       });

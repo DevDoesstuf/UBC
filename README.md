@@ -149,7 +149,7 @@ The server keeps two numbers per market: YES shares sold and NO shares sold. `b`
 - A buy costs `C(after) - C(before)`. Phones buy by dollar amount; shares come from the closed-form inverse: `s = b * ln(e^(m/b) + e^((other - mine)/b) * (e^(m/b) - 1))`.
 - Each winning share pays $1 (payout rounded down to the cent). Balances are integer cents.
 - Worked example (b = 10), checked by `npm test`: 5 YES costs $2.81 and moves YES to 62%, then 4 NO costs $1.70 and YES drops to 52%.
-- **Subsidy:** the house can lose at most `b * ln 2` per question ($6.93 at b = 10). With demo money that's free. With real money, the treasury must hold that much per question. `housePnl` in the lobby tracks it.
+- **Subsidy:** the house can lose at most `b * ln(1/p)` per question, where p is the opening price of the side that wins (`lmsr.maxLoss(b, prior)`): $6.93 at b = 10 for a 50/50 open, up to $29.96 for a question that opens at 5% (model priors do). With demo money that is free. With real money, the treasury must hold that much per question. `housePnl` in the lobby tracks it.
 - Prices shown are clamped to 1..99¢. There is no selling yet: players can only buy.
 
 ### Games config (`web/config/games.json`)
@@ -247,7 +247,7 @@ Cash-out with `PAYOUTS=onchain` (real money only) sends the player's whole balan
 1. In [portal.cdp.coinbase.com](https://portal.cdp.coinbase.com), create a **Secret API key** (Ed25519 recommended). Put its id and secret in `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` in **Vercel env vars**, not in chat or git.
 2. Create a **Wallet Secret** (Server Wallet) and put it in `CDP_WALLET_SECRET`. The server then creates or loads a treasury account named `live-lines-treasury`. Its address shows up the first time a deposit is started. Or set `TREASURY_ADDRESS` to a Base address you already control (payouts then need to be done by hand).
 3. In the portal, under Onramp, make sure Onramp is enabled for the project and add your Vercel domain to the **Domain Allowlist**. Without it, Coinbase silently ignores the redirect back to the site; the deposit still lands and **Check for my deposit** still works.
-4. For real payouts, keep a little ETH on Base in the treasury for gas, plus enough USDC to cover the house subsidy (`b * ln 2` per question).
+4. For real payouts, keep a little ETH on Base in the treasury for gas, plus enough USDC to cover the house subsidy (`b * ln(1/p)` per question, up to $29.96 at b = 10 and a 5% open).
 5. Start with `COINBASE_SANDBOX=true` (the default), then switch to `false` for real money.
 
 **Caveats from Coinbase's docs:**
@@ -378,7 +378,7 @@ Planned: a second ESP32 with an I2S amp (e.g. MAX98357A) that polls `GET /api/ki
 | Real-time: polling or hosted real-time? | Polling about every second |
 | Onramp provider | Coinbase Onramp (USDC on Base) + CDP Server Wallet for payouts |
 | Resolving markets | Host taps YES/NO on the kiosk. Optional auto-resolve from config (`answer` + `resolveAt`). AI resolution is a later add-on |
-| Subsidy | LMSR. House covers `b * ln 2` per question. The pooled-bet fallback from the spec is not implemented (TapBet had it) |
+| Subsidy | LMSR. House covers up to `b * ln(1/p)` per question (p = opening price of the winning side; `b * ln 2` at 50/50). The pooled-bet fallback from the spec is not implemented (TapBet had it) |
 | Real money | Off by default. Needs three env flags. Legal note above |
 | Other 3 games | Basketball, Soccer, Tennis as "Coming soon" tiles (change in games.json) |
 

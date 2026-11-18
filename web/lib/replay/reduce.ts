@@ -45,7 +45,8 @@ export function reduce(state: GameState, event: GameEvent): GameState {
   // ---- clock ----
   if (state.sport === 'soccer') {
     const minute = data.minute;
-    if (typeof minute === 'number' && Number.isFinite(minute)) next.minute = minute;
+    // The final whistle often carries minute 90 after stoppage-time events (96'): the clock never runs backwards.
+    if (typeof minute === 'number' && Number.isFinite(minute)) next.minute = event.type === 'final' ? Math.max(base.minute ?? 0, minute) : minute;
   } else {
     const secs = data.secondsRemaining;
     if (typeof secs === 'number' && Number.isFinite(secs)) next.secondsRemaining = Math.max(0, secs);

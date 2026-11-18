@@ -194,7 +194,9 @@ test("replay: pregame Gemini question, engine questions on the game clock, settl
   assert.equal(v.game!.score!.started, true);
   const screen = await kioskScreen(kiosk, "http://x");
   assert.equal(screen.screen, "market");
-  assert.match(screen.title, new RegExp(`Question 2 of ${total}`));
+  // Replays ask as the plays come (calls add more): numbered without a fixed total, like the phone and TV.
+  assert.equal(screen.title, "Question 2");
+  void total;
 
   // Play the whole game, one poll per second, both players buying every question.
   const asked = new Set<string>([v.market!.text]);

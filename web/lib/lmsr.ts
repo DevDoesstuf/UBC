@@ -40,9 +40,13 @@ export function sharesForSpend(side: Side, dollars: number, qy: number, qn: numb
   return b * Math.log(em + Math.exp((other - mine) / b) * (em - 1));
 }
 
-/** Worst case the market maker can lose on one market (the subsidy): b * ln 2. */
-export function maxLoss(b: number): number {
-  return b * Math.LN2;
+/**
+ * Worst case the market maker can lose on one market (the subsidy) when it opens at YES price `prior`:
+ * b * ln(1 / p) where p is the opening price of the side that wins. b * ln 2 at 50/50, $29.96 at b = 10 and 5%.
+ */
+export function maxLoss(b: number, prior = 0.5): number {
+  const p = Math.min(Math.max(prior, 1e-6), 1 - 1e-6);
+  return b * Math.log(1 / Math.min(p, 1 - p));
 }
 
 /** Price as whole cents for display, kept inside 1..99 so neither side ever shows 0 or 100. */

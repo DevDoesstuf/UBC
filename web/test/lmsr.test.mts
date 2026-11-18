@@ -33,6 +33,7 @@ test("sharesForSpend is the inverse of costToBuy", () => {
 
 test("max loss is b ln 2 (about $6.93 at b = 10)", () => {
   close(maxLoss(10), 6.93);
+  close(maxLoss(10, 0.05), 29.96); // a question that opens at a 5% model prior
   close(cost(0, 0, 10), 6.93);
 });
 

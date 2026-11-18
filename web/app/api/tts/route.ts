@@ -19,9 +19,12 @@ export async function GET(req: Request) {
     if (code) {
       const l = await getLobby(code);
       if (!l) throw new ApiError(404, "Lobby not found");
-      const id = Number(q.get("id"));
-      const cap = (l.captions ?? []).find((c) => c.id === id) ?? (l.captions ?? [])[l.captions!.length - 1];
-      if (!cap) throw new ApiError(404, "No caption yet");
+      // An id names one caption (the URL is cached as immutable, so it must never answer with another line);
+      // without an id, the newest caption.
+      const idParam = q.get("id");
+      const caps = l.captions ?? [];
+      const cap = idParam ? caps.find((c) => c.id === Number(idParam)) : caps[caps.length - 1];
+      if (!cap) throw new ApiError(404, idParam ? "No caption with that id (it may have rolled off)" : "No caption yet");
       text = cap.text;
       if (!q.get("persona")) persona = personaOf(l);
     }
