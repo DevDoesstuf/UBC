@@ -621,8 +621,8 @@ static void liveDot(int cx, int cy, bool fresh) {
   if (fresh) {  // a soft ping every 1.6 s
     float p = (NOW % 1600) / 1600.f;
     if (p < 0.8f) circle(cx, cy, 5 + 9 * eOut(p / 0.8f), c, (uint8_t)(90 * (1 - p / 0.8f)));
-    markAmbient(cx - 16, cy - 16, 32, 32);
   }
+  markAmbient(cx - 16, cy - 16, 32, 32);  // also turns gold when the site stops answering
   circle(cx, cy, 5, c);
 }
 
@@ -2069,6 +2069,10 @@ static void scene(const NetStatus &st) {
     default: drawMessage(s, st); break;
   }
   if (toast[0] && NOW - tToast < 3040) drawToast();
+  else if (toast[0] && measuring) {  // gone: erase it
+    toast[0] = 0;
+    fullDirty = true;
+  }
   if (staleNow) {  // keep the last screen, say we are reconnecting
     const char *msg = "Reconnecting to the site...";
     int w = textW(F_B1, msg) + 64, x = (SCR_W - w) / 2;
@@ -2102,6 +2106,10 @@ bool uiFrame(const NetStatus &st) {
   uint32_t status = strHash(st.error, (st.configured ? 1 : 0) | (st.wifi ? 2 : 0) | (st.lastOkMs ? 4 : 0)) ^ strHash(st.ip);
   if (conn && status != lastStatus) fullDirty = true;
   lastStatus = status;
+  if (tapped[0] && NOW - tappedAt >= 2500) {  // no answer: drop the pending dots
+    tapped[0] = 0;
+    fullDirty = true;
+  }
   ambientTick = NOW - lastAmbient >= 100;
   if (ambientTick) lastAmbient = NOW;
 
@@ -2368,6 +2376,7 @@ void uiSetJson(const String &body) {
     strlcpy(toast, n.error, sizeof(toast));
     tToast = NOW;
   }
+  if (tapped[0]) fullDirty = true;
   tapped[0] = 0;  // the server answered: the press is done
   Screen *t = cur;
   cur = nxt;
