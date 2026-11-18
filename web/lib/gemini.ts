@@ -172,6 +172,47 @@ export function contractLine(label: string): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
+/** A team as our screens name it, keyed by its Gemini contract code ("LAC" -> "Chargers"). */
+export interface LabelTeam {
+  code: string;
+  name: string;
+}
+
+const PERIOD_WORD: Record<string, string> = { Q: "quarter", H: "half" };
+function periodText(period: string | undefined): string | null {
+  const m = /^(\d)([QH])$/i.exec(period ?? "");
+  if (!m) return null;
+  const n = Number(m[1]);
+  return `${n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`} ${PERIOD_WORD[m[2].toUpperCase()]}`;
+}
+
+/**
+ * Gemini names contracts by city, cut short where two teams share one ("Los Angeles C", "New York J"), and
+ * adds rule words ("San Francisco wins 1st Quarter", "More than 56.5 points scored"). This is the label our
+ * screens and the announcer use: the team as we call it ("Chargers to win the 1st quarter"), "Tie in the
+ * 2nd half", "Over 56.5 points". The contract code decides the team; a label we cannot place is kept as is.
+ */
+export function friendlyLabel(ev: Pick<GeminiEvent, "kind" | "period">, c: { ticker: string; label: string }, teams: LabelTeam[] = []): string {
+  const raw = String(c.label ?? "").replace(/\s+/g, " ").trim();
+  const code = String(c.ticker ?? "").toUpperCase();
+  if (ev.kind === "total") {
+    const m = /^more than\s+(\d+(?:\.\d+)?)\s+(\w+)/i.exec(raw);
+    return m ? `Over ${m[1]} ${m[2].toLowerCase()}` : raw;
+  }
+  if (ev.kind !== "moneyline" && ev.kind !== "period_winner") return raw;
+  const per = ev.kind === "period_winner" ? periodText(ev.period) : null;
+  if (code === "D" || /^(tie|draw)\b/i.test(raw)) return per ? `Tie in the ${per}` : /draw/i.test(raw) ? "Draw" : "Tie";
+  let team = teams.find((t) => t.code && t.code.toUpperCase() === code);
+  if (!team) {
+    // "Los Angeles C" with no code match: the one team whose full name the label (minus its last initial) begins.
+    const city = raw.replace(/\s+wins?\b.*$/i, "").trim();
+    const hits = teams.filter((t) => t.name.toLowerCase().startsWith(city.toLowerCase()));
+    if (hits.length === 1) team = hits[0];
+  }
+  if (!team) return raw;
+  return per ? `${team.name} to win the ${per}` : team.name;
+}
+
 /** Engine calibration input. */
 export function toEngineQuotes(s: GeminiSnapshot | null): GeminiEventQuote[] {
   if (!s) return [];
@@ -188,7 +229,7 @@ export function toEngineQuotes(s: GeminiSnapshot | null): GeminiEventQuote[] {
  *  - moneyline / period_winner: the contract for team `yesTeam` (a Gemini team code like "DAL")
  *  - total: the "More than <line>" contract with exactly our line
  */
-export function refForHint(s: GeminiSnapshot | null, hint: GeminiHint | undefined, yesTeam?: string): GeminiRef | null {
+export function refForHint(s: GeminiSnapshot | null, hint: GeminiHint | undefined, yesTeam?: string, teams: LabelTeam[] = []): GeminiRef | null {
   if (!s || !hint || !s.events.length) return null;
   const ev =
     hint.kind === "moneyline"
@@ -202,15 +243,15 @@ export function refForHint(s: GeminiSnapshot | null, hint: GeminiHint | undefine
       ? ev.contracts.find((x) => x.prob !== null && hint.line !== undefined && contractLine(x.label) === hint.line)
       : ev.contracts.find((x) => x.prob !== null && !!yesTeam && x.ticker.toUpperCase() === yesTeam.toUpperCase());
   if (!c || c.prob === null) return null;
-  return { prob: c.prob, label: c.label, asOf: s.asOf, url: ev.url, live: s.live, eventTicker: ev.ticker, contract: c.ticker, source: sourceOf(s) };
+  return { prob: c.prob, label: friendlyLabel(ev, c, teams), asOf: s.asOf, url: ev.url, live: s.live, eventTicker: ev.ticker, contract: c.ticker, source: sourceOf(s) };
 }
 
 /** Direct mapping from a clip question's config: { event: "NFL-...-M", contract: "DAL" }. */
-export function refForContract(s: GeminiSnapshot | null, eventTicker: string, contract: string): GeminiRef | null {
+export function refForContract(s: GeminiSnapshot | null, eventTicker: string, contract: string, teams: LabelTeam[] = []): GeminiRef | null {
   const ev = s?.events.find((e) => e.ticker === eventTicker);
   const c = ev?.contracts.find((x) => x.ticker.toUpperCase() === contract.toUpperCase());
   if (!s || !ev || !c || c.prob === null) return null;
-  return { prob: c.prob, label: c.label, asOf: s.asOf, url: ev.url, live: s.live, eventTicker: ev.ticker, contract: c.ticker, source: sourceOf(s) };
+  return { prob: c.prob, label: friendlyLabel(ev, c, teams), asOf: s.asOf, url: ev.url, live: s.live, eventTicker: ev.ticker, contract: c.ticker, source: sourceOf(s) };
 }
 
 // ---------------------------------------------------------------- fetching
@@ -276,9 +317,14 @@ const shortTime = (iso: string) => {
 function snapshotFromConfig(cfg: GeminiGameConfig, error: string, note?: string): GeminiSnapshot | null {
   if (!cfg.snapshot) return null;
   const at = Date.parse(cfg.snapshot.asOf);
+  const events = eventsFromStored(cfg.snapshot);
+  // Listed but never traded (e.g. Man United v Aston Villa): say there is nothing to compare, not "prices from...".
+  const unpriced = !events.some((e) => e.contracts.some((c) => c.prob !== null));
   return {
-    at: Number.isNaN(at) ? 0 : at, asOf: cfg.snapshot.asOf, live: false, ok: true, error, events: eventsFromStored(cfg.snapshot), source: "snapshot",
-    note: note ?? `Gemini could not be reached (${error}); showing the last prices seen, ${shortDate(cfg.snapshot.asOf)} ${shortTime(cfg.snapshot.asOf)}.`,
+    at: Number.isNaN(at) ? 0 : at, asOf: cfg.snapshot.asOf, live: false, ok: true, error, events, source: "snapshot",
+    note: unpriced
+      ? "Gemini listed this game but it never traded, so there are no Gemini prices to compare with."
+      : note ?? `Gemini could not be reached (${error}); showing the last prices seen, ${shortDate(cfg.snapshot.asOf)} ${shortTime(cfg.snapshot.asOf)}.`,
   };
 }
 

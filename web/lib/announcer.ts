@@ -76,7 +76,9 @@ function variants(ev: CaptionEvent, p: Persona): string[] {
       const room = pct(ev.yesPct);
       const lock = ev.lockIn && ev.lockIn > 0 ? Math.round(ev.lockIn) : null;
       const model = typeof ev.modelPct === "number" ? pct(ev.modelPct) : null;
-      const gem = ev.gemini ? `Gemini has ${ev.gemini.label} at ${pct(ev.gemini.pct)}.` : null;
+      // Labels read "Chargers", "Chargers to win the 1st quarter", "Over 56.5 points", "Tie in the 2nd half".
+      const gl = ev.gemini ? ev.gemini.label.replace(/^(Over|Under|Tie|Draw)\b/, (w) => w.toLowerCase()) : "";
+      const gem = ev.gemini ? `Gemini has ${gl === "draw" ? "a draw" : gl === "tie" ? "a tie" : gl.startsWith("tie ") ? `a ${gl}` : gl} at ${pct(ev.gemini.pct)}.` : null;
       const pool = ev.mode === "pool";
       const h2h = ev.mode === "h2h";
       const closer: Record<Persona, string> = {
@@ -183,12 +185,43 @@ function variants(ev: CaptionEvent, p: Persona): string[] {
   }
 }
 
-/** One caption line for an event, or null when there is nothing worth saying. */
+/** The kiosk box draws at most this many characters of a caption (lib/kiosk.ts cuts there). */
+export const MAX_CAPTION = 180;
+
+/**
+ * Trim a line to `max` characters without cutting a word: whole sentences while they fit, else the first
+ * sentence cut at a word boundary with "...". Sentences split on ". " before a capital, so "D.Prescott" and
+ * "Jones Jr. makes" stay whole.
+ */
+export function fitText(s: string, max: number = MAX_CAPTION): string {
+  const t = String(s ?? "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  let out = "";
+  for (const sen of t.split(/(?<=[.!?])\s+(?=[A-Z0-9("'*$])/)) {
+    const next = out ? `${out} ${sen}` : sen;
+    if (next.length <= max) {
+      out = next;
+      continue;
+    }
+    if (out.length < max / 2) {
+      const room = max - (out ? out.length + 1 : 0) - 3;
+      const cut = sen.slice(0, room + 1);
+      const at = cut.lastIndexOf(" ");
+      const head = (at > 0 ? cut.slice(0, at) : cut.slice(0, room)).replace(/[\s,;:(-]+$/, "");
+      out = `${out ? `${out} ` : ""}${head}...`;
+    }
+    break;
+  }
+  return out;
+}
+
+/** One caption line for an event, or null when there is nothing worth saying. Never longer than MAX_CAPTION. */
 export function captionLine(ev: CaptionEvent, persona: Persona = "nfl", seed = ""): string | null {
   const p: Persona = persona === "soccer" || persona === "calm" ? persona : "nfl";
   const list = variants(ev, p);
   if (!list.length) return null;
-  return pick(list, `${seed}|${ev.type}`) ?? null;
+  const line = pick(list, `${seed}|${ev.type}`);
+  return line ? fitText(line) : null;
 }
 
 /** A trade is announced when it is big: at least $5, or at least a third of the market's volume so far. */

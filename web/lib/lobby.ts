@@ -12,7 +12,7 @@ import { kvDel, kvGet, kvSet, withLock } from "./store";
 import { getGame, hasVideo, isReplay } from "./games";
 import * as lmsr from "./lmsr";
 import { captionLine, isBigTrade, type CaptionEvent, type Persona } from "./announcer";
-import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTrack, replaySnapshotAt, sourceOf, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot } from "./gemini";
+import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTrack, replaySnapshotAt, sourceOf, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot, type LabelTeam } from "./gemini";
 import { buildScorecard } from "./scorecard";
 import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePairs, settlePool, takerStakeFor, MAX_ODDS, MIN_ODDS } from "./modes";
 import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
@@ -150,11 +150,21 @@ function geminiConfigFor(game: Game | undefined): GeminiGameConfig | undefined {
   return { event: i > 0 ? t.slice(0, i) : t };
 }
 
+/** Our names for the game's teams, keyed by Gemini contract code, so Gemini's "Los Angeles C" reads "Chargers". */
+function labelTeams(l: Lobby): LabelTeam[] {
+  const st = l.replay?.state;
+  if (!st) return [];
+  const cfg = getGame(l.gameId)?.gemini;
+  const say = (name: string) => (st.sport === "soccer" ? name : name.trim().split(/\s+/).pop() ?? name);
+  return [{ code: cfg?.home ?? st.home.short, name: say(st.home.name) }, { code: cfg?.away ?? st.away.short, name: say(st.away.name) }];
+}
+
 function refreshMarketGemini(l: Lobby, now: number = Date.now()): void {
   const m = l.market;
   if (!m || !m.geminiKey || l.phase !== "open") return;
   const k = m.geminiKey;
-  const ref = k.event && k.contract ? refForContract(l.gemini ?? null, k.event, k.contract) : refForHint(l.gemini ?? null, k.hint, k.yesTeam);
+  const teams = labelTeams(l);
+  const ref = k.event && k.contract ? refForContract(l.gemini ?? null, k.event, k.contract, teams) : refForHint(l.gemini ?? null, k.hint, k.yesTeam, teams);
   if (ref) {
     m.gemini = ref;
     noteTrail(m, now);
@@ -624,7 +634,12 @@ function winnersOf(l: Lobby, m: Market, outcome: Side): { name: string; cents: n
 
 function recordScore(l: Lobby, m: Market, outcome: Side): void {
   const room = m.priceAtLock ?? yesPrice(m);
-  (l.scoreEntries ??= []).push({ room, model: m.model ?? null, gemini: m.gemini?.prob ?? null, outcome: outcome === "yes" ? 1 : 0 });
+  // Games with a Gemini market say whether Gemini priced it at all, so the verdict can tell "not comparable" apart.
+  const mapped = !!geminiConfigFor(getGame(l.gameId));
+  const priced = !!l.gemini?.events.some((e) => e.contracts.some((c) => c.prob !== null));
+  (l.scoreEntries ??= []).push({
+    room, model: m.model ?? null, gemini: m.gemini?.prob ?? null, outcome: outcome === "yes" ? 1 : 0, ...(mapped ? { geminiUnpriced: !priced } : {}),
+  });
 }
 
 export function resolveMarket(l: Lobby, outcome: Side, now: number): void {
