@@ -1,0 +1,64 @@
+{
+  "_help": "One entry per game tile on the kiosk (the first 4 are shown). Adding a game is adding an entry here, not code. Set live=true to make a tile tappable. youtubeId is the 11 characters after v= in a YouTube link. All times are seconds into the video: trading opens when the host starts a question (the video jumps to startAt), locks automatically at lockAt, and if answer is set to \"yes\" or \"no\" it resolves itself at resolveAt; otherwise the host taps the result on the kiosk. b is the LMSR liquidity: smaller = jumpier prices; the house can lose at most b x ln2 dollars per question (about $6.93 at b=10).",
+  "games": [
+    {
+      "id": "football",
+      "title": "Football",
+      "subtitle": "4th quarter: defense on the field",
+      "live": true,
+      "color": "#1d9e75",
+      "youtubeId": "PASTE_YOUTUBE_ID",
+      "b": 10,
+      "questions": [
+        {
+          "id": "int",
+          "text": "Will the defense intercept on the next play?",
+          "short": "Interception next play?",
+          "startAt": 0,
+          "lockAt": 45,
+          "resolveAt": 60,
+          "answer": null
+        },
+        {
+          "id": "td",
+          "text": "Touchdown on this drive?",
+          "short": "Touchdown this drive?",
+          "startAt": 60,
+          "lockAt": 100,
+          "resolveAt": 130,
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "basketball",
+      "title": "Basketball",
+      "subtitle": "Final 30 seconds",
+      "live": false,
+      "color": "#d85a30",
+      "youtubeId": "",
+      "b": 10,
+      "questions": []
+    },
+    {
+      "id": "soccer",
+      "title": "Soccer",
+      "subtitle": "Penalty shootout",
+      "live": false,
+      "color": "#378add",
+      "youtubeId": "",
+      "b": 10,
+      "questions": []
+    },
+    {
+      "id": "tennis",
+      "title": "Tennis",
+      "subtitle": "Match point rally",
+      "live": false,
+      "color": "#ba7517",
+      "youtubeId": "",
+      "b": 10,
+      "questions": []
+    }
+  ]
+}
