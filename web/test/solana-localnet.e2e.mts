@@ -83,7 +83,7 @@ let BASE = process.env.HUDDLE_URL || "";
 if (!BASE) {
   BASE = `http://localhost:${PORT}`;
   const env = { ...process.env, MONEY_MODE: "solana", SOLANA_TREASURY_SECRET_KEY: SECRET, USDC_MINT: MINT, SOLANA_RPC_URL: RPC, GEMINI_DISABLED: "1", KIOSK_KEY: "" };
-  const s = spawn("npx", ["next", "dev", "-p", String(PORT)], { cwd: WEB, env, detached: true, stdio: "ignore" });
+  const s = spawn("npx", ["next", "dev", "--webpack", "-p", String(PORT)], { cwd: WEB, env, detached: true, stdio: "ignore" });
   s.unref();
   children.push(s);
   for (let i = 0; i < 90; i++) {
