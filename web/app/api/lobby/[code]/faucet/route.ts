@@ -1,0 +1,37 @@
+// POST /api/lobby/ABCD/faucet  {"address":"<Solana wallet address>"}  (header x-player-token)
+// MONEY_MODE=solana only: sends the player's wallet $20 of test USDC (devnet) plus a pinch of SOL for
+// transfer fees, once per player per lobby. The player then deposits with the Solana Pay link as usual.
+// -> {"ok":true,"cents":2000,"usdcSig","solSig","explorer"}
+import { handle, json, playerToken, readBody } from "@/lib/http";
+import { ApiError, mutate, requirePlayer } from "@/lib/lobby";
+import { MONEY_MODE } from "@/lib/money";
+import { FAUCET_CENTS, explorerTx, faucet, isSolanaAddress } from "@/lib/solana";
+
+export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
+  return handle(async () => {
+    if (MONEY_MODE !== "solana") throw new ApiError(400, "The faucet is only for MONEY_MODE=solana; demo money is free");
+    const { code } = await params;
+    const body = await readBody(req);
+    const token = playerToken(req);
+    const address = String(body.address ?? "").trim();
+    if (!(await isSolanaAddress(address))) throw new ApiError(400, "Enter the Solana address of your wallet");
+    let playerId = "";
+    await mutate(code, (l) => {
+      const p = requirePlayer(l, token);
+      if (p.fauceted) throw new ApiError(400, "You already got test money in this lobby");
+      p.fauceted = true;
+      p.solanaAddress ??= address;
+      playerId = p.id;
+    });
+    try {
+      const r = await faucet(address, FAUCET_CENTS);
+      return json({ ok: true, cents: FAUCET_CENTS, ...r, explorer: explorerTx(r.usdcSig) });
+    } catch (e) {
+      await mutate(code, (l) => {
+        const p = l.players[playerId];
+        if (p) p.fauceted = false;
+      });
+      throw new ApiError(502, `Faucet failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  });
+}

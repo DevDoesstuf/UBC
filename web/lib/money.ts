@@ -14,30 +14,51 @@
 //   CDP_WALLET_SECRET                    only for PAYOUTS=onchain (or to auto-create the treasury wallet)
 //   TREASURY_ADDRESS                     optional 0x address that receives deposits; defaults to the CDP wallet
 
+//
+// MONEY_MODE=solana          Test USDC on Solana devnet through Solana Pay (see lib/solana.ts): deposits are
+//                            transfer-request links/QRs to the treasury, credited once per signature;
+//                            cash-out sends USDC from the treasury. Needs SOLANA_TREASURY_SECRET_KEY and
+//                            USDC_MINT (SOLANA_RPC_URL defaults to devnet). Missing env -> demo money, and
+//                            /api/health says why.
+
+import { solanaProblems } from "./solana";
+
 const env = (k: string) => (process.env[k] || "").trim();
 
-export const MONEY_MODE: "demo" | "coinbase" = env("MONEY_MODE") === "coinbase" ? "coinbase" : "demo";
+/** What MONEY_MODE asked for; MONEY_MODE below is what actually runs (solana falls back to demo when not configured). */
+export const REQUESTED_MONEY_MODE = env("MONEY_MODE") || "demo";
+const SOLANA_FALLBACK = REQUESTED_MONEY_MODE === "solana" ? solanaProblems() : [];
+export const MONEY_MODE: "demo" | "coinbase" | "solana" =
+  REQUESTED_MONEY_MODE === "coinbase" ? "coinbase" : REQUESTED_MONEY_MODE === "solana" && SOLANA_FALLBACK.length === 0 ? "solana" : "demo";
 export const SANDBOX = env("COINBASE_SANDBOX").toLowerCase() !== "false";
 export const PAYOUTS: "off" | "onchain" = env("PAYOUTS") === "onchain" ? "onchain" : "off";
 const ONRAMP_API: "v2" | "v1" = env("COINBASE_ONRAMP_API") === "v1" ? "v1" : "v2";
 const TREASURY_ACCOUNT_NAME = env("CDP_TREASURY_ACCOUNT_NAME") || "live-lines-treasury";
 const NETWORK = "base";
 
-export const DEPOSIT_OPTIONS = MONEY_MODE === "coinbase" ? [500, 1000, 2000] : [500, 1000];
+export const DEPOSIT_OPTIONS = MONEY_MODE === "coinbase" || MONEY_MODE === "solana" ? [500, 1000, 2000] : [500, 1000];
 
 export function moneyInfo() {
+  const solana = MONEY_MODE === "solana";
   return {
     mode: MONEY_MODE,
     sandbox: MONEY_MODE === "coinbase" ? SANDBOX : true,
     realMoney: MONEY_MODE === "coinbase" && !SANDBOX,
-    payouts: MONEY_MODE === "coinbase" && !SANDBOX && PAYOUTS === "onchain" ? "onchain" : "test",
+    /** "solana": cash-out sends devnet USDC to a Solana address (or the wallet the player deposited from). */
+    payouts: (solana ? "solana" : MONEY_MODE === "coinbase" && !SANDBOX && PAYOUTS === "onchain" ? "onchain" : "test") as "solana" | "onchain" | "test",
     depositOptions: DEPOSIT_OPTIONS,
-    asset: "USDC on Base",
-  } as const;
+    asset: solana ? "test USDC on Solana devnet" : "USDC on Base",
+    /** Solana: deposits are Solana Pay links; a faucet gives test USDC. */
+    solanaPay: solana,
+    faucet: solana,
+  };
 }
 
 export function moneyProblems(): string[] {
   const out: string[] = [];
+  if (REQUESTED_MONEY_MODE === "solana" && SOLANA_FALLBACK.length) {
+    out.push(`MONEY_MODE=solana is not configured (${SOLANA_FALLBACK.join("; ")}): running demo money instead`);
+  }
   if (MONEY_MODE !== "coinbase") return out;
   if (!env("CDP_API_KEY_ID") || !env("CDP_API_KEY_SECRET")) out.push("MONEY_MODE=coinbase needs CDP_API_KEY_ID and CDP_API_KEY_SECRET");
   if (!env("TREASURY_ADDRESS") && !env("CDP_WALLET_SECRET")) out.push("Set TREASURY_ADDRESS, or CDP_WALLET_SECRET so the server wallet can be created");
