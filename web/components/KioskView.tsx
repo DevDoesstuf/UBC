@@ -365,7 +365,7 @@ function Select({ s, onTouch, fresh }: Ctx) {
                 className={`hk-card hk-rise ${c.enabled ? "hk-lift" : "hk-off"}`}
                 style={{ left: x, top: y, width: 248, height: 184, ...d(80 + i * 60) }}
                 onClick={() => c.enabled && onTouch(c.id)}
-                disabled={!c.enabled}
+                aria-disabled={!c.enabled}
                 aria-label={`${c.title}${c.enabled ? "" : ", coming soon"}`}
               >
                 <i className="hk-ribbon" style={{ background: teams ? `linear-gradient(90deg, ${c.home!.color ?? c.color ?? P.accent} 50%, ${c.away!.color ?? P.ink2} 50%)` : c.color ?? P.accent }} />
