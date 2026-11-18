@@ -4,7 +4,7 @@
 // like the firmware does (top = baseline - ascent of the firmware font). Motion is CSS: entrances are keyframes
 // whose resting style is the final state, numbers roll, the lock ring drains from the clock. If the box and
 // this page ever differ, the firmware is the reference.
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import type { KioskButton, KioskCard, KioskScreen } from "@/lib/kiosk";
 import { avatarHash } from "@/lib/boxText";
 
@@ -832,7 +832,7 @@ function Result({ s, onTouch, pending, fresh }: Ctx) {
   share = Math.min(0.95, Math.max(0.05, share));
   const next = s.buttons.find((b) => b.id === "next");
   const end = s.buttons.find((b) => b.id === "end");
-  const allCalls = s.calls ?? s.buttons.filter((b) => b.id.startsWith("moment:"));
+  const allCalls: (KioskButton & { enabled?: boolean })[] = s.calls ?? s.buttons.filter((b) => b.id.startsWith("moment:"));
   const winners = s.winners ?? (s.lines ?? []).map((l) => ({ name: l, cents: 0, profit: 0 }));
   const losers = s.losers ?? [];
   const trailing = (s.volume !== undefined ? `${money(s.volume)} traded` : s.traded) ?? "";
@@ -996,6 +996,419 @@ function Message({ s, onTouch, pending, fresh }: Ctx) {
   );
 }
 
+// ---------------------------------------------------------------- pages (market / locked / result scroll down)
+//
+// Same layout as ui.cpp drawPage: the first 480 px are the screen as it always was; under it the odds graph,
+// "Odds right now", recent trades + standings and Back to top. Snap points, the slim header that slides in once
+// the view is scrolled away (tap = top), the "more below" tab and the scrollbar match the firmware.
+
+type Chart = NonNullable<KioskScreen["chart"]>;
+type Odds = NonNullable<KioskScreen["odds"]>[number];
+
+const hasPage = (s: KioskScreen) =>
+  (s.screen === "market" || s.screen === "locked" || s.screen === "result") && ((s.chart?.room.length ?? 0) > 0 || (s.odds?.length ?? 0) > 0 || (s.standings?.length ?? 0) > 0);
+
+function pageLayout(s: KioskScreen) {
+  const chartY = 480 + 8;
+  const chartH = (s.chart?.room.length ?? 0) > 0 ? 348 : 0;
+  const oddsY = chartY + (chartH ? chartH + 20 : 0);
+  const nOdds = Math.min(10, s.odds?.length ?? 0);
+  const oddsH = 64 + Math.max(1, nOdds) * 66;
+  const listY = oddsY + oddsH + 12;
+  const rows = Math.min(8, Math.max(1, Math.min(8, s.trades?.length ?? 0), s.standings?.length ?? 0));
+  const listH = 58 + rows * 38 + 10;
+  const endY = listY + listH + 20;
+  return { chartY, chartH, oddsY, oddsH, listY, listH, endY, contentH: endY + 62 + 18 };
+}
+
+/** True once a good part of the element has been on screen inside the page (the firmware's seen()). */
+function useSeen(root: RefObject<HTMLDivElement | null>, h: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || seen) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setSeen(true);
+      return;
+    }
+    const need = Math.min(h / 3, 150) / h;
+    const io = new IntersectionObserver((es) => es.some((e) => e.intersectionRatio >= need - 0.01) && setSeen(true), { root: root.current, threshold: [need] });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [root, h, seen]);
+  return { ref, seen };
+}
+
+function ChartSection({ c, question, market, y, h, root }: { c: Chart; question: string; market: boolean; y: number; h: number; root: RefObject<HTMLDivElement | null> }) {
+  const { ref, seen } = useSeen(root, h);
+  const room = c.room.length === 1 ? [c.room[0], c.room[0]] : c.room;
+  const n = room.length;
+  const gem = c.gemini && c.gemini.some((g) => g !== null) ? c.gemini : null;
+  const span = Math.max(1, c.span);
+  const px0 = 72, px1 = 668, py0 = 96, py1 = 300;
+  const PY = (v: number) => py1 - Math.trunc((v * (py1 - py0)) / 100);
+  const PX = (i: number) => px0 + Math.trunc(((px1 - px0) * span * i) / (100 * (n - 1)));
+  const spanX = px0 + Math.trunc(((px1 - px0) * span) / 100);
+  const future = market && spanX < px1 - 2;
+  let path = "";
+  for (let i = 0; i < n; i++) path += i === 0 ? `M${PX(0)},${PY(room[0])}` : `H${PX(i)}V${PY(room[i])}`;
+  const ex = PX(n - 1), ey = PY(room[n - 1]);
+  const gemPath = gem
+    ? gem.map((g, i) => (g === null ? "" : `${i > 0 && gem[i - 1] !== null ? "L" : "M"}${PX(i)},${PY(g)}`)).join("")
+    : "";
+  const lockX = c.lock !== null && !(c.outcome && c.lock >= 96) ? px0 + Math.trunc(((px1 - px0) * c.lock) / 100) : null;
+  // value tags at the right, kept 30 px apart (firmware: same rule)
+  const lastGem = gem ? [...gem].reverse().find((g) => g !== null) ?? null : null;
+  const tags = [
+    { y: PY(room[n - 1]), v: room[n - 1], kind: 0 },
+    ...(lastGem !== null ? [{ y: PY(lastGem), v: lastGem, kind: 1 }] : []),
+    ...(c.model !== null ? [{ y: PY(c.model), v: c.model, kind: 2 }] : []),
+  ].sort((a, b) => a.y - b.y);
+  const ty: number[] = [];
+  tags.forEach((t, i) => ty.push(i ? Math.max(t.y, ty[i - 1] + 30) : Math.max(t.y, py0 - 8)));
+  const over = ty[ty.length - 1] - (py1 + 8);
+  if (over > 0) for (let i = 0; i < ty.length; i++) ty[i] -= over;
+  const yes = c.outcome === "YES";
+  const oy = PY(yes ? 100 : 0);
+  return (
+    <div ref={ref} className={`hk-abs hk-card hk-lift hk-chart ${seen ? "hk-in" : ""}`} style={{ left: 12, top: y, width: 776, height: h, borderRadius: 26, cursor: "default" }} role="img" aria-label={`Odds graph: room ${room[n - 1]}%${lastGem !== null ? `, Gemini ${lastGem}%` : ""}${c.model !== null ? `, model ${c.model}%` : ""}${c.outcome ? `, it was ${c.outcome}` : ""}`}>
+      <T f="H3" x={20} y={40}>Odds graph</T>
+      <T f="B2" x={20} y={66} w={736} color={P.ink2}>{question}</T>
+      <div className="hk-abs hk-legend hk-body hk-w600" style={{ right: 20, top: 24 }}>
+        <span><i style={{ background: P.yes, height: 3.4 }} />Room</span>
+        {c.model !== null && <span><i className="hk-dash" />Model</span>}
+        {gem && <span><i style={{ background: P.ink, height: 2.4 }} /><b className="hk-tri hk-hollow" />Gemini</span>}
+      </div>
+      <svg className="hk-abs" style={{ left: -12, top: 0 }} width={800} height={h} viewBox={`0 0 800 ${h}`} aria-hidden="true">
+        <defs>
+          <clipPath id="hk-reveal">
+            <rect className="hk-reveal" x={px0 - 8} y={py0 - 24} width={spanX - px0 + 52} height={py1 - py0 + 48} />
+          </clipPath>
+        </defs>
+        {future && <rect x={spanX} y={py0} width={px1 - spanX} height={py1 - py0} fill={P.well} opacity={0.67} />}
+        {[0, 25, 50, 75, 100].map((v) => (
+          <rect key={v} x={px0} y={PY(v)} width={px1 - px0} height={1} fill={v === 50 ? P.ruleStrong : P.rule} />
+        ))}
+        {lockX !== null && <line x1={lockX} y1={py0 + 4} x2={lockX} y2={py1} stroke={P.ink} strokeOpacity={0.55} strokeWidth={2} strokeDasharray="5 5" />}
+        {c.model !== null && <line className="hk-fadein" x1={px0} y1={PY(c.model)} x2={px1} y2={PY(c.model)} stroke={P.ink} strokeOpacity={0.67} strokeWidth={2.2} strokeDasharray="8 6" />}
+        <g clipPath="url(#hk-reveal)">
+          <path d={`${path}V${py1}H${PX(0)}Z`} fill={P.yes} fillOpacity={0.12} />
+          {gem && <path d={gemPath} fill="none" stroke={P.ink} strokeWidth={2.4} strokeLinejoin="round" />}
+          <path d={path} fill="none" stroke={P.yes} strokeWidth={3.2} strokeLinejoin="round" />
+        </g>
+        <g className="hk-late">
+          {market && <circle cx={ex} cy={ey} r={5.5} fill={P.yes} className="hk-ping" />}
+          <circle cx={ex} cy={ey} r={5.5} fill={P.yes} />
+          <circle cx={ex} cy={ey} r={2.4} fill={P.card} />
+          {c.outcome && (
+            <>
+              <line x1={ex} y1={Math.min(ey, oy) + 6} x2={ex} y2={Math.max(ey, oy) - 6} stroke={yes ? P.yes : P.no600} strokeWidth={2} strokeDasharray="4 5" />
+              <circle cx={ex} cy={oy} r={12} fill="none" stroke={yes ? P.yes : P.no} strokeWidth={2.5} strokeOpacity={0.5} />
+              <circle cx={ex} cy={oy} r={8} fill={yes ? P.yes : P.no} />
+            </>
+          )}
+          {tags.map((t, i) => (
+            <line key={`l${i}`} x1={t.kind === 0 ? ex + 8 : (t.kind === 2 ? px1 : spanX) + 4} y1={t.y} x2={682} y2={ty[i]} stroke={t.kind === 0 ? P.yes : P.ink} strokeOpacity={0.33} strokeWidth={1.2} />
+          ))}
+        </g>
+      </svg>
+      {lockX !== null && <Lock cx={lockX - 12} cy={py0 - 6} s={0.6} color={P.ink} />}
+      {[0, 25, 50, 75, 100].map((v) => (
+        <T key={v} f="B3" x={px0 - 10 - 12} y={PY(v) + 5} w={60} align="right" color={P.muted}>{`${v}%`}</T>
+      ))}
+      <T f="B3" x={px0 - 12} y={py1 + 26} color={P.muted}>{c.x0 || "Open"}</T>
+      <T f="B3" x={px1 - 12} y={py1 + 26} w={120} align="right" color={P.muted}>{c.x1 || "Now"}</T>
+      {lockX !== null && lockX - px0 > 70 && px1 - lockX > 70 && <T f="B3" x={lockX - 12} y={py1 + 26} w={80} align="center" color={P.ink2}>Locked</T>}
+      {future && px1 - spanX > 150 && <T f="B3" x={(spanX + px1) / 2 - 12} y={py1 - 14} w={220} align="center" color={P.muted}>Trading until the lock</T>}
+      <div className="hk-late">
+        {c.outcome && (
+          <T f="B1" x={(lockX !== null && lockX < ex - 18 && ex - 18 - lockX < 150 ? lockX - 10 : ex - 18) - 12} y={oy + (yes ? 24 : -10)} w={200} align="right" color={yes ? P.yes600 : P.no600}>
+            {yes ? "It was YES" : "It was NO"}
+          </T>
+        )}
+        {tags.map((t, i) => (
+          <span key={i} className="hk-abs hk-tag hk-num hk-w700 hk-c90" style={{ left: 684 - 12, top: ty[i] - 13, background: t.kind === 0 ? P.yes : t.kind === 1 ? P.ink : P.card, color: t.kind === 2 ? P.ink : P.white, boxShadow: t.kind === 2 ? `inset 0 0 0 2px ${P.ink}` : undefined }}>
+            {t.v}%
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MiniLine({ v, x, y, w, h, color, stepped }: { v: number[]; x: number; y: number; w: number; h: number; color: string; stepped: boolean }) {
+  const n = v.length;
+  if (n < 2) return null;
+  let lo = Math.min(...v), hi = Math.max(...v);
+  const mid = Math.trunc((lo + hi) / 2), sp = Math.max(20, hi - lo + 6);
+  lo = Math.min(Math.max(0, mid - Math.trunc(sp / 2)), Math.max(0, 100 - sp));
+  hi = lo + sp;
+  const py = (val: number) => h - 2 - Math.trunc(((val - lo) * (h - 4)) / Math.max(1, hi - lo));
+  const px = (i: number) => Math.trunc((i * (w - 6)) / (n - 1));
+  let d = `M${px(0)},${py(v[0])}`;
+  for (let i = 1; i < n; i++) d += stepped ? `H${px(i)}V${py(v[i])}` : `L${px(i)},${py(v[i])}`;
+  return (
+    <svg className="hk-abs" style={{ left: x, top: y }} width={w} height={h} overflow="visible" aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth={2.2} strokeLinejoin="round" />
+      <circle cx={px(n - 1)} cy={py(v[n - 1])} r={3.6} fill={color} />
+    </svg>
+  );
+}
+
+function OddsSection({ odds, note, y, h, root }: { odds: Odds[]; note: string; y: number; h: number; root: RefObject<HTMLDivElement | null> }) {
+  const { ref, seen } = useSeen(root, h);
+  return (
+    <div ref={ref} className="hk-abs" style={{ left: 0, top: y, width: 800, height: h }}>
+      <T f="H3" x={24} y={30}>Odds right now</T>
+      {note && <T f="B3" x={24} y={52} w={752} color={P.muted}>{note}</T>}
+      {odds.length === 0 && (
+        <div className="hk-abs hk-row hk-lift" style={{ left: 16, top: 64, width: 768, height: 58, borderRadius: 18 }}>
+          <T f="B2" x={18} y={36} color={P.ink2}>No odds to show yet.</T>
+        </div>
+      )}
+      {odds.slice(0, 10).map((o, i) => {
+        const room = o.source === "room";
+        const spark = (o.hist?.length ?? 0) >= 2;
+        // chip widths as drawn (firmware: label + 24, Gemini + its mark 36); the browser's pill runs a few px wider
+        const chipW = room ? 62 : 94;
+        const valL = 768 - 16 - 86;
+        const sparkX = valL - 164;
+        return (
+          <div key={`${o.label}${i}`} className={`hk-abs hk-row hk-lift ${seen ? "hk-slide-r" : ""}`} style={{ left: 16, top: 64 + i * 66, width: 768, height: 58, borderRadius: 18, boxShadow: room ? `inset 0 0 0 2px rgba(18,161,80,.47)` : undefined, ...d(60 + i * 70) }}>
+            {room ? (
+              <span className="hk-pill hk-body hk-w600" style={{ left: 14, top: 16, background: P.accentTint, color: P.deep }}>Room</span>
+            ) : (
+              <span className="hk-pill hk-body hk-w600" style={{ left: 14, top: 16, background: P.ink, color: P.white }}>
+                <svg width="13" height="12" viewBox="0 0 12 11" aria-hidden="true"><path d="M0 0 H12 L6 11 Z M3 1.5 L6 6.5 L9 1.5 Z" fill="#fff" fillRule="evenodd" /></svg> Gemini
+              </span>
+            )}
+            <T f="B1" x={14 + chipW + 12} y={36} w={(spark ? sparkX - 18 : valL - 10) - (14 + chipW + 12)}>{o.label}</T>
+            {spark && <MiniLine v={o.hist!} x={sparkX} y={12} w={150} h={34} color={room ? P.yes : P.ink2} stepped={room} />}
+            <T f="N3" x={768 - 16} y={41} w={100} align="right" color={room ? P.yes600 : P.ink}>{`${o.p}%`}</T>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ListsSection({ s, y, h, root }: { s: KioskScreen; y: number; h: number; root: RefObject<HTMLDivElement | null> }) {
+  const { ref, seen } = useSeen(root, h);
+  const trades = (s.trades ?? []).slice(0, 8);
+  const board = (s.standings ?? []).slice(0, 8);
+  const tie = board.length > 0 && !board[0].lead;
+  return (
+    <div ref={ref} className="hk-abs" style={{ left: 0, top: y, width: 800, height: h }}>
+      {[0, 1].map((side) => (
+        <div key={side} className={`hk-abs hk-card hk-lift ${seen ? "hk-rise" : ""}`} style={{ left: side ? 406 : 16, top: 0, width: 378, height: h, borderRadius: 22, cursor: "default", ...d(side * 90) }}>
+          <T f="H3" x={18} y={36}>{side ? "Standings" : "Recent trades"}</T>
+          {side === 0 && trades.length === 0 && <T f="B2" x={18} y={80} color={P.ink2}>No trades yet. Phones buy YES or NO.</T>}
+          {side === 1 && board.length === 0 && <T f="B2" x={18} y={80} color={P.ink2}>No players yet.</T>}
+          {side === 0 &&
+            trades.map((t, i) => {
+              const ry = 54 + i * 38;
+              const col = t.side === "yes" ? P.yes600 : P.no600;
+              return (
+                <div key={i}>
+                  <Avatar name={t.name} cx={30} cy={ry + 15} r={13} />
+                  <T f="B1" x={52} y={ry + 22} w={126}>{t.name}</T>
+                  <Arrow cx={192} cy={ry + 14} s={0.6} up={t.side === "yes"} color={col} />
+                  <T f="B3" x={202} y={ry + 20} color={col}>{t.side === "yes" ? "Yes" : "No"}</T>
+                  {t.price >= 0 && <T f="B3" x={240} y={ry + 20} color={P.muted}>{`@${t.price}%`}</T>}
+                  <T f="N4" x={378 - 16} y={ry + 22} w={100} align="right">{money(t.cents)}</T>
+                </div>
+              );
+            })}
+          {side === 1 &&
+            board.map((p, i) => {
+              const ry = 54 + i * 38;
+              const lead = i === 0 && !tie;
+              return (
+                <div key={i}>
+                  {lead && <i className="hk-abs" style={{ left: 8, top: ry - 4, width: 362, height: 36, borderRadius: 12, background: P.ink }} />}
+                  <T f="N4" x={28} y={ry + 22} w={30} align="center" color={lead ? P.gold : P.muted}>{String(p.rank || i + 1)}</T>
+                  <Avatar name={p.name} cx={60} cy={ry + 14} r={13} />
+                  <T f="B1" x={82} y={ry + 22} w={150} color={lead ? P.white : P.ink}>{p.name}</T>
+                  {p.pnl !== 0 && <T f="B3" x={378 - 16 - 78} y={ry + 21} w={100} align="right" color={lead ? P.lime : p.pnl > 0 ? P.yes600 : P.no600}>{money(p.pnl, true)}</T>}
+                  <T f="N4" x={378 - 16} y={ry + 22} w={100} align="right" color={lead ? P.white : P.ink}>{money(p.cents)}</T>
+                </div>
+              );
+            })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The slim header that slides in once the view is scrolled away (firmware pageChrome). Tap = back to the top. */
+function PageHeader({ s, k, rem, onTop }: { s: KioskScreen; k: number; rem: number; onTop: () => void }) {
+  const badge = /^Question \d+/.test(s.title) ? `Q${/^Question (\d+)/.exec(s.title)![1]}` : s.title || "Live";
+  const secs = Math.ceil(rem / 1000);
+  const clock = secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` : `${secs}s`;
+  const result = s.result === "YES" ? { t: "YES", bg: P.yes, fg: P.white } : s.result === "NO" ? { t: "NO", bg: P.no, fg: P.ink } : { t: "Void", bg: P.well, fg: P.ink };
+  return (
+    <button type="button" className="hk-pagehead" style={{ opacity: k, transform: `translateY(${(k - 1) * 24}px)`, pointerEvents: k > 0.5 ? "auto" : "none" }} onClick={onTop} aria-label="Back to the top">
+      {s.screen === "market" ? (
+        <span className="hk-badge hk-body hk-w700" style={{ background: GRAD, height: 34 }}>
+          <svg width="12" height="18" viewBox="-7 -10 14 20" aria-hidden="true"><path d="M2 -9 L-6 1.5 L1 1.5 Z M-2 9 L6 -1.5 L-1 -1.5 Z" fill="#fff" /></svg>
+          {badge}
+        </span>
+      ) : s.screen === "locked" ? (
+        <span className="hk-badge hk-body hk-w700" style={{ background: P.ink, height: 34 }}>
+          <svg width="16" height="18" viewBox="-10 -11 20 24" aria-hidden="true"><path d="M-5.5 -0.5 V-3 A5.5 5.5 0 0 1 5.5 -3 V-0.5" fill="none" stroke="#fff" strokeWidth="2.6" /><rect x="-9" y="-0.5" width="18" height="13" rx="3" fill="#fff" /></svg>
+          Closed
+        </span>
+      ) : (
+        <span className="hk-badge hk-body hk-w700" style={{ background: result.bg, color: result.fg, height: 34 }}>{result.t}</span>
+      )}
+      <span className="hk-body hk-w700 hk-q">{s.question}</span>
+      {s.screen === "market" && s.lockIn !== undefined && (s.lockTotal ?? 0) > 0 && (
+        <span className="hk-num hk-w700 hk-c90" style={{ fontSize: 21, color: secs <= 5 ? P.hot : P.ink, display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <svg width="12" height="14" viewBox="-10 -11 20 24" aria-hidden="true"><path d="M-5.5 -0.5 V-3 A5.5 5.5 0 0 1 5.5 -3 V-0.5" fill="none" stroke="currentColor" strokeWidth="2.6" /><rect x="-9" y="-0.5" width="18" height="13" rx="3" fill="currentColor" /></svg>
+          {clock}
+        </span>
+      )}
+      {s.screen !== "result" && <span className="hk-badge hk-body hk-w700" style={{ background: P.yes, height: 34 }}>Yes {s.yes}¢</span>}
+      <span className="hk-body hk-w600" style={{ fontSize: 15, color: P.ink2 }}>▲ Top</span>
+    </button>
+  );
+}
+
+function Page({ s, children, onTouch, pending }: { s: KioskScreen; children: ReactNode; onTouch: (id: string) => void; pending?: string | null }) {
+  const L = pageLayout(s);
+  const root = useRef<HTMLDivElement>(null);
+  const [y, setY] = useState(0);
+  const [moving, setMoving] = useState(0);
+  const rem = useRemaining(s);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      setY(el.scrollTop);
+      setMoving(Date.now());
+      clearTimeout(t);
+      t = setTimeout(() => setMoving(0), 1200);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    // A page left scrolled down glides home after a minute without a touch (the box is shared), like the firmware.
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => el.scrollTo({ top: 0, behavior: "smooth" }), 60_000);
+    };
+    arm();
+    el.addEventListener("pointerdown", arm);
+    el.addEventListener("scroll", arm, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("pointerdown", arm);
+      el.removeEventListener("scroll", arm);
+      clearTimeout(t);
+      clearTimeout(idle);
+    };
+  }, []);
+  const top = () => root.current?.scrollTo({ top: 0, behavior: "smooth" });
+  const more = () => root.current?.scrollTo({ top: L.chartH ? L.chartY - 66 : L.oddsY - 66, behavior: "smooth" });
+  const touch = (id: string) => (id === "ui:top" ? top() : onTouch(id));
+  const maxOff = Math.max(1, L.contentH - 480);
+  const barH = Math.max(36, (480 * 480) / L.contentH);
+  const snaps = [0, ...(L.chartH ? [L.chartY - 66] : []), L.oddsY - 66, L.listY - 66];
+  return (
+    <div className="hk-fill">
+      <div ref={root} className="hk-pagescroll" aria-label="Box screen, scrolls down to the odds graph">
+        <div style={{ position: "relative", height: L.contentH }}>
+          {snaps.map((v) => <i key={v} className="hk-snapat" style={{ top: v }} aria-hidden="true" />)}
+          <div className="hk-abs" style={{ left: 0, top: 0, width: 800, height: 480 }}>{children}</div>
+          {L.chartH > 0 && s.chart && <ChartSection c={s.chart} question={s.question ?? ""} market={s.screen === "market"} y={L.chartY} h={L.chartH} root={root} />}
+          <OddsSection odds={s.odds ?? []} note={s.oddsNote ?? ""} y={L.oddsY} h={L.oddsH} root={root} />
+          <ListsSection s={s} y={L.listY} h={L.listH} root={root} />
+          <Button b={{ id: "ui:top", label: "Back to top", style: "plain" }} x={250} y={L.endY} w={300} h={62} r={22} onTouch={touch} pending={pending === "ui:top"} />
+          <Arrow cx={290} cy={L.endY + 31} s={0.7} up color={P.ink2} />
+        </div>
+      </div>
+      <i className="hk-pagebar" style={{ top: ((480 - barH) * Math.min(1, Math.max(0, y / maxOff))) + 3, height: barH - 6, opacity: moving ? 0.47 : 0.18 }} aria-hidden="true" />
+      {y < 60 && (
+        <button type="button" className="hk-moretab hk-body hk-w600" style={{ opacity: 1 - y / 60 }} onClick={more}>
+          {L.chartH ? "Odds graph" : "More"}
+          <svg width="10" height="9" viewBox="-7 -6 14 12" aria-hidden="true"><path d="M0 6 L-7 -5 L7 -5 Z" fill="#fff" /></svg>
+        </button>
+      )}
+      {y > 150 && <PageHeader s={s} k={Math.min(1, (y - 150) / 40)} rem={rem} onTop={top} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Solana Pay card (on top of any screen)
+
+function PayCard({ pay, onTouch, pending }: { pay: NonNullable<KioskScreen["pay"]>; onTouch: (id: string) => void; pending?: string | null }) {
+  const base = useRef({ left: pay.leftMs, at: Date.now() });
+  const cur = base.current.left - (Date.now() - base.current.at);
+  if (Math.abs(pay.leftMs - cur) > 1500) base.current = { left: pay.leftMs, at: Date.now() };
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, []);
+  const left = Math.max(0, base.current.left - (Date.now() - base.current.at));
+  const secs = Math.ceil(left / 1000);
+  const expired = !pay.paid && left <= 0;
+  const qr = pay.qr;
+  const scale = qr ? Math.max(1, Math.floor((352 - 28) / qr.size)) : 1;
+  return (
+    <div className="hk-paywrap" role="dialog" aria-modal="true" aria-label={pay.paid ? "Payment received" : "Pay with Solana"}>
+      <div className="hk-abs hk-card hk-lift hk-rise" style={{ left: 60, top: 40, width: 680, height: 400, borderRadius: 30, cursor: "default", ...d(60) }}>
+        {!pay.paid ? (
+          <div className="hk-abs" style={{ left: 24, top: 24, width: 352, height: 352, borderRadius: 22, background: P.white, boxShadow: `inset 0 0 0 2px ${P.rule}`, display: "grid", placeItems: "center" }}>
+            {qr ? (
+              <svg width={scale * qr.size} height={scale * qr.size} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="Solana Pay QR code">
+                {qr.rows.flatMap((row, r) => [...row].map((c, col) => (c === "1" ? <rect key={`${r}-${col}`} x={col} y={r} width="1" height="1" fill={P.ink} /> : null)))}
+              </svg>
+            ) : (
+              <div style={{ textAlign: "center" }}>
+                <div className="hk-body hk-w700" style={{ fontSize: 20, color: P.ink2 }}>Pay from your phone</div>
+                <div className="hk-body hk-w600" style={{ fontSize: 15, color: P.muted }}>This request does not fit a QR</div>
+              </div>
+            )}
+            {expired && <div className="hk-abs hk-head hk-w800" style={{ inset: 0, borderRadius: 22, background: "rgba(255,255,255,.75)", display: "grid", placeItems: "center", fontSize: 31 }}>Expired</div>}
+          </div>
+        ) : (
+          <div className="hk-abs hk-paid" style={{ left: 24, top: 24, width: 352, height: 352, borderRadius: 22, background: P.accentTint }}>
+            <svg width="352" height="352" viewBox="-176 -176 352 352" aria-hidden="true">
+              <circle className="hk-paid-ring" r="104" fill="none" stroke={P.accent} strokeWidth="5" />
+              <circle className="hk-paid-dot" r="104" fill={P.accent} />
+              <path className="hk-paid-check" d="M-56 0 L-17.5 42 L63 -49" fill="none" stroke="#fff" strokeWidth="14.3" strokeLinecap="round" strokeLinejoin="round" pathLength={1} />
+            </svg>
+          </div>
+        )}
+        <span className="hk-pill hk-body hk-w600" style={{ left: 400, top: 26, height: 28, background: P.ink, color: P.white }}>
+          <i style={{ width: 18, height: 10, borderRadius: 3, background: "linear-gradient(90deg,#9945FF,#5A8CE6,#14F195)" }} /> Solana Pay
+        </span>
+        {!pay.paid ? (
+          <>
+            <div className="hk-t hk-head hk-w700" style={{ left: 400, top: 136 - 23 - 40, width: 256, fontSize: 24, lineHeight: "30px", whiteSpace: "normal" }}>Scan with any Solana wallet</div>
+            <T f="B3" x={400} y={210 - 40} color={P.muted}>Paying in</T>
+            <T f="B1" x={400} y={236 - 40} w={256}>{pay.name || "Player"}</T>
+            <T f="N2" x={400} y={304 - 40}>{money(pay.cents)}</T>
+            <i className="hk-abs" style={{ left: 401, top: 289, width: 10, height: 10, borderRadius: 9, background: expired ? P.hot : P.accent }} />
+            <T f="B2" x={418} y={340 - 40} color={P.ink2}>{expired ? "This request expired" : `Expires in ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`}</T>
+            <Button b={{ id: "pay:close", label: "Close", style: "plain" }} x={400} y={320} w={256} h={58} r={20} onTouch={onTouch} pending={pending === "pay:close"} />
+          </>
+        ) : (
+          <div className="hk-fade" style={d(360)}>
+            <T f="H1" x={400} y={160 - 40} color={P.deep}>Paid!</T>
+            <T f="N2" x={400} y={236 - 40}>{money(pay.cents)}</T>
+            <T f="B1" x={400} y={274 - 40} w={256} color={P.ink2}>{`added for ${pay.name || "the player"}`}</T>
+            <T f="B3" x={400} y={302 - 40} color={P.muted}>It shows on their phone now.</T>
+            <Button b={{ id: "pay:close", label: "Done" }} style="brand" x={400} y={320} w={256} h={58} r={20} onTouch={onTouch} pending={pending === "pay:close"} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- the view
 
 export function KioskView({ s, pressed, error, stale, onTouch }: {
@@ -1012,11 +1425,21 @@ export function KioskView({ s, pressed, error, stale, onTouch }: {
       <div key={s.screen === "locked" ? "market" : s.screen} className="hk-fill">
         {s.screen === "select" && <Select {...ctx} />}
         {s.screen === "lobby" && <Lobby {...ctx} />}
-        {(s.screen === "market" || s.screen === "locked") && <Market {...ctx} locked={s.screen === "locked"} />}
-        {s.screen === "result" && <Result {...ctx} />}
+        {hasPage(s) ? (
+          // Market, locked and result scroll down to the odds graph (the page stays where it is when trading locks).
+          <Page key={s.question} s={s} onTouch={onTouch} pending={pressed}>
+            {s.screen === "result" ? <Result {...ctx} /> : <Market {...ctx} locked={s.screen === "locked"} />}
+          </Page>
+        ) : (
+          <>
+            {(s.screen === "market" || s.screen === "locked") && <Market {...ctx} locked={s.screen === "locked"} />}
+            {s.screen === "result" && <Result {...ctx} />}
+          </>
+        )}
         {s.screen === "ended" && <Ended {...ctx} />}
         {!["select", "lobby", "market", "locked", "result", "ended"].includes(s.screen) && <Message {...ctx} />}
       </div>
+      {s.pay && <PayCard key={s.pay.until} pay={s.pay} onTouch={onTouch} pending={pressed} />}
       {error && (
         <div className="hk-toast hk-body hk-w700" role="alert">
           <i>!</i>

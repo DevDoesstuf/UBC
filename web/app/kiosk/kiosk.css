@@ -242,6 +242,38 @@
 /* ended */
 .hk-podium { border-radius: 18px 18px 0 0; transform-origin: bottom; animation: hk-grow 640ms var(--spring) both; animation-delay: var(--d, 0ms); }
 
+/* pages: market / locked / result scroll down (ui.cpp drawPage). Native momentum scrolling, proximity snaps. */
+.hk-pagescroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scroll-snap-type: y proximity; scrollbar-width: none; }
+.hk-pagescroll::-webkit-scrollbar { display: none; }
+.hk-snapat { position: absolute; left: 0; width: 1px; height: 1px; scroll-snap-align: start; pointer-events: none; }
+.hk-pagebar { position: absolute; right: 3px; width: 4px; border-radius: 2px; background: var(--ink); pointer-events: none; transition: opacity 300ms var(--ease-out); z-index: 3; }
+.hk-moretab { position: absolute; left: 50%; top: 460px; height: 40px; transform: translateX(-50%); padding: 0 14px 18px 16px; border-radius: 14px 14px 0 0; background: var(--ink); color: #fff; font-size: 15px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; z-index: 3; }
+.hk-moretab svg { animation: hk-bob 1.6s ease-in-out infinite; }
+.hk-pagehead { position: absolute; left: 0; top: 0; width: 800px; height: 58px; padding: 0 18px 0 16px; display: flex; align-items: center; gap: 12px; background: var(--canvas); color: var(--ink); cursor: pointer; text-align: left; box-shadow: 0 1px 0 var(--rule), 0 3px 6px -2px rgba(16, 38, 28, 0.12); z-index: 4; transition: opacity 120ms linear; }
+.hk-pagehead .hk-badge { flex: none; }
+.hk-pagehead .hk-q { flex: 1; min-width: 0; font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hk-legend { display: flex; gap: 16px; font-size: 15px; color: var(--ink-2); white-space: nowrap; }
+.hk-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.hk-legend i { display: inline-block; width: 22px; border-radius: 2px; }
+.hk-legend .hk-dash { height: 2px; background: repeating-linear-gradient(90deg, var(--ink) 0 5px, transparent 5px 8px); }
+.hk-legend .hk-tri { margin-left: -26px; margin-right: 4px; top: -5px; }
+.hk-tag { height: 26px; padding: 0 11px; border-radius: 13px; font-size: 21px; display: grid; place-items: center; line-height: 1; }
+/* The graph draws on left to right the first time it scrolls into view; values and markers follow. */
+.hk-chart .hk-reveal { transform-box: fill-box; transform-origin: left; }
+.hk-chart.hk-in .hk-reveal { animation: hk-reveal 900ms var(--ease-out) 120ms both; }
+.hk-chart.hk-in .hk-late { animation: hk-fade 360ms var(--ease-out) 660ms both; }
+.hk-chart.hk-in .hk-fadein { animation: hk-fade 450ms var(--ease-out) 120ms both; }
+
+/* Solana Pay card */
+.hk-paywrap { position: absolute; inset: 0; background: rgba(16, 38, 28, 0.59); z-index: 6; animation: hk-fade 260ms var(--ease-out) both; }
+.hk-paid-dot { transform-box: fill-box; transform-origin: center; animation: hk-pop 620ms var(--bounce) both; }
+.hk-paid-ring { transform-box: fill-box; transform-origin: center; opacity: 0; animation: hk-paidring 620ms var(--ease-out); }
+.hk-paid-check { stroke-dasharray: 1; stroke-dashoffset: 0; animation: hk-check 520ms var(--ease-out) 260ms both; }
+@keyframes hk-reveal { from { transform: scaleX(0); } }
+@keyframes hk-bob { 0%, 100% { transform: translateY(-1.5px); } 50% { transform: translateY(1.5px); } }
+@keyframes hk-paidring { from { transform: scale(1); opacity: 0.67; } to { transform: scale(1.55); opacity: 0; } }
+@keyframes hk-check { from { stroke-dashoffset: 1; } }
+
 /* toast + reconnecting */
 .hk-toast {
   position: absolute;
