@@ -240,4 +240,9 @@ export interface Lobby {
   gemini?: GeminiSnapshot | null;
   /** MONEY_MODE=solana: open Solana Pay deposit requests by reference key. */
   solanaRefs?: Record<string, { playerId: string; cents: number; at: number }>;
+  /**
+   * A Solana Pay request shown full screen on the box (set by the money routes, read and cleared by
+   * lib/kiosk.ts: the box's Close button sends `pay:close`). `url` is the solana: transfer-request URL.
+   */
+  boxPay?: { playerId: string; name: string; cents: number; url: string /* solana: transfer-request URL */; reference: string; at: number; until: number /* ms epoch */; paidAt?: number | null } | null;
 }
