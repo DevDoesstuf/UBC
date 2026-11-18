@@ -240,4 +240,75 @@ export interface Lobby {
   gemini?: GeminiSnapshot | null;
   /** MONEY_MODE=solana: open Solana Pay deposit requests by reference key. */
   solanaRefs?: Record<string, { playerId: string; cents: number; at: number }>;
+  /**
+   * "Pay on the box": a phone asked the box to show a Solana Pay QR for this player's deposit. The box draws it and
+   * clears it on touch `pay:close`; the server sets `paidAt` once the payment is credited and clears it ~4 s later
+   * (or at `until`, ~90 s after it was asked for).
+   */
+  boxPay?: { playerId: string; name: string; cents: number; url: string /* solana: transfer-request URL */; reference: string; at: number; until: number /* ms epoch, ~90 s */; paidAt?: number | null } | null;
+  /** Every on-chain action for this lobby, newest last (about 40 kept): what the phones and TV link to. */
+  chain?: ChainEvent[];
+  /** SETTLEMENT=vault: this party's huddle_vault accounts and settlement progress. */
+  vault?: LobbyVault;
+}
+
+/** One Solana transaction Huddle made or saw for a lobby. */
+export interface ChainEvent {
+  at: number;
+  kind: "deposit" | "faucet" | "cashout" | "create" | "sweep" | "topup" | "close" | "state" | "finalize" | "withdraw" | "host";
+  sig: string;
+  explorer: string;
+  playerId?: string;
+  cents?: number;
+  /** Who found it: our own send ("server"), deposit polling ("sync"), the box QR check ("box"), or QuickNode ("quicknode"). */
+  via?: "server" | "sync" | "box" | "quicknode";
+  /** A QuickNode Stream also delivered this transaction. */
+  streamed?: boolean;
+}
+
+export interface VaultTx {
+  sig: string;
+  explorer: string;
+  at: number;
+}
+
+/** A credited Solana Pay deposit moved from the treasury into the party vault by the program's `deposit`. */
+export interface VaultSweep {
+  playerId: string;
+  cents: number;
+  status: "pending" | "sent" | "unclear";
+  sig?: string;
+  explorer?: string;
+  validUntil?: number;
+  at: number;
+  error?: string;
+}
+
+export interface LobbyVault {
+  program: string;
+  /** Party PDA ["party", host, party_id] and its token vault PDA ["vault", party]. */
+  party: string;
+  vault: string;
+  partyId: string;
+  host: string;
+  boxSigner: string;
+  /** Explorer link of the party account. */
+  explorer: string;
+  status: "open" | "closing" | "finalized" | "settled";
+  created?: VaultTx | null;
+  /** Keyed by the deposit record key (`sol-<payment signature>`). */
+  sweeps: Record<string, VaultSweep>;
+  /** House top-up when the room won more than it put in (the house seat's claim is 0). */
+  topUp?: (VaultTx & { cents: number }) | null;
+  closed?: VaultTx | null;
+  /** Signed final balance per member seat, verified on chain through the Ed25519 program. */
+  states: Record<string, VaultTx & { cents: number; playerId: string | null }>;
+  finalized?: VaultTx | null;
+  /** Payouts by player id ("house" for the house seat): vault -> seat -> the player's own wallet, one transaction. */
+  payouts: Record<string, VaultTx & { cents: number; to: string }>;
+  hostPayout?: (VaultTx & { cents: number }) | null;
+  /** Signatures of sends whose confirmation was unclear, by step ("pay:<playerId>", "close"...), for reconciling. */
+  inflight?: Record<string, string>;
+  error?: string | null;
+  lastTryAt?: number;
 }

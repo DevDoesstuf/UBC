@@ -51,6 +51,10 @@ export function moneyInfo() {
     /** Solana: deposits are Solana Pay links; a faucet gives test USDC. */
     solanaPay: solana,
     faucet: solana,
+    /** Solana: "vault" = money sits in the party's huddle_vault program account and settles on chain (SETTLEMENT=vault). */
+    settlement: (solana ? (env("SETTLEMENT") === "vault" ? "vault" : "treasury") : null) as "vault" | "treasury" | null,
+    /** "Pay on the box": the box can show this player's Solana Pay QR. */
+    boxPay: solana,
   };
 }
 

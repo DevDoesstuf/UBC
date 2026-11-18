@@ -4,6 +4,7 @@
 // The player then deposits with the Solana Pay link as usual.
 // -> {"ok":true,"cents":2000,"usdcSig","solSig" (same signature, or null when no SOL was needed),"explorer"}
 import { handle, json, playerToken, readBody } from "@/lib/http";
+import { pushChainEvent } from "@/lib/chain";
 import { ApiError, mutate, requirePlayer } from "@/lib/lobby";
 import { MONEY_MODE } from "@/lib/money";
 import { FAUCET_CENTS, SolanaSendError, destinationProblem, explorerTx, faucet } from "@/lib/solana";
@@ -28,6 +29,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     });
     try {
       const r = await faucet(address, FAUCET_CENTS);
+      await mutate(code, (l, now) => {
+        pushChainEvent(l, { at: now, kind: "faucet", sig: r.usdcSig, explorer: explorerTx(r.usdcSig), playerId, cents: FAUCET_CENTS, via: "server" });
+      }).catch(() => null);
       return json({ ok: true, cents: FAUCET_CENTS, ...r, explorer: explorerTx(r.usdcSig) });
     } catch (e) {
       // Unclear whether it landed: keep it marked as used (it is test money; never mint twice).
