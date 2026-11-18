@@ -51,6 +51,10 @@ export interface Game {
   persona?: Persona;
   /** Gemini Prediction Markets mapping for the game. */
   gemini?: GeminiGameConfig;
+  /** Sport, for "Call it" moments (default: the replay's sport, else from the persona). */
+  sport?: "nfl" | "soccer";
+  /** "Call it" moment kinds the kiosk offers for this game (see MOMENT_KINDS in lib/moments.ts). */
+  moments?: string[];
 }
 
 export interface Player {
@@ -123,7 +127,10 @@ export interface Market {
   voided?: boolean;
   voidReason?: string | null;
   /** Where the question came from. */
-  source?: { kind: "replay"; templateId: string; key: string; rationale: string } | { kind: "clip" };
+  source?:
+    | { kind: "replay"; templateId: string; key: string; rationale: string; moment?: string }
+    | { kind: "clip" }
+    | { kind: "moment"; moment: string; label: string; rationale: string };
 }
 
 export interface Offer {

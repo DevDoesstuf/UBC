@@ -288,6 +288,26 @@ export function bestCandidate(run: ReplayRun, nowMs: number, engine = engineFor(
   return best;
 }
 
+/**
+ * A host-called moment that the engine also proposed (e.g. "Penalty!" while the engine holds a penalty
+ * candidate): take that candidate so the play-by-play resolves it. Returns it marked as asked, or null.
+ */
+export function takeCandidate(run: ReplayRun, templates: string[], now: number): { q: PendingQ; lockAtMs: number } | null {
+  if (run.startedAt === null || !templates.length) return null;
+  const t = getTimeline(run.timelineId);
+  if (!t) return null;
+  const nowMs = now - run.startedAt;
+  const engine = engineFor(run);
+  const q = [...run.pending].reverse().find((p) => templates.includes(p.templateId) && p.resolveAtMs !== null && p.resolveAtMs - nowMs >= MIN_TRADE_MS);
+  if (!q) return null;
+  const lockAtMs = Math.min(lockFor(engine, t, run, q, nowMs), q.resolveAtMs!);
+  if (lockAtMs - nowMs < MIN_TRADE_MS) return null;
+  run.pending = run.pending.filter((p) => p.key !== q.key);
+  run.current = { ...q, lockAtMs, openedAtMs: nowMs };
+  run.asked++;
+  return { q: run.current, lockAtMs };
+}
+
 /** Drop candidates that can never open any more. */
 function prune(run: ReplayRun, nowMs: number): void {
   run.pending = run.pending.filter((q) => {

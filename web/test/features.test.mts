@@ -305,6 +305,81 @@ test("h2h lobby: offer, partial take, unmatched released at lock, winner takes b
   assert.equal(totalMoney(l), deposited(l));
 });
 
+// ---------------------------------------------------------------- "Call it" moments
+
+test("moments: table per sport, short Latin-1 labels, momentsFor ids", async () => {
+  for (const sport of ["nfl", "soccer"] as const) {
+    const kinds = lobby.MOMENT_KINDS[sport];
+    assert.ok(kinds.length >= 3 && kinds.length <= 4);
+    for (const k of kinds) {
+      assert.ok(k.label.length <= 12 && /^[\x20-\x7E\xA0-\xFF]+$/.test(k.label), k.label);
+      const w = k.write({ state: null });
+      assert.ok(w.prior > 0 && w.prior < 1, `${k.kind} prior ${w.prior}`);
+    }
+  }
+  const { code } = await setup("soccer-replay");
+  const l = (await lobby.getLobby(code))!;
+  assert.deepEqual(lobby.momentsFor(l).map((m) => m.id), ["moment:penalty", "moment:corner", "moment:free_kick", "moment:next_goal"]);
+});
+
+test("moments: clip game opens at the model prior, host resolves, scripted question count unchanged", async () => {
+  const { code, tokens } = await setup("football");
+  let l = await lobby.mutate(code, (x, now) => lobby.openMoment(x, "moment:red_zone", now));
+  let v = lobby.publicView(l, null, "http://x");
+  assert.equal(v.phase, "open");
+  assert.match(v.market!.text, /red-zone/);
+  assert.ok(v.market!.model! > 0.4 && v.market!.model! < 0.75);
+  assert.equal(v.market!.yesCents, Math.round(v.market!.model! * 100));
+  assert.ok(v.market!.lockIn <= 25 && v.market!.lockIn >= 24);
+  assert.equal(v.market!.moment, "red_zone");
+  assert.match(l.captions!.at(-1)!.text, /^Red zone! /);
+  await assert.rejects(lobby.mutate(code, (x, now) => lobby.openMoment(x, "big_play", now)), /current question/);
+  await lobby.mutate(code, (x, now) => lobby.buy(x, lobby.requirePlayer(x, tokens[0]), "yes", 300, now));
+  advance(26_000);
+  l = (await lobby.getLobby(code))!;
+  assert.equal(l.phase, "locked");
+  l = await lobby.mutate(code, (x, now) => lobby.resolveMarket(x, "yes", now));
+  assert.equal(l.qIndex, 0, "a called moment does not use up a scripted question");
+  await assert.rejects(lobby.mutate(code, (x, now) => lobby.openMoment(x, "penalty", now)), /does not offer/);
+  const screen = await kioskScreen(l.kioskId, "http://x");
+  assert.equal(screen.screen, "result");
+  assert.ok(screen.buttons.some((b) => b.id === "next"));
+  assert.equal(totalMoney(l), deposited(l));
+});
+
+test("moments: replay game uses the engine's matching candidate, resolved by the play-by-play", async () => {
+  const { code, kiosk, tokens } = await setup("soccer-replay");
+  await kioskTouch(kiosk, "start", "http://x"); // Ronaldo penalty question opens (engine)
+  await kioskTouch(kiosk, "lock", "http://x");
+  await kioskTouch(kiosk, "resolve:yes", "http://x");
+  // Wait for the corner at 100 s (replay time); the host calls it before the engine's own auto-open.
+  let l = (await lobby.getLobby(code))!;
+  const run = l.replay!;
+  const cornerAt = run.startedAt! + 100_000;
+  clock = cornerAt - 1000;
+  l = (await lobby.getLobby(code))!;
+  if (l.phase === "open") await kioskTouch(kiosk, "lock", "http://x");
+  l = (await lobby.getLobby(code))!;
+  if (l.phase === "locked") await kioskTouch(kiosk, "resolve:no", "http://x");
+  // A template moment (no engine match) in a replay game: host-resolved; it also restarts the result hold.
+  l = await lobby.mutate(code, (x, now) => lobby.openMoment(x, "free_kick", now));
+  assert.equal(l.market!.source!.kind, "moment");
+  await kioskTouch(kiosk, "resolve:no", "http://x");
+  // The corner is awarded 1 s later, inside the 5 s result hold, so the host's call is what opens it.
+  clock = cornerAt + 200;
+  l = (await lobby.getLobby(code))!;
+  assert.equal(l.phase, "result");
+  l = await lobby.mutate(code, (x, now) => lobby.openMoment(x, "corner", now));
+  assert.equal(l.market!.source!.kind, "replay");
+  assert.match(l.market!.text, /corner/);
+  await lobby.mutate(code, (x, now) => lobby.buy(x, lobby.requirePlayer(x, tokens[1]), "yes", 300, now));
+  advance(30_000); // the corner outcome (shot on target) arrives at 124 s
+  l = (await lobby.getLobby(code))!;
+  assert.equal(l.phase, "result");
+  assert.equal(l.market!.outcome, "yes");
+  assert.equal(totalMoney(l), deposited(l));
+});
+
 test.after(() => {
   Date.now = realNow;
 });

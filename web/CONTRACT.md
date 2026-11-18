@@ -44,6 +44,33 @@ In pool and h2h mode `market.yesCents/noCents/priceYes/history` still work: pool
 YES (the model prior while empty), h2h shows the YES probability implied by the last matched offer.
 `me.position` in pool/h2h mode holds **dollars staked** per side (not $1 shares).
 
+## "Call it" moments (kiosk hardware)
+
+The host taps a moment on the kiosk the instant it happens; a market opens immediately with a model-priced
+question and a short trading window (15-25 s). Between questions only (phase `lobby` or `result`).
+
+```ts
+// lib/lobby.ts (server)
+export const MOMENT_KINDS: Record<'nfl' | 'soccer', MomentKind[]>   // re-exported from lib/moments.ts
+//   nfl:    third_down "3rd down", red_zone "Red zone", big_play "Big play?", next_score "Next score"
+//   soccer: penalty "Penalty!", corner "Corner", free_kick "Free kick", next_goal "Next goal"
+export function momentsFor(l: Lobby): { id: string /* "moment:<kind>" */; label: string /* Latin-1, <= 12 chars */ }[]
+export function openMoment(l: Lobby, kind: string /* "penalty" or "moment:penalty" */, now: number): void  // throws ApiError(400)
+```
+
+Kiosk wiring (UI agent, in `lib/kiosk.ts`): show `momentsFor(l)` as buttons on the lobby/result screens and on a
+tap `moment:<kind>` call `await mutate(code, (l, now) => openMoment(l, arg, now))`. The market then behaves like
+any other: `market` screen, auto-lock at `lockAt`, host taps **It was YES/NO** (resolveAt is null), except in
+replay games where a matching engine question exists (3rd down, red zone, penalty, corner): then the
+play-by-play resolves it. A called moment does not use up one of the game's scripted questions (`qIndex` is
+unchanged after it resolves). The caption leads with the call: "Penalty called! Will Ronaldo score this penalty? ...".
+
+- `game.moments` in `config/games.json`: the kinds a game offers (and `game.sport`: `nfl` | `soccer`).
+- publicView: `moments: { id, label, enabled }[]` (enabled = no question running) and `market.moment`
+  (the kind, when the market came from a call).
+- HTTP for screens other than the ESP32: `GET /api/lobby/:code/moment` lists them; `POST /api/lobby/:code/moment {kind}`
+  opens one (x-kiosk-key if set).
+
 ## New routes
 
 | Route | Body | Returns |

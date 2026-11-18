@@ -15,7 +15,8 @@ import { captionLine, isBigTrade, type CaptionEvent, type Persona } from "./anno
 import { geminiForGame, refForContract, refForHint, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot } from "./gemini";
 import { buildScorecard } from "./scorecard";
 import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePairs, settlePool, takerStakeFor, MAX_ODDS, MIN_ODDS } from "./modes";
-import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, type PendingQ, type ReplayHost } from "./replay/run";
+import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
+import { findMoment, kioskSafe, MOMENT_KINDS, type MomentKind, type MomentSport } from "./moments";
 import { getTimeline } from "./replay/timeline";
 import type { Game, Lobby, LobbyEvent, Market, MarketMode, Offer, Player, Side, WithdrawalRecord } from "./types";
 import { MARKET_MODES } from "./types";
@@ -179,10 +180,10 @@ function newMarket(l: Lobby, now: number, o: {
   return m;
 }
 
-function announceOpen(l: Lobby, m: Market, now: number): void {
-  addEvent(l, "start", `Trading open: ${m.text}`, "start");
+function announceOpen(l: Lobby, m: Market, now: number, moment?: MomentKind): void {
+  addEvent(l, "start", moment ? `${moment.call} ${m.text}` : `Trading open: ${m.text}`, "start");
   caption(l, {
-    type: "start", text: m.text, yesPct: yesPrice(m) * 100, modelPct: m.model == null ? null : m.model * 100,
+    type: "start", call: moment?.call ?? null, text: m.text, yesPct: yesPrice(m) * 100, modelPct: m.model == null ? null : m.model * 100,
     gemini: m.gemini ? { label: m.gemini.label, pct: m.gemini.prob * 100 } : null,
     lockIn: Math.max(0, Math.round((m.lockAt - now) / 1000)), mode: modeOf(m),
   }, now, m.questionId);
@@ -222,7 +223,7 @@ function replayHost(l: Lobby): ReplayHost {
   };
 }
 
-function openReplayMarket(l: Lobby, q: PendingQ, yesPrior: number, lockAtWall: number, resolveAtWall: number | null, now: number): void {
+function openReplayMarket(l: Lobby, q: PendingQ, yesPrior: number, lockAtWall: number, resolveAtWall: number | null, now: number, moment?: MomentKind): void {
   const game = getGame(l.gameId);
   const run = l.replay;
   const yesTeam = q.yesId === "home" ? (game?.gemini?.home ?? run?.state.home.short) : q.yesId === "away" ? (game?.gemini?.away ?? run?.state.away.short) : undefined;
@@ -231,13 +232,13 @@ function openReplayMarket(l: Lobby, q: PendingQ, yesPrior: number, lockAtWall: n
     qIndex, questionId: q.key, text: q.text, short: q.short, b: game?.b ?? 10, prior: yesPrior,
     startAt: run ? Math.round(replayMs(run, now) / 1000) : 0, lockAt: lockAtWall, lockAtVideo: Math.round((lockAtWall - (run?.startedAt ?? now)) / 1000),
     resolveAt: resolveAtWall,
-    source: { kind: "replay", templateId: q.templateId, key: q.key, rationale: q.rationale },
+    source: { kind: "replay", templateId: q.templateId, key: q.key, rationale: q.rationale, moment: moment?.kind },
     geminiKey: q.geminiHint ? { hint: q.geminiHint, yesTeam } : null,
   });
   l.qIndex = qIndex;
   l.phase = "open";
   refreshMarketGemini(l);
-  announceOpen(l, l.market, now);
+  announceOpen(l, l.market, now, moment);
 }
 
 /** Moves a locked pregame market aside (it settles at the final whistle) so the live questions can run. */
@@ -573,15 +574,69 @@ export function resolveMarket(l: Lobby, outcome: Side, now: number): void {
   recordScore(l, m, outcome);
   l.results.push({ qIndex: m.qIndex, text: m.text, outcome, volume: m.volume, payouts: { ...m.payouts } });
   l.phase = "result";
-  l.qIndex = m.qIndex + 1;
+  // A called moment is an extra question: it does not use up one of the game's scripted questions.
+  if (m.source?.kind !== "moment") l.qIndex = m.qIndex + 1;
   const winners = winnersOf(l, m, outcome);
   const head = outcome === "yes" ? "YES!" : "NO!";
   addEvent(l, "result", winners.length ? `${head} ${winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ")}` : `${head} No winners this time.`, "win");
   const atLock = m.priceAtLock ?? yesPrice(m);
   caption(l, { type: "result", outcome, winners, atLockPct: (outcome === "yes" ? atLock : 1 - atLock) * 100 }, now, m.questionId);
-  if (l.replay && l.replay.startedAt === null && !l.replay.parked) {
+  if (l.replay && l.replay.startedAt === null && !l.replay.parked && m.source?.kind === "replay") {
     startRun(l.replay, now);
   }
+}
+
+// ---------------------------------------------------------------- "Call it" moments
+
+export { MOMENT_KINDS };
+
+export function sportOf(game: Game | undefined): MomentSport {
+  if (game?.sport) return game.sport;
+  const t = game?.replay ? getTimeline(game.replay) : undefined;
+  if (t) return t.info.sport;
+  return game?.persona === "soccer" ? "soccer" : "nfl";
+}
+
+/** The moment buttons a lobby's game offers: [{ id: "moment:penalty", label: "Penalty!" }]. */
+export function momentsFor(l: Lobby): { id: string; label: string }[] {
+  const game = getGame(l.gameId);
+  const sport = sportOf(game);
+  return (game?.moments ?? [])
+    .map((k) => findMoment(sport, k))
+    .filter((m): m is NonNullable<typeof m> => !!m)
+    .map((m) => ({ id: `moment:${m.kind}`, label: kioskSafe(m.label).slice(0, 12) }));
+}
+
+/**
+ * The host called a moment on the kiosk: open a market for it right now (no question may be running).
+ * Replay games use the engine's matching candidate when it has one (resolved from the play-by-play);
+ * otherwise the question comes from the moment's template, priced by the model, and the host taps the result.
+ */
+export function openMoment(l: Lobby, kind: string, now: number): void {
+  if (l.phase !== "lobby" && l.phase !== "result") throw new ApiError(400, l.phase === "ended" ? "This session has ended" : "Finish the current question first");
+  const game = getGame(l.gameId);
+  if (!game) throw new ApiError(400, "Unknown game");
+  const k = String(kind || "").replace(/^moment:/, "");
+  const offered = game.moments ?? [];
+  const mk = offered.includes(k) ? findMoment(sportOf(game), k) : undefined;
+  if (!mk) throw new ApiError(400, "This game does not offer that moment");
+  const run = l.replay;
+  if (run && !run.pregame) {
+    const hit = takeCandidate(run, mk.templates, now);
+    if (hit) {
+      const lockAtWall = run.startedAt! + hit.lockAtMs;
+      openReplayMarket(l, hit.q, hit.q.yesPrior, lockAtWall, hit.q.resolveAtMs !== null ? run.startedAt! + hit.q.resolveAtMs : null, now, mk);
+      return;
+    }
+  }
+  const w = mk.write({ state: run?.state ?? null });
+  l.market = newMarket(l, now, {
+    qIndex: l.qIndex, questionId: `moment-${k}-${now}`, text: w.text, short: w.short, b: game.b ?? 10, prior: w.prior,
+    startAt: 0, lockAt: now + mk.lockSecs * 1000, lockAtVideo: 0, resolveAt: null,
+    source: { kind: "moment", moment: k, label: mk.label, rationale: w.rationale },
+  });
+  l.phase = "open";
+  announceOpen(l, l.market, now, mk);
 }
 
 /** Refund every stake (the resolver could not settle it, e.g. a penalty on the play). */
@@ -748,7 +803,8 @@ function marketExtras(l: Lobby, m: Market) {
     gemini: m.gemini ? { prob: m.gemini.prob, label: m.gemini.label, asOf: m.gemini.asOf, url: m.gemini.url, live: m.gemini.live } : null,
     priceAtLock: m.priceAtLock ?? null,
     voided: m.voided ?? false,
-    rationale: m.source?.kind === "replay" ? m.source.rationale : null,
+    rationale: m.source && "rationale" in m.source ? m.source.rationale : null,
+    moment: m.source?.kind === "moment" ? m.source.moment : m.source?.kind === "replay" ? m.source.moment ?? null : null,
     pool: mode === "pool" ? { yesCents: m.pool?.yes ?? 0, noCents: m.pool?.no ?? 0 } : undefined,
     offers:
       mode === "h2h"
@@ -790,6 +846,7 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
         }
       : null,
     mode: lobbyMode(l),
+    moments: momentsFor(l).map((x) => ({ ...x, enabled: l.phase === "lobby" || l.phase === "result" })),
     qIndex: l.qIndex,
     questionCount: game?.questions.length ?? 0,
     nextQuestion: run ? null : game?.questions[l.qIndex]?.text ?? null,
