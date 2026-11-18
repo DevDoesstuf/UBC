@@ -59,7 +59,8 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 72px; }
+html:has(.dock) { scroll-padding-bottom: 220px; } /* the sticky header and trade dock never cover the focused element */
 @media (pointer: fine) { html { overscroll-behavior: none; } }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
 body {
