@@ -28,6 +28,8 @@ market.offers?: {                                             // h2h mode only
 }[]
 market.model?: number | null                      // model YES probability the market opened at (null = no model, 50/50)
 market.gemini?: { prob: number; label: string; asOf: string; url?: string; live: boolean } | null
+                                                  // label in our names: "Chargers", "Chargers to win the 1st half",
+                                                  // "Tie in the 2nd half", "Over 39.5 points" (never Gemini's "Los Angeles C")
                                                   // Gemini's YES probability for comparable questions; live=false means
                                                   // the API was unreachable and this is the bundled last-seen snapshot (asOf is real)
 // extras: market.priceAtLock (YES price when trading locked), market.voided, market.rationale (why the model says what it says)
@@ -61,7 +63,10 @@ gemini?: {                                        // game-level Gemini block, nu
 
 captions?: { id: number; at: number; text: string }[]          // newest last, about 10 kept; ids only increase
 scorecard?: { room: number|null; model: number|null; gemini: number|null; n: number; verdict: string }
-                                                  // Brier scores (lower is better) over resolved questions
+                                                  // Brier scores (lower is better) over resolved questions. The verdict
+                                                  // says how many Gemini priced ("Gemini priced 3 of 8: the room out-called
+                                                  // Gemini on those."); a game Gemini listed but never priced (epl-mun-avl)
+                                                  // gets "Gemini listed this game but never priced it, ..." instead
 parked?: { text; yesCents; model; gemini; volume; mode; myPosition } | null
                                                   // replay: the pregame question, locked, settling at the final whistle
 me.stake?: { yes: number; no: number }            // pool mode: my cents on each side
@@ -120,8 +125,8 @@ unchanged after it resolves). The caption leads with the call: "Penalty called! 
 | `POST /api/lobby/:code/mode` (x-kiosk-key if set) | `{mode}` | `{ok, mode}`; between questions only |
 | `POST /api/lobby` (x-kiosk-key if set) | `{game, kiosk?, mode?}` | `{ok, code, kiosk, mode}`: same as tapping a game tile, plus a mode |
 | `POST /api/kiosk/touch` | `{kiosk, id, mode?}` | unchanged; `mode` is honoured on `game:<id>` taps (the ESP32 never sends it) |
-| `GET /api/tts?text=...&persona=nfl` or `?code=ABCD&id=<caption id>` | | `audio/mpeg` (ElevenLabs, cached by hash); `&format=wav` gives 22 kHz mono WAV. **204** when `ELEVENLABS_API_KEY` is unset; 502/504 when ElevenLabs fails. On anything but 200, read the caption with Web Speech |
-| `GET /api/kiosk/audio?kiosk=1&after=<id>` | | unchanged shape `{id, url, text}`. Still serves the WAV sound effects; with `ELEVENLABS_API_KEY` set, every caption is also an item whose `url` is `/api/tts?code=..&id=..&format=wav` (the announcer on the speaker). Ids only increase (captions share the event id counter) |
+| `GET /api/tts?text=...&persona=nfl` or `?code=ABCD&id=<caption id>` | | `audio/mpeg` (ElevenLabs, cached by hash); `&format=wav` gives 22 kHz mono WAV. **204** when `ELEVENLABS_API_KEY` is unset, or ElevenLabs rejected it (401/403) in the last 5 minutes (`x-tts: rejected-key`); 502/504 when ElevenLabs fails. On anything but 200, read the caption with Web Speech |
+| `GET /api/kiosk/audio?kiosk=1&after=<id>` | | unchanged shape `{id, url, text}`. Still serves the WAV sound effects; with `ELEVENLABS_API_KEY` set (and not rejected by ElevenLabs in the last 5 minutes), every caption is also an item whose `url` is `/api/tts?code=..&id=..&format=wav` (the announcer on the speaker). Ids only increase (captions share the event id counter) |
 | `GET/POST /api/lobby/:code/moment` | `{kind}` | list / open a "Call it" moment (see above) |
 | `GET /api/gemini/markets` `?league=NFL,NBA,EPL&team=DAL` | | Market discovery: `{asOf, live, source: 'live'\|'snapshot'\|'unavailable', note, leagues, count, games: [{base, league, title, startTime, isLive, url, home: {code, name, prob}, away, draw, volume}], ours: [{gameId, title, event, real, date, settled, hasPriceHistory, liveNow, upcoming: [game...]}]}`. Full-game moneylines Gemini is trading, soonest first (default leagues NFL, NBA, EPL; also NHL NCAAF NCAAM MLB MLS UCL). `ours` lists the Gemini games our teams play next. Cached 2 min; when Gemini is down it serves the last good list (`live: false`, real `asOf`), never a 5xx |
 | `POST /api/lobby/:code/deposit` | `{cents}` | demo: `{credited}`; coinbase: `{url}`; **solana**: `{url: "solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle&message=..", solanaPay: true, reference, recipient, mint, amount}`. Show `url` as a QR and an "Open in wallet" link, then poll `/deposit/sync` every 3 s |
@@ -185,8 +190,12 @@ The host's **Start** tap opens the pregame question (games with a Gemini mapping
 Titans?", model calibrated to Gemini, `market.gemini` attached). It trades 20 s, then it is *parked*
 (`parked` field) and settles at the final whistle, and the game clock starts on the first live question.
 After that the question engine asks one question at a time from the plays (3rd/4th-down conversions, red-zone
-touchdowns, drive results, penalties, corners, cards, next goal, period winners), locks it at its lock time or
-lock event and resolves it from the play-by-play. The next question opens by itself 5 s after a result.
+touchdowns or field goals, drive results, points or a turnover on a drive, next score a touchdown, more points
+before the end of a quarter, penalties, corners, cards, shots on target, next goal, period winners), locks it at
+its lock time or lock event and resolves it from the play-by-play. Variety: one family of question (e.g. the
+touchdown questions) is never asked twice in a row and at most 3 times a game (`lib/replay/run.ts`
+`MAX_PER_FAMILY`). Event and caption text is Latin-1, at most 150 (events) / 180 (captions) characters, cut at a
+sentence or word. The next question opens by itself 5 s after a result.
 **Lock now**, **It was YES/NO** and **Next question** taps still work. `questionCount` is the length of the
 script when nobody taps; `qIndex` counts questions asked.
 
@@ -215,7 +224,8 @@ price a minute before kickoff and the pricing models are calibrated to it.
 NBA questions (`nba-okc-lac`): pregame winner, free-throw trips ("Will Shai Gilgeous-Alexander make both free
 throws?", league 78% per shot), next score out of a timeout (team with the ball ~68%), a made three in the first
 two minutes of a quarter, quarter winner with about 2:30 left while the quarter is in doubt, crunch-time hold-on,
-late total at the projected pace. Kiosk "Call it" moments for NBA: `free_throws`, `timeout`, `three`.
+late total at the projected pace, next made basket a three (31%), the trailing team taking the lead late in a
+close quarter (random-walk margin, asked only between 15% and 60%). Kiosk "Call it" moments for NBA: `free_throws`, `timeout`, `three`.
 
 ## Env vars
 

@@ -11,7 +11,7 @@ import type {
   ResolverResult,
   TeamRef,
 } from './types';
-import { clamp, normalInv, normalizePrior, pct } from './math';
+import { clamp, normalCdf, normalInv, normalizePrior, pct } from './math';
 import {
   conversionProb,
   defaultNflStrength,
@@ -81,6 +81,48 @@ export const TEMPLATES = {
   nbaQuarter: 'nba.quarter_winner',
   nbaClutch: 'nba.clutch',
   nbaLateTotal: 'nba.late_total',
+  // Variety (asked when the data supports them; see TEMPLATE_FAMILY and run.ts for the anti-repeat rules)
+  nflScoringDrive: 'nfl.scoring_drive',
+  nflFieldGoal: 'nfl.field_goal',
+  nflTurnover: 'nfl.turnover_drive',
+  nflNextScoreTd: 'nfl.next_score_td',
+  nflLateScore: 'nfl.late_score',
+  nbaNextThree: 'nba.next_basket_three',
+  nbaLeadChange: 'nba.lead_change',
+  soccerCornerWindow: 'soccer.corner_window',
+  soccerShotWindow: 'soccer.sot_window',
+  soccerCardWindow: 'soccer.card_window',
+} as const;
+
+/**
+ * Templates that read as the same question to the room share a family: the run never asks one family twice in a
+ * row and caps each family per game (run.ts). "Touchdown on this drive?" and "Touchdown in the red zone?" are one.
+ */
+export const TEMPLATE_FAMILY: Record<string, string> = {
+  'nfl.drive_result': 'nfl.td',
+  'nfl.red_zone_td': 'nfl.td',
+  'nfl.quarter_winner': 'period',
+  'nba.quarter_winner': 'period',
+  'any.period_winner': 'period',
+};
+
+export function familyOf(templateId: string): string {
+  return TEMPLATE_FAMILY[templateId] ?? templateId;
+}
+
+// League rates behind the variety templates (published averages; the drive tables are nflverse, see nfl.json).
+export const VARIETY_RATES = {
+  /** Share of NFL drives that end in an interception or a lost fumble (nflverse, 2021-2025: about 11%). */
+  nflTurnoverPerDrive: 0.11,
+  /** NFL scores (TD, FG, safety) per game minute, both teams: about 8.3 a game. */
+  nflScoresPerMinute: 8.3 / 60,
+  /** Scoring runs hotter at the end of a half (two-minute drill, clock stops). */
+  nflLateBoost: 1.3,
+  /** Share of NBA made field goals that are threes (about 13 of 42 a team). */
+  nbaThreeShare: 0.31,
+  /** Premier League averages per match, both teams. */
+  soccerCornersPerMatch: 10.5,
+  soccerShotsOnTargetPerMatch: 8.5,
 } as const;
 
 const YES_NO: Outcome[] = [
@@ -106,7 +148,9 @@ function nick(team: TeamRef, sport: GameState['sport']): string {
 }
 
 function ordinal(n: number): string {
-  return n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
+  const t = n % 100;
+  if (t >= 11 && t <= 13) return `${n}th`;
+  return n % 10 === 1 ? `${n}st` : n % 10 === 2 ? `${n}nd` : n % 10 === 3 ? `${n}rd` : `${n}th`;
 }
 
 function normalInvSafe(p: number): number {
@@ -344,6 +388,30 @@ export class HuddleQuestionEngine {
       });
     }
 
+    // Short windows in match minutes (never across halftime): another corner, a shot on target, a card.
+    const halfEnd = period >= 2 ? 90 : 45;
+    const windowQ = (templateId: string, kind: 'corner' | 'shot' | 'card', mins: number, perMinute: number, what: string, hook: string, basis: string, priority: number): void => {
+      if (minute + mins > halfEnd - 1) return;
+      const p = 1 - Math.exp(-perMinute * mins);
+      const until = minute + mins;
+      const rationale = `${basis}; at that rate the chance of at least one in ${mins} minutes is ${pct(p)} (Poisson).`;
+      out.push({
+        templateId, kind: 'moment', question: `${what} by the ${ordinal(until)} minute?`, hook, outcomes: YES_NO,
+        prior: normalizePrior({ yes: p, no: 1 - p }), lockAfterSecs: 20,
+        resolver: { type: 'event_window', params: { event: kind, fromMinute: minute, untilMinute: until, rationale } }, priority, rationale,
+      });
+    };
+    if (event.type === 'corner' && typeof event.data.shotOnTarget === 'boolean') {
+      windowQ(TEMPLATES.soccerCornerWindow, 'corner', 5, VARIETY_RATES.soccerCornersPerMatch / 90, 'Another corner', 'Corners keep coming?', `Premier League matches average about ${VARIETY_RATES.soccerCornersPerMatch} corners`, 38);
+    }
+    if (event.type === 'goal' || event.type === 'sub' || (event.type === 'period_start' && period === 2) || event.type === 'kickoff') {
+      windowQ(TEMPLATES.soccerShotWindow, 'shot', 5, VARIETY_RATES.soccerShotsOnTargetPerMatch / 90, 'A shot on target', 'Anyone testing the keeper?', `Premier League matches average about ${VARIETY_RATES.soccerShotsOnTargetPerMatch} shots on target`, 36);
+    }
+    if ((event.type === 'sub' || event.type === 'card') && period >= 2) {
+      const perMatch = SOCCER_TABLE.cards.per_match_first_half + SOCCER_TABLE.cards.per_match_second_half;
+      windowQ(TEMPLATES.soccerCardWindow, 'card', 10, perMatch / 90, 'A card', 'Tempers rising?', `Matches average ${perMatch.toFixed(1)} cards (StatsBomb open data)`, 34);
+    }
+
     if (event.type === 'period_start' && Number(event.data.period ?? period) === 2) {
       const w = matchProbs(rates.home / 2, rates.away / 2);
       const prior = normalizePrior({ home: w.home, draw: w.draw, away: w.away });
@@ -483,7 +551,51 @@ export class HuddleQuestionEngine {
         priority: 50,
         rationale,
       });
-      if (yardline >= 80) out.push(this.redZoneCandidate(event.team, offenseNick, yardline, score, seasons));
+      if (yardline >= 80) out.push(...this.redZoneCandidates(event.team, offenseNick, yardline, score, seasons));
+
+      // Variety on the same drive: points of any kind, a giveaway, and what the next score of the game will be.
+      const pts = prior.td! + prior.fg!;
+      const ptsRationale = `Drives starting at ${where} produce points ${pct(pts)} of the time: a touchdown ${pct(prior.td!)}, a field goal ${pct(prior.fg!)} (${seasons}).`;
+      out.push({
+        templateId: TEMPLATES.nflScoringDrive,
+        kind: 'moment',
+        question: `Will the ${offenseNick} score on this drive?`,
+        hook: `${offenseNick} ball at ${where}. Any points at all?`,
+        outcomes: YES_NO,
+        prior: normalizePrior({ yes: pts, no: 1 - pts }),
+        lockAfterSecs: 20,
+        resolver: { type: 'drive_result', params: { team: event.team, yesOn: ['td', 'fg'], startHome: score.home, startAway: score.away, rationale: ptsRationale } },
+        priority: 49,
+        rationale: ptsRationale,
+      });
+      const to = VARIETY_RATES.nflTurnoverPerDrive;
+      const toRationale = `About ${pct(to)} of NFL drives end in an interception or a lost fumble (nflverse, 2021 to 2025).`;
+      out.push({
+        templateId: TEMPLATES.nflTurnover,
+        kind: 'moment',
+        question: `Will the ${offenseNick} turn it over on this drive?`,
+        hook: `${offenseNick} ball. Does the defense take it away?`,
+        outcomes: YES_NO,
+        prior: normalizePrior({ yes: to, no: 1 - to }),
+        lockAfterSecs: 20,
+        resolver: { type: 'drive_turnover', params: { team: event.team, rationale: toRationale } },
+        priority: 44,
+        rationale: toRationale,
+      });
+      const tdShare = NFL_TABLE.drive_result_overall.td / Math.max(0.01, NFL_TABLE.drive_result_overall.td + NFL_TABLE.drive_result_overall.fg);
+      const nsRationale = `${pct(tdShare)} of NFL scores are touchdowns; the rest are field goals and the odd safety (${seasons}, ${NFL_TABLE.drive_result_overall.n.toLocaleString('en-US')} drives).`;
+      out.push({
+        templateId: TEMPLATES.nflNextScoreTd,
+        kind: 'moment',
+        question: 'Will the next score be a touchdown?',
+        hook: `${score.home}-${score.away}. Six points or three next?`,
+        outcomes: YES_NO,
+        prior: normalizePrior({ yes: tdShare, no: 1 - tdShare }),
+        lockAfterSecs: 20,
+        resolver: { type: 'next_score_type', params: { startHome: score.home, startAway: score.away, rationale: nsRationale } },
+        priority: 42,
+        rationale: nsRationale,
+      });
     }
 
     if (event.type === 'snap' && offense) {
@@ -548,7 +660,7 @@ export class HuddleQuestionEngine {
       const kicked = event.data.playType === 'kick' || event.data.playType === 'punt';
       // Red zone entry: this play moved the ball inside the 20 and the offense keeps a real chance.
       if (start !== undefined && start < 80 && start + gained >= 80 && !over && !kicked && (firstDown || down <= 2)) {
-        out.push(this.redZoneCandidate(event.team, offenseNick, clamp(start + gained, 80, 99), score, seasons));
+        out.push(...this.redZoneCandidates(event.team, offenseNick, clamp(start + gained, 80, 99), score, seasons));
       }
     }
 
@@ -578,6 +690,30 @@ export class HuddleQuestionEngine {
           geminiHint: { kind: 'period_winner', period: `${period}Q` }, priority: 72, rationale,
         });
       }
+    }
+
+    // Late in a quarter (3:00 to 0:30 left): any more points before it ends? Scores arrive at the league rate,
+    // a little faster at the end of a half. Proposed on every play in the window; the freshest one is asked.
+    if ((event.type === 'play_result' || event.type === 'snap' || event.type === 'drive_start') && period >= 1 && period <= 4 && inPeriod <= 180 && inPeriod >= 30) {
+      const mins = inPeriod / 60;
+      const rate = VARIETY_RATES.nflScoresPerMinute * (period === 2 || period === 4 ? VARIETY_RATES.nflLateBoost : 1);
+      const p = 1 - Math.exp(-rate * mins);
+      const clockText = `${Math.floor(inPeriod / 60)}:${String(Math.round(inPeriod % 60)).padStart(2, '0')}`;
+      const when = period === 2 ? 'before halftime' : period === 4 ? 'before the end of regulation' : `in the ${ordinal(period)} quarter`;
+      const rationale = `NFL games average about ${(VARIETY_RATES.nflScoresPerMinute * 60).toFixed(1)} scores${period === 2 || period === 4 ? ', and the end of a half runs about 30% hotter' : ''}; with ${clockText} left that is ${pct(p)} for at least one more (Poisson).`;
+      out.push({
+        templateId: TEMPLATES.nflLateScore,
+        kind: 'moment',
+        question: `Any more points ${when}?`,
+        hook: `${clockText} left in the ${ordinal(period)} quarter.`,
+        outcomes: YES_NO,
+        prior: normalizePrior({ yes: p, no: 1 - p }),
+        lockAfterSecs: 15,
+        lockOnEvent: `period_end:${period}`,
+        resolver: { type: 'score_change', params: { period, startHome: score.home, startAway: score.away, rationale } },
+        priority: 64,
+        rationale,
+      });
     }
 
     return out;
@@ -647,6 +783,35 @@ export class HuddleQuestionEngine {
       }
     }
 
+    // Next made basket a three? (after a timeout or at the start of a quarter)
+    if ((event.type === 'timeout' && typeof event.data.ball === 'string') || (event.type === 'period_start' && period >= 2 && period <= 4)) {
+      const p = VARIETY_RATES.nbaThreeShare;
+      const rationale = `About ${pct(p)} of NBA made field goals are threes (league average, about 13 of 42 a team), so that is the price for the next one.`;
+      out.push({
+        templateId: TEMPLATES.nbaNextThree, kind: 'moment', question: 'Will the next made basket be a three?', hook: 'From deep or inside?',
+        outcomes: YES_NO, prior: normalizePrior({ yes: p, no: 1 - p }), lockAfterSecs: 15, lockOnEvent: 'shot',
+        resolver: { type: 'next_basket_three', params: { rationale } }, priority: event.type === 'timeout' ? 70 : 44, rationale,
+      });
+    }
+
+    // Late in a close quarter (3:20 to 1:00 left, trailing by 1 to 5): does the trailing team get in front before it ends?
+    const lc = score.home - score.away;
+    const playEv = event.type === 'shot' || event.type === 'turnover' || event.type === 'timeout' || (event.type === 'free_throw' && event.data.trip !== true);
+    if (playEv && period >= 1 && period <= 4 && inPeriod <= 200 && inPeriod >= 60 && Math.abs(lc) >= 1 && Math.abs(lc) <= 5) {
+      const trailing: 'home' | 'away' = lc > 0 ? 'away' : 'home';
+      const tn = nick(state[trailing], 'nba');
+      const sdRem = NBA.marginSd * Math.sqrt(inPeriod / NBA.gameSeconds);
+      // Reflection principle on a random-walk margin: P(it ever gets past zero) ~ 2 P(Z > (|lead| + 0.5) / sd).
+      const p = clamp(2 * (1 - normalCdf((Math.abs(lc) + 0.5) / Math.max(0.5, sdRem))), 0.05, 0.6);
+      // A long shot (under 15%) is no fun to trade: ask only while it is a real question.
+      const rationale = `Down ${Math.abs(lc)} with ${Math.floor(inPeriod / 60)}:${String(Math.round(inPeriod % 60)).padStart(2, '0')} left in the ${ordinal(period)}; a random-walk model of the margin (sd ${NBA.marginSd} over a game) puts the ${tn} in front at some point before the buzzer ${pct(p)} of the time.`;
+      if (p >= 0.15) out.push({
+        templateId: TEMPLATES.nbaLeadChange, kind: 'moment', question: `Will the ${tn} take the lead before the end of the ${ordinal(period)} quarter?`, hook: `${tn} down ${Math.abs(lc)}.`,
+        outcomes: YES_NO, prior: normalizePrior({ yes: p, no: 1 - p }), lockAfterSecs: 15, lockOnEvent: `period_end:${period}`,
+        resolver: { type: 'lead_change', params: { trailing, period, rationale } }, priority: 66, rationale,
+      });
+    }
+
     // Start of quarters 2-4: a made three in the first two minutes?
     if (event.type === 'period_start' && period >= 2 && period <= 4) {
       const p = threeInWindowProb(120);
@@ -707,6 +872,27 @@ export class HuddleQuestionEngine {
       });
     }
     return out;
+  }
+
+  /** Red zone: a touchdown, or (asked instead when touchdowns were just asked) a field goal. */
+  private redZoneCandidates(team: string | undefined, offenseNick: string, yardline: number, score: { home: number; away: number }, seasons: string): MarketCandidate[] {
+    const rz = redZoneProbs(yardline);
+    const rationale = `Drives that reach the ${100 - yardline}-yard line end in a touchdown ${pct(rz.td)} of the time and a field goal ${pct(rz.fg)} (${seasons}${rz.n ? `, ${rz.n.toLocaleString('en-US')} red-zone trips` : ''}).`;
+    return [
+      this.redZoneCandidate(team, offenseNick, yardline, score, seasons),
+      {
+        templateId: TEMPLATES.nflFieldGoal,
+        kind: 'moment',
+        question: `Will the ${offenseNick} settle for a field goal on this trip?`,
+        hook: `${offenseNick} in the red zone. Do they have to kick it?`,
+        outcomes: YES_NO,
+        prior: normalizePrior({ yes: rz.fg, no: 1 - rz.fg }),
+        lockAfterSecs: 20,
+        resolver: { type: 'drive_result', params: { team, yesOn: ['fg'], startHome: score.home, startAway: score.away, rationale } },
+        priority: 76,
+        rationale,
+      },
+    ];
   }
 
   private redZoneCandidate(team: string | undefined, offenseNick: string, yardline: number, score: { home: number; away: number }, seasons: string): MarketCandidate {
@@ -857,8 +1043,10 @@ export class HuddleQuestionEngine {
       }
 
       case 'drive_result': {
-        const binary = params.binary === true;
-        const done = (r: 'td' | 'fg' | 'none'): ResolverResult => (binary ? pick(r === 'td' ? 'yes' : 'no') : pick(r));
+        // binary: YES = touchdown; yesOn: YES = any of these results ("score on this drive", "field goal").
+        const yesOn = Array.isArray(params.yesOn) ? (params.yesOn as unknown[]).map(String) : null;
+        const binary = params.binary === true || !!yesOn;
+        const done = (r: 'td' | 'fg' | 'none'): ResolverResult => (binary ? pick((yesOn ?? ['td']).includes(r) ? 'yes' : 'no') : pick(r));
         if (event.type === 'play_result' && sameTeam && event.data.noPlay !== true) {
           if (event.data.turnover === true) return done('none');
           if (event.data.touchdown === true) return done('td');
@@ -899,6 +1087,52 @@ export class HuddleQuestionEngine {
         return has('tie') ? pick('tie') : pick('draw');
       }
 
+      case 'drive_turnover': {
+        if (event.type === 'play_result' && sameTeam && event.data.noPlay !== true) {
+          if (event.data.turnover === true) return pick('yes');
+          if (event.data.touchdown === true || event.data.playType === 'kick' || event.data.playType === 'punt') return pick('no');
+          return null;
+        }
+        if (event.type === 'drive_end' && sameTeam) return pick(String(event.data.result ?? '').toLowerCase() === 'turnover' ? 'yes' : 'no');
+        // The other team has the ball without a giveaway on ours (downs, end of half), or the game is over.
+        if (event.type === 'drive_start' || event.type === 'period_end' || isFinal) return pick('no');
+        return null;
+      }
+
+      case 'next_score_type': {
+        const dh = score.home - (num(params.startHome) ?? 0);
+        const da = score.away - (num(params.startAway) ?? 0);
+        if (dh > 0 && da > 0) return { void: true, reason: 'both teams scored between updates' };
+        const d = Math.max(dh, da);
+        if (d >= 6) return pick('yes'); // a touchdown, with or without the try
+        if (d >= 2) return pick('no'); // a field goal or a safety
+        if (isFinal) return { void: true, reason: 'nobody scored again' };
+        return null;
+      }
+
+      case 'score_change': {
+        const p = Number(params.period);
+        const changed = score.home !== (num(params.startHome) ?? 0) || score.away !== (num(params.startAway) ?? 0);
+        if (changed) return pick('yes');
+        const evPeriod = Number(event.data?.period ?? event.clock?.period ?? state.clock.period);
+        if ((event.type === 'period_end' && evPeriod >= p) || evPeriod > p || isFinal) return pick('no');
+        return null;
+      }
+
+      case 'event_window': {
+        const until = Number(params.untilMinute);
+        const minute = num(event.data?.minute) ?? state.minute ?? 0;
+        const kind = String(params.event);
+        const hit =
+          kind === 'corner' ? event.type === 'corner' && typeof event.data.shotOnTarget !== 'boolean'
+            : kind === 'shot' ? ((event.type === 'score_update' || event.type === 'corner') && event.data.shotOnTarget === true) || event.type === 'goal'
+              : kind === 'card' ? event.type === 'card'
+                : false;
+        if (hit && minute <= until) return pick('yes');
+        if (minute > until || event.type === 'period_end' || isFinal) return pick('no');
+        return null;
+      }
+
       // ---- basketball ----
       case 'ft_trip': {
         if (event.type === 'free_throw' && event.data.trip !== true && event.data.technical !== true) {
@@ -930,6 +1164,22 @@ export class HuddleQuestionEngine {
         const inPeriod = secs !== undefined ? secs - Math.max(0, 4 - evPeriod) * 720 : undefined;
         if (event.type === 'shot' && event.data.made === true && event.data.three === true && evPeriod === p && (inPeriod === undefined || inPeriod >= until)) return pick('yes');
         if (evPeriod > p || isFinal || (event.type === 'period_end' && evPeriod >= p) || (evPeriod === p && inPeriod !== undefined && inPeriod < until)) return pick('no');
+        return null;
+      }
+
+      case 'next_basket_three': {
+        if (event.type === 'shot' && event.data.made === true && (num(event.data.points) ?? 0) > 0) return pick(event.data.three === true ? 'yes' : 'no');
+        if (event.type === 'period_end' || isFinal) return { void: true, reason: 'no basket before the end of the quarter' };
+        return null;
+      }
+
+      case 'lead_change': {
+        const trailing = params.trailing === 'away' ? 'away' : 'home';
+        const lead = trailing === 'home' ? score.home - score.away : score.away - score.home;
+        if (lead > 0) return pick('yes');
+        const p = Number(params.period);
+        const evPeriod = Number(event.data?.period ?? event.clock?.period ?? state.clock.period);
+        if ((event.type === 'period_end' && evPeriod >= p) || evPeriod > p || isFinal) return pick('no');
         return null;
       }
 

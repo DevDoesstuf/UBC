@@ -8,7 +8,7 @@
 // The engine only prices and resolves. Scheduling uses the replay script itself: since the timeline is
 // known, we can tell when a candidate will lock and resolve and skip ones that would leave the room
 // staring at a locked market for long (one question at a time).
-import { HuddleQuestionEngine, type GameMemo, type GameModel } from "./engine";
+import { familyOf, HuddleQuestionEngine, type GameMemo, type GameModel } from "./engine";
 import { reduce } from "./reduce";
 import { getTimeline, type Timeline } from "./timeline";
 import {
@@ -77,6 +77,8 @@ export interface ReplayRun {
   /** The pregame question after it locked: it settles from its resolver (the final whistle) in the background. */
   parked?: PendingQ | null;
   parkedMarket?: Market | null;
+  /** Template ids of the live questions asked so far, in order (variety rules; missing on older lobbies). */
+  askedTemplates?: string[];
 }
 
 /** What the lobby lets the replay do. Implemented in lib/lobby.ts. */
@@ -219,6 +221,39 @@ export function toYesNo(c: MarketCandidate, state: GameState, ev: GameEvent): Om
     case "soccer.total_goals":
       short = c.question.replace(/^Will /, "");
       break;
+    case "nfl.scoring_drive":
+      short = `${offense} score this drive?`;
+      break;
+    case "nfl.field_goal":
+      short = `${offense} settle for a FG?`;
+      break;
+    case "nfl.turnover_drive":
+      short = `${offense} turn it over?`;
+      break;
+    case "nfl.next_score_td":
+      short = "Next score a TD?";
+      break;
+    case "nfl.late_score": {
+      const p = Number(c.resolver.params.period);
+      short = p === 2 ? "More points before half?" : p === 4 ? "More points before the end?" : "More points this quarter?";
+      break;
+    }
+    case "nba.next_basket_three":
+      short = "Next basket a three?";
+      break;
+    case "nba.lead_change": {
+      const tr = c.resolver.params.trailing === "away" ? away : home;
+      short = `${tr} take the lead?`;
+      break;
+    }
+    case "soccer.corner_window":
+    case "soccer.sot_window":
+    case "soccer.card_window": {
+      const until = Number(c.resolver.params.untilMinute);
+      const what = c.templateId === "soccer.corner_window" ? "Another corner" : c.templateId === "soccer.sot_window" ? "Shot on target" : "A card";
+      short = `${what} by ${until}'?`;
+      break;
+    }
     default:
       if (!has("yes")) {
         yesId = c.outcomes[0]?.id ?? "yes";
@@ -293,12 +328,36 @@ function lockFor(engine: HuddleQuestionEngine, t: Timeline, run: ReplayRun, q: P
 /** Moment questions at or above this priority (3rd/4th downs, red zone, penalties, free throws...) are the headline ones. */
 export const BIG_MOMENT_PRIORITY = 70;
 
-/** Replay ms of the next event (not yet folded) that will set up a moment question (of at least `minPriority`), or Infinity. */
-function nextMomentAt(run: ReplayRun, t: Timeline, minPriority = 0): number {
+/**
+ * Variety: the same family of question (lib/replay/engine.ts TEMPLATE_FAMILY: "touchdown on this drive?" and "red
+ * zone touchdown?" are one) is never asked twice in a row, and at most this many times a game.
+ */
+export const MAX_PER_FAMILY = 3;
+
+/** Why a template cannot be asked next ("repeat", "cap"), or null when it can. Host-called moments skip this. */
+export function varietyBlock(run: Pick<ReplayRun, "askedTemplates">, templateId: string): "repeat" | "cap" | null {
+  const asked = run.askedTemplates ?? [];
+  const fam = familyOf(templateId);
+  if (asked.length && familyOf(asked[asked.length - 1]) === fam) return "repeat";
+  if (asked.filter((x) => familyOf(x) === fam).length >= MAX_PER_FAMILY) return "cap";
+  return null;
+}
+
+function noteAsked(run: ReplayRun, templateId: string): void {
+  (run.askedTemplates ??= []).push(templateId);
+}
+
+/**
+ * Replay ms of the next event (not yet folded) that will set up a moment question (of at least `minPriority`)
+ * the room could still be asked, or Infinity. `after` = the template about to be asked (its family will then be
+ * the last one asked).
+ */
+function nextMomentAt(run: ReplayRun, t: Timeline, minPriority = 0, after?: string): number {
   const scout = new HuddleQuestionEngine().restore(run.timelineId, structuredClone(run.model), structuredClone(run.memo));
+  const asked = { askedTemplates: [...(run.askedTemplates ?? []), ...(after ? [after] : [])] };
   let at = Infinity;
   walk(t, run.folded, run.state, (ev, atMs, s) => {
-    if (scout.propose(ev, s, []).some((c) => c.kind === "moment" && c.priority >= minPriority)) {
+    if (scout.propose(ev, s, []).some((c) => c.kind === "moment" && c.priority >= minPriority && !varietyBlock(asked, c.templateId))) {
       at = atMs;
       return true;
     }
@@ -312,23 +371,25 @@ export function bestCandidate(run: ReplayRun, nowMs: number, engine = engineFor(
   const t = getTimeline(run.timelineId);
   if (!t) return null;
   let best: { q: PendingQ; lockAtMs: number } | null = null;
-  let momentAt: number | undefined;
-  let bigAt: number | undefined;
+  const momentAt = new Map<string, number>();
+  const bigAt = new Map<string, number>();
   for (const q of run.pending) {
     if (q.resolveAtMs === null || q.resolveAtMs - nowMs < MIN_TRADE_MS) continue;
+    if (varietyBlock(run, q.templateId)) continue;
     const lockAtMs = Math.min(lockFor(engine, t, run, q, nowMs), q.resolveAtMs);
     if (lockAtMs - nowMs < MIN_TRADE_MS) continue;
     if (q.resolveAtMs - lockAtMs > MAX_LOCKED_WAIT_MS) continue;
+    const fam = familyOf(q.templateId);
     // Game-long questions are filler: never let one block the room when a play-by-play moment is coming.
     if (q.kind === "game") {
-      momentAt ??= nextMomentAt(run, t);
-      if (momentAt <= q.resolveAtMs) continue;
+      if (!momentAt.has(fam)) momentAt.set(fam, nextMomentAt(run, t, 0, q.templateId));
+      if (momentAt.get(fam)! <= q.resolveAtMs) continue;
     }
     // Small moments (a drive result, a corner) wait when a headline moment (a 3rd down, a penalty, free throws)
     // would arrive while they are still running.
     if (q.kind === "moment" && q.priority < BIG_MOMENT_PRIORITY) {
-      bigAt ??= nextMomentAt(run, t, BIG_MOMENT_PRIORITY);
-      if (bigAt <= q.resolveAtMs) continue;
+      if (!bigAt.has(fam)) bigAt.set(fam, nextMomentAt(run, t, BIG_MOMENT_PRIORITY, q.templateId));
+      if (bigAt.get(fam)! <= q.resolveAtMs) continue;
     }
     if (!best || q.priority > best.q.priority || (q.priority === best.q.priority && q.proposedAtMs < best.q.proposedAtMs)) best = { q, lockAtMs };
   }
@@ -352,6 +413,7 @@ export function takeCandidate(run: ReplayRun, templates: string[], now: number):
   run.pending = run.pending.filter((p) => p.key !== q.key);
   run.current = { ...q, lockAtMs, openedAtMs: nowMs };
   run.asked++;
+  noteAsked(run, q.templateId);
   return { q: run.current, lockAtMs };
 }
 
@@ -519,6 +581,7 @@ export function advanceReplay(run: ReplayRun, now: number, host: ReplayHost, for
       run.pending = run.pending.filter((p) => p.key !== q.key);
       run.current = { ...q, yesPrior, lockAtMs: best.lockAtMs };
       run.asked++;
+      noteAsked(run, q.templateId);
       host.open(run.current, yesPrior, run.startedAt + best.lockAtMs, q.resolveAtMs !== null ? run.startedAt + q.resolveAtMs : null, now);
       changed = true;
     }

@@ -11,6 +11,8 @@ export interface ScoreEntry {
   gemini: number | null;
   /** 1 = YES happened, 0 = NO. */
   outcome: 0 | 1;
+  /** The game has a Gemini market but Gemini never priced it (listed, never traded): nothing to compare. */
+  geminiUnpriced?: boolean;
 }
 
 export interface Scorecard {
@@ -40,19 +42,26 @@ export function buildScorecard(entries: ScoreEntry[]): Scorecard {
   const modelG = brier(withGemini.filter((e) => typeof e.model === "number").map((e) => ({ p: e.model as number, o: e.outcome })));
 
   let verdict = "No resolved questions yet.";
-  if (room !== null) verdict = `Room Brier ${room.toFixed(2)} over ${entries.length} question${entries.length === 1 ? "" : "s"}.`;
+  const n = entries.length;
+  if (room !== null) verdict = `Room Brier ${room.toFixed(2)} over ${n} question${n === 1 ? "" : "s"}.`;
   if (roomM !== null && model !== null) {
     const diff = Math.abs(roomM - model);
-    if (diff < 0.005) verdict = "The room and the model are dead even tonight";
-    else if (roomM < model) verdict = `The room beat the model by ${diff.toFixed(2)} tonight`;
-    else verdict = `The model beat the room by ${diff.toFixed(2)} tonight`;
-    if (gemini !== null && roomG !== null) {
-      const best = Math.min(roomG, modelG ?? Infinity);
-      if (gemini < best - 0.005) verdict += "; Gemini still wins";
-      else if (gemini > best + 0.005) verdict += modelG === null || roomG <= modelG ? "; and the room out-called Gemini" : "; and the model out-called Gemini";
-      else verdict += "; Gemini is level with the best of them";
-    }
-    verdict += ".";
+    if (diff < 0.005) verdict = "The room and the model are dead even tonight.";
+    else if (roomM < model) verdict = `The room beat the model by ${diff.toFixed(2)} tonight.`;
+    else verdict = `The model beat the room by ${diff.toFixed(2)} tonight.`;
+  }
+  // Gemini is only compared on the questions it priced, and the verdict says how many those were.
+  const g = withGemini.length;
+  if (n && g && gemini !== null && roomG !== null) {
+    const best = Math.min(roomG, modelG ?? Infinity);
+    const who = modelG === null || roomG <= modelG ? "the room" : "the model";
+    const tail =
+      gemini < best - 0.005 ? "Gemini called those best" : gemini > best + 0.005 ? `${who} out-called Gemini on those` : `${who} and Gemini were level on those`;
+    verdict += ` Gemini priced ${g} of ${n}: ${tail}.`;
+  } else if (n && entries.every((e) => e.geminiUnpriced)) {
+    verdict += " Gemini listed this game but never priced it, so there is no Gemini comparison.";
+  } else if (n && entries.some((e) => e.geminiUnpriced === false)) {
+    verdict += ` Gemini priced none of the ${n} questions.`;
   }
   return { room: r3(room), model: r3(model), gemini: r3(gemini), n: entries.length, verdict };
 }

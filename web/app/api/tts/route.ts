@@ -1,17 +1,20 @@
 // GET /api/tts?text=<line>&persona=nfl|soccer|calm      -> audio/mpeg (ElevenLabs), cached by hash
 // GET /api/tts?code=ABCD&id=<caption id>                -> the same for one of the lobby's captions (persona from the game)
 // &format=wav                                            -> 22 kHz mono 16-bit WAV (the speaker ESP32's format) instead of MP3
-// 204 (no body) when ELEVENLABS_API_KEY is not set: the TV then reads the caption with the browser's Web Speech.
+// 204 (no body) when ELEVENLABS_API_KEY is not set, or ElevenLabs rejected it (401/403) in the last 5 minutes: the TV
+// then reads the caption with the browser's Web Speech.
 // 502/504 when ElevenLabs fails: also fall back to Web Speech.
 import { handle, json } from "@/lib/http";
 import { ApiError, getLobby, personaOf } from "@/lib/lobby";
-import { MAX_TTS_CHARS, TtsError, asPersona, synthesize, ttsEnabled } from "@/lib/tts";
+import { MAX_TTS_CHARS, TtsError, asPersona, synthesize, ttsEnabled, ttsKeyRejected } from "@/lib/tts";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   return handle(async () => {
     if (!ttsEnabled()) return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", "x-tts": "off" } });
+    // ElevenLabs rejected the key a moment ago (401/403): behave as if there were no key for a few minutes.
+    if (await ttsKeyRejected()) return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", "x-tts": "rejected-key" } });
     const q = new URL(req.url).searchParams;
     let text = (q.get("text") || "").trim();
     let persona = asPersona(q.get("persona"));
