@@ -41,7 +41,7 @@ export function multiplierText(p: number | null | undefined): string | null {
   if (v === null || v <= 0 || v >= 1) return null;
   const x = 1 / v;
   if (x >= 100) return "100+";
-  if (x >= 10) return String(Math.round(x));
+  // Always to the cent, so the tile ("$1 pays $11.32") matches the $1 chip under it ("get $11.32").
   return x.toFixed(2);
 }
 

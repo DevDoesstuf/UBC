@@ -10,6 +10,9 @@ import {
 import { SIDE, SOLANA_ADDRESS, profitOf, ranked, type Lobby } from "./derive";
 import { CodeTiles, Empty, InlineError, Money, SectionTitle, Sheet, cx, d } from "./ui";
 
+/** The server's lobby limit (lib/lobby.ts MAX_PLAYERS): a full lobby says so before anyone types a name. */
+const MAX_PARTY = 12;
+
 // ------------------------------------------------------------------ backdrop
 
 /** The drifting colour field behind the app; a moment market tints it with the game's colour. */
@@ -100,6 +103,8 @@ export function JoinScreen({
 
         {ended ? (
           <Empty mark>This party has ended. Pick a new game on the box to start another.</Empty>
+        ) : l.players.length >= MAX_PARTY ? (
+          <Empty mark>This party is full ({MAX_PARTY} players). Watch along on the TV, or start another game on the box.</Empty>
         ) : (
           <form className="ph-join-form hd-rise" style={d(380)} onSubmit={submit} noValidate>
             <label htmlFor="name" className="ph-label">
@@ -322,8 +327,9 @@ export function Header({ l, onMoney }: { l: Lobby; onMoney: () => void }) {
                 <span className="ph-team">{s.awayShort ?? s.away.slice(0, 3)}</span>
               </span>
               <span className="ph-bug-clock" aria-hidden="true">
-                {s.status === "live" && <span className="hd-live-dot" />}
-                <span className="hd-num">{s.status === "final" ? "Final" : s.status === "pre" ? "Pre-game" : s.clock}</span>
+                {/* Same rule as the TV: before the clock starts (the pregame question) it is Pre-game, not live. */}
+                {s.status === "live" && s.started !== false && <span className="hd-live-dot" />}
+                <span className="hd-num">{s.status === "final" ? "Final" : s.status === "pre" || s.started === false ? "Pre-game" : s.clock}</span>
               </span>
             </div>
           ) : (
@@ -557,7 +563,8 @@ export function ScorecardBlock({ l }: { l: Lobby }) {
 export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode; cashed: { cents: number; explorer?: string } | null }) {
   const me = l.me!;
   const profit = profitOf(l);
-  const rows = ranked(l);
+  // Only players who bought in are ranked: a watcher with $0 is not "2nd of 12".
+  const rows = ranked(l).filter((p) => p.deposited > 0);
   const rank = rows.findIndex((p) => p.id === me.id) + 1;
   const s = l.game?.score;
   const verdict = rank === 1 && profit > 0 ? "You won the room." : profit > 0 ? "Up on the night." : profit < 0 ? "Cooked tonight." : "Broke even.";
@@ -645,7 +652,7 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
 
 /** The podium as the box draws it: brand gradient 1st, ink 2nd, card 3rd. */
 function Podium({ l }: { l: Lobby }) {
-  const rows = ranked(l).slice(0, 3);
+  const rows = ranked(l).filter((p) => p.deposited > 0).slice(0, 3);
   const order = [1, 0, 2].filter((i) => rows[i]);
   return (
     <section aria-label="Podium" className="ph-podium">
