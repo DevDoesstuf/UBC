@@ -18,7 +18,14 @@ type Toast = { text: string; kind: "ok" | "err"; n: number };
 
 export default function PhonePage() {
   const params = useParams<{ code: string }>();
-  const code = String(params.code || "").toUpperCase();
+  // Codes are letters; anything else ("%3Cscript%3E") is shown decoded, not URL-encoded.
+  const code = (() => {
+    try {
+      return decodeURIComponent(String(params.code || "")).toUpperCase().slice(0, 12);
+    } catch {
+      return String(params.code || "").toUpperCase().slice(0, 12);
+    }
+  })();
   const [boot, setBoot] = useState<{ seat: string | null; depositReturn: boolean } | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -41,6 +48,12 @@ export default function PhonePage() {
     const seat = q.get("seat");
     setToken(loadToken(code, seat));
     setBoot({ seat, depositReturn: q.get("deposit") === "1" });
+    // "Just watch for now" is remembered for this lobby and seat, so a reload does not ask again.
+    try {
+      if (localStorage.getItem(`huddle:skip:${code}:${seat ?? ""}`) === "1") setSkipped(true);
+    } catch {
+      /* private mode: ask again after a reload */
+    }
   }, [code]);
 
   const { data: l, error, refresh, lastOk } = usePoll(boot ? () => api<LobbyData>(`/api/lobby/${code}`, { token }) : null, 1000);
@@ -82,7 +95,9 @@ export default function PhonePage() {
     if (marketKey && marketKey !== lastMarket.current && l?.phase === "open") {
       setTab("play");
       try {
-        navigator.vibrate?.(30);
+        // Chrome blocks (and logs) vibrate before the first tap on the page.
+        const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+        if (!ua || ua.hasBeenActive) navigator.vibrate?.(30);
       } catch {
         /* no vibration */
       }
@@ -289,7 +304,14 @@ export default function PhonePage() {
             setBuyInDone(false);
             setSkipped(true);
           }}
-          onSkip={() => setSkipped(true)}
+          onSkip={() => {
+            setSkipped(true);
+            try {
+              localStorage.setItem(`huddle:skip:${code}:${boot.seat ?? ""}`, "1");
+            } catch {
+              /* private mode */
+            }
+          }}
         />
         <ToastView toast={toast} />
       </>
@@ -331,6 +353,13 @@ export default function PhonePage() {
         Skip to content
       </a>
       <Header l={l} onMoney={() => setMoneyOpen(true)} />
+      {error && (
+        <div className="ph-offline-wrap">
+          <div className="ph-offline hd-pop" role="status">
+            <Icon name="wifiOff" size={18} /> Reconnecting… your bets are safe.
+          </div>
+        </div>
+      )}
       <main id="main" className="ph-col ph-main">
         <div key={tab} className="hd-fade ph-stackgap">
           {tab === "play" &&

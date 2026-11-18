@@ -214,6 +214,19 @@ html:has(.ph-screen) {
 .ph-tab-icon { position: relative; display: inline-flex; }
 .ph-tab-badge { position: absolute; top: -2px; right: -6px; width: 10px; height: 10px; border-radius: 999px; background: var(--k-hot); box-shadow: 0 0 0 2px var(--k-card); }
 
+/* ---------------------------------------------------------------- offline: polling failed after the first load */
+
+.ph-offline-wrap {
+  position: fixed; top: calc(env(safe-area-inset-top) + 8px); left: 0; right: 0; z-index: 75;
+  display: grid; justify-items: center; padding: 0 16px; pointer-events: none;
+}
+.ph-offline {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 16px; border-radius: 999px;
+  background: var(--k-hot-50); color: var(--k-hot-600); font-size: 0.9375rem; font-weight: 700; white-space: nowrap;
+  box-shadow: var(--k-shadow-pop), inset 0 0 0 2px var(--k-hot);
+}
+.ph-offline svg { flex: none; }
+
 /* ---------------------------------------------------------------- toasts */
 
 .ph-toasts { position: fixed; bottom: calc(env(safe-area-inset-bottom) + 150px); left: 0; right: 0; z-index: 70; display: grid; justify-items: center; pointer-events: none; padding: 0 16px; }
@@ -307,6 +320,8 @@ html:has(.ph-screen) {
 .ph-line { padding-top: 12px; border-top: 1px solid var(--k-rule); font-weight: 400; }
 
 .ph-tray { margin-top: 12px; padding: 12px; border-radius: var(--k-r-tile); background: var(--k-canvas); }
+/* Scrolled into view above the fixed dock (caption pill + tab bar). */
+.ph-tray, .ph-post .hd-btn-block { scroll-margin-bottom: calc(env(safe-area-inset-bottom) + 150px); }
 .ph-tray-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -4px -6px 0 0; font-size: 0.9375rem; color: var(--k-ink-2); }
 .ph-side-text { font-weight: 700; }
 .ph-side-text.yes { color: var(--k-yes-600); }

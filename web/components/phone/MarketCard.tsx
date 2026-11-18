@@ -2,7 +2,7 @@
 // The phone's market card (DESIGN.md section 9): question, lock ring, the split, the price line,
 // solid YES/NO game tiles that kick on price moves, the stake tray ("you pay / you get"), your
 // position, and the result (flood, "Called it" / "Cooked"). Head-to-head shows the offer book.
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Burst, Icon, Kinetic, LockRing, MarkerShape, Pct, Roll, Sparkline, SplitBar, SplitMarkers, pctLabel, pctText,
   payoutText, useCoins, useReplayClass, usd, usdShort, signedUsd, type SeriesPoint,
@@ -340,10 +340,21 @@ export function OutcomeTile({
  */
 function StakeTray({ side, m, actions, flow, onClose }: { side: Side; m: Mkt; actions: Actions; flow: Flow; onClose: () => void }) {
   const [busy, setBusy] = useState<number | null>(null);
+  // State updates land after a render; a ref stops a second click in the same tick from buying twice.
+  const inFlight = useRef(false);
+  const tray = useRef<HTMLDivElement>(null);
+  // The chips are the buy buttons: bring them above the fixed caption and tab bar as soon as they appear.
+  useEffect(() => {
+    revealAboveDock(tray.current);
+  }, []);
   const chips = stakeChips(actions.balance);
   const place = async (c: number, el: HTMLElement) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(c);
-    const ok = await actions.buy(side, c);
+    const ok = await actions.buy(side, c).finally(() => {
+      inFlight.current = false;
+    });
     setBusy(null);
     if (ok) {
       flow(el);
@@ -351,7 +362,7 @@ function StakeTray({ side, m, actions, flow, onClose }: { side: Side; m: Mkt; ac
     }
   };
   return (
-    <div className="ph-tray hd-rise" role="group" aria-label={`Stake on ${SIDE[side]}`}>
+    <div ref={tray} className="ph-tray hd-rise" role="group" aria-label={`Stake on ${SIDE[side]}`}>
       <div className="ph-tray-head">
         <span>
           You pay, you get back if <b className={cx("ph-side-text", side)}>{SIDE[side]}</b> wins
@@ -394,6 +405,15 @@ function StakeTray({ side, m, actions, flow, onClose }: { side: Side; m: Mkt; ac
   );
 }
 
+/** Scrolls `el` into view above the fixed dock (scroll-margin-bottom in phone.css), only when it is covered. */
+function revealAboveDock(el: HTMLElement | null) {
+  if (!el || typeof window === "undefined") return;
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const dock = document.querySelector<HTMLElement>(".ph-dock");
+  const limit = dock ? dock.getBoundingClientRect().top : window.innerHeight;
+  if (el.getBoundingClientRect().bottom > limit - 8) el.scrollIntoView({ block: "end", behavior: reduce ? "auto" : "smooth" });
+}
+
 /** $1, $2, $5 (the server's quick amounts) plus "all in" when the balance is something else. */
 function stakeChips(balance: number): { cents: number; max: boolean }[] {
   const base = [100, 200, 500];
@@ -416,6 +436,15 @@ function OfferBook({ l, m, live, actions, flow }: { l: Lobby; m: Mkt; live: bool
   const [error, setError] = useState<string | null>(null);
   const post = useRef<HTMLButtonElement>(null);
   const pv = offerPreview(cents, odds);
+  // Picking a side, stake or odds: keep the Offer button above the fixed caption and tab bar.
+  const touched = useRef(false);
+  useEffect(() => {
+    if (!touched.current) {
+      touched.current = true;
+      return;
+    }
+    revealAboveDock(post.current);
+  }, [side, cents, odds]);
 
   return (
     <div className="ph-h2h">
