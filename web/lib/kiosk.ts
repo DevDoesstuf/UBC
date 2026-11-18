@@ -9,15 +9,28 @@
 //   question, yes, no (cents 1-99), move (-1|0|1), history[] (cents), traded, lockIn (seconds)   market/locked
 //   result ("YES"|"NO"), lines[]                              result / ended
 //   buttons   [{id,label,style}]  style: primary|yes|no|plain, drawn as a row along the bottom
+//
+// v2 (optional, additive; old firmware ignores them, the new firmware copes when any is missing):
+//   v: 2, palette {canvas,card,well,rule,ink,ink2,muted,accent,accentDeep,accentLight,yes,no,hot,gold} (hex)
+//   game {id,title,league,sport,kind,mode}, score {home,away,homeShort,awayShort,homeColor,awayColor,
+//     homeScore,awayScore,clock,period,status}, caption {id,text}
+//   cards [{id,title,sub,enabled,league,kind,date,color,gemini,home?,away?}]   select: EVERY game (tiles = first 4)
+//   roster [{name,cents,deposited}], pot (cents), calls [{id,label,enabled}]    lobby/result ("Call it!" moments)
+//   volume (cents), lockInMs, lockTotal (s), model (cents|null), gemini {cents,label,live}|null,
+//     trades [{name,side,cents,price}] newest first, moment, mode              market/locked
+//   winners [{name,cents,profit}], losers [{name,cents}], lockYes (cents)      result
+//   leaderboard [{name,cents,pnl}], scorecard {room,model,gemini,n,verdict}     ended
 import QRCode from "qrcode";
 import { allGames, getGame } from "./games";
+import { getTimeline } from "./replay/timeline";
+import { buildScorecard } from "./scorecard";
 import {
   ApiError, createLobby, endSession, getKioskCode, getKioskLobby, getLobby, lockMarket, mutate, openMarket,
   releaseKiosk, resolveMarket, usd,
 } from "./lobby";
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
-import type { Lobby } from "./types";
+import type { Game, Lobby } from "./types";
 
 // ---------------------------------------------------------------- "Call it!" moments
 // The room slams these on the box when something happens on TV; each opens a quick market on that moment.
@@ -83,7 +96,71 @@ export interface KioskScreen {
   result?: "YES" | "NO";
   lines?: string[];
   buttons: KioskButton[];
+  /** v2 fields (optional, see the contract at the top). */
+  v?: 2;
+  palette?: Record<string, string>;
+  game?: { id: string; title: string; league?: string; sport?: string; kind?: string; mode?: string };
+  score?: KioskScore;
+  caption?: { id: number; text: string } | null;
+  cards?: KioskCard[];
+  roster?: { name: string; cents: number; deposited: number }[];
+  pot?: number;
+  calls?: { id: string; label: string; enabled: boolean }[];
+  volume?: number;
+  lockInMs?: number;
+  lockTotal?: number;
+  model?: number | null;
+  gemini?: { cents: number; label: string; live: boolean } | null;
+  trades?: { name: string; side: "yes" | "no"; cents: number; price: number }[];
+  moment?: string | null;
+  mode?: string;
+  winners?: { name: string; cents: number; profit: number }[];
+  losers?: { name: string; cents: number }[];
+  lockYes?: number | null;
+  leaderboard?: { name: string; cents: number; pnl: number }[];
+  scorecard?: { room: number | null; model: number | null; gemini: number | null; n: number; verdict: string };
 }
+
+export interface KioskTeam {
+  name: string;
+  short?: string;
+  color?: string;
+}
+
+export interface KioskCard {
+  id: string;
+  title: string;
+  sub: string;
+  enabled: boolean;
+  league?: string;
+  kind?: string;
+  date?: string;
+  color?: string;
+  gemini?: boolean;
+  home?: KioskTeam;
+  away?: KioskTeam;
+}
+
+export interface KioskScore {
+  home: string;
+  away: string;
+  homeShort: string;
+  awayShort: string;
+  homeColor?: string;
+  awayColor?: string;
+  homeScore: number;
+  awayScore: number;
+  clock: string;
+  period: string;
+  status: string;
+}
+
+/** The shared Huddle design tokens (green + ivory). The firmware has the same defaults built in. */
+export const KIOSK_PALETTE = {
+  canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ink: "#10261C", ink2: "#3E5247",
+  muted: "#6C7A70", accent: "#12A150", accentDeep: "#0B7A3E", accentLight: "#7CCB4E", yes: "#1468FF",
+  no: "#FF6B00", hot: "#E5484D", gold: "#E8A33D",
+} as const;
 
 /** The firmware uses Latin-1 fonts: swap typographic characters and drop anything it cannot draw. */
 function k(s: string): string {
@@ -107,8 +184,154 @@ function qrRows(text: string): { size: number; rows: string[] } {
   return { size, rows };
 }
 
+const HEX = /^#?[0-9a-f]{6}$/i;
+const hex = (c: unknown): string | undefined => (typeof c === "string" && HEX.test(c) ? (c.startsWith("#") ? c : `#${c}`) : undefined);
+const LEAGUE: Record<string, string> = { nfl: "NFL", soccer: "Soccer", nba: "NBA", mlb: "MLB", nhl: "NHL", tennis: "Tennis" };
+
+/** Team from the config: a string, {name, short, color}, or the replay timeline's team. */
+function team(v: unknown): KioskTeam | undefined {
+  if (typeof v === "string" && v.trim()) return { name: k(v).slice(0, 30) };
+  if (v && typeof v === "object") {
+    const t = v as { name?: unknown; short?: unknown; abbr?: unknown; color?: unknown };
+    if (typeof t.name !== "string" || !t.name.trim()) return undefined;
+    const short = typeof t.short === "string" ? t.short : typeof t.abbr === "string" ? t.abbr : undefined;
+    return { name: k(t.name).slice(0, 30), short: short ? k(short).slice(0, 5) : undefined, color: hex(t.color) };
+  }
+  return undefined;
+}
+
+/** "2026-11-22T18:00:00Z" -> "Sun, Nov 22"; anything else passes through (Latin-1, short). */
+function prettyDate(v: unknown): string | undefined {
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(v)) {
+    const d = new Date(v.length === 10 ? `${v}T12:00:00Z` : v);
+    if (!Number.isNaN(d.getTime())) return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  }
+  return k(v).slice(0, 26);
+}
+
+/** A game picker card from whatever the config provides (league, date, teams are optional). */
+function gameCard(g: Game): KioskCard {
+  const x = g as Game & Record<string, unknown>;
+  const enabled = g.live && g.questions.length > 0;
+  const tl = g.kind === "replay" && g.replay ? getTimeline(g.replay) : undefined;
+  const teams = Array.isArray(x.teams) ? (x.teams as unknown[]) : [];
+  const home = team(x.home) ?? team(teams[0]) ?? (tl ? team(tl.info.home) : undefined);
+  const away = team(x.away) ?? team(teams[1]) ?? (tl ? team(tl.info.away) : undefined);
+  const sport = typeof x.sport === "string" ? x.sport : tl?.info.sport;
+  const league = typeof x.league === "string" && x.league.trim() ? k(x.league).slice(0, 12) : sport ? LEAGUE[sport] : undefined;
+  const date = prettyDate(x.date ?? x.kickoff ?? x.played ?? x.when ?? tl?.info.startsAt);
+  return {
+    id: `game:${g.id}`, title: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled,
+    league, kind: g.kind ?? "clip", date, color: hex(g.color), gemini: !!g.gemini?.event,
+    ...(home && away ? { home, away } : {}),
+  };
+}
+
+function scoreOf(l: Lobby): KioskScore | undefined {
+  const run = l.replay;
+  if (!run) return undefined;
+  const st = run.state;
+  return {
+    home: k(st.home.name), away: k(st.away.name), homeShort: k(st.home.short), awayShort: k(st.away.short),
+    homeColor: hex(st.home.color), awayColor: hex(st.away.color),
+    homeScore: st.score.home, awayScore: st.score.away, clock: k(st.clock.display),
+    period: periodLabel(st.sport, st.clock.period), status: String(st.status ?? ""),
+  };
+}
+
+function periodLabel(sport: string, period: number | undefined): string {
+  if (!period) return "";
+  if (sport === "nfl") return period > 4 ? "OT" : `Q${period}`;
+  return period === 1 ? "1st half" : period === 2 ? "2nd half" : "ET";
+}
+
+/** Everything the v2 firmware can use on every screen. */
+function common(l: Lobby | null): Partial<KioskScreen> {
+  const game = l ? getGame(l.gameId) : undefined;
+  const sport = game?.sport;
+  const last = l?.captions?.[l.captions.length - 1];
+  const score = l ? scoreOf(l) : undefined;
+  return {
+    v: 2,
+    palette: { ...KIOSK_PALETTE },
+    ...(game ? { game: { id: game.id, title: k(game.title), league: sport ? LEAGUE[sport] : undefined, sport, kind: game.kind ?? "clip", mode: l?.mode } } : {}),
+    ...(score ? { score } : {}),
+    caption: last ? { id: last.id, text: k(last.text).slice(0, 180) } : null,
+  };
+}
+
+function callsOf(l: Lobby): { id: string; label: string; enabled: boolean }[] {
+  if (typeof backend.openMoment !== "function" || typeof backend.momentsFor !== "function") return [];
+  try {
+    const open = l.phase === "lobby" || l.phase === "result";
+    return (backend.momentsFor(l) ?? [])
+      .filter((b) => b && typeof b.id === "string" && b.id.startsWith("moment:"))
+      .slice(0, 6)
+      .map((b) => ({ id: b.id, label: k(b.label).trim().slice(0, 14), enabled: open }));
+  } catch {
+    return [];
+  }
+}
+
+/** v2 additions per screen. */
+function extras(l: Lobby | null): Partial<KioskScreen> {
+  const base = common(l);
+  if (!l) return { ...base, cards: allGames().map(gameCard) };
+  const players = l.order.map((id) => l.players[id]).filter(Boolean);
+  const m = l.market;
+  if (l.phase === "lobby") {
+    return {
+      ...base,
+      roster: players.map((p) => ({ name: k(p.name), cents: p.balance, deposited: p.deposited })),
+      pot: players.reduce((a, p) => a + p.deposited, 0),
+      calls: players.length ? callsOf(l) : [],
+    };
+  }
+  if ((l.phase === "open" || l.phase === "locked") && m) {
+    const g = m.gemini;
+    return {
+      ...base,
+      volume: m.volume,
+      lockInMs: Math.max(0, m.lockAt - Date.now()),
+      lockTotal: Math.max(0, Math.round((m.lockAt - m.openedAt) / 1000)),
+      model: typeof m.model === "number" ? Math.round(m.model * 100) : null,
+      gemini: g && typeof g.prob === "number" ? { cents: Math.round(g.prob * 100), label: k(g.label ?? "Gemini").slice(0, 40), live: !!g.live } : null,
+      trades: m.trades.slice(-8).reverse().map((t) => ({ name: k(t.name), side: t.side, cents: t.cents, price: lmsr.toCents(t.priceAfter) })),
+      moment: m.source?.kind === "moment" ? m.source.moment : null,
+      mode: m.mode ?? "market",
+    };
+  }
+  if (l.phase === "result" && m) {
+    const winners = Object.entries(m.payouts)
+      .filter(([, c]) => c > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([id, c]) => ({ name: k(l.players[id]?.name ?? "?"), cents: c, profit: c - (m.positions[id]?.spent ?? 0) }));
+    const losers = Object.entries(m.positions)
+      .filter(([id, pos]) => pos.spent > 0 && !(m.payouts[id] > 0))
+      .sort((a, b) => b[1].spent - a[1].spent)
+      .map(([id, pos]) => ({ name: k(l.players[id]?.name ?? "?"), cents: pos.spent }));
+    return {
+      ...base,
+      winners, losers, volume: m.volume,
+      lockYes: typeof m.priceAtLock === "number" ? lmsr.toCents(m.priceAtLock) : null,
+      calls: callsOf(l),
+    };
+  }
+  const board = [...players]
+    .map((p) => ({ name: k(p.name), cents: p.balance + p.withdrawn, pnl: p.balance + p.withdrawn - p.deposited }))
+    .sort((a, b) => b.cents - a.cents);
+  const sc = buildScorecard(l.scoreEntries ?? []);
+  return { ...base, leaderboard: board, scorecard: { room: sc.room, model: sc.model, gemini: sc.gemini, n: sc.n, verdict: k(sc.verdict) } };
+}
+
 export async function kioskScreen(kioskId: string, baseUrl: string): Promise<KioskScreen> {
   const l = await getKioskLobby(kioskId);
+  return { ...(await kioskScreenV1(kioskId, baseUrl, l)), ...extras(l) };
+}
+
+/** The original screen (every field the old firmware reads), unchanged. */
+async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null): Promise<KioskScreen> {
   // Look (firmware palette only): header green while a lobby or question is live and when YES wins, gray for
   // calm screens. Main actions use the "yes" style (the firmware's green) instead of "primary" (blue).
   // Copy stays short and Latin-1 (the firmware truncates titles at 560 px and subtitles at 750 px).
