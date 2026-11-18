@@ -752,6 +752,7 @@ static bool enter(uint32_t t0, int delay, int kind, Rect r, int dur = 480) {
 }
 
 // Button. Pressed: squish (inset 3 px) and darken; released: springs back; pending: three dots pulse.
+static bool rowNoIcon = false;  // set by callRow: this row's labels need the bolt's room
 static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int r = 18) {
   bool pressed = isPressed(b.id) && b.enabled;
   float inset = 0;
@@ -788,7 +789,7 @@ static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int
   if (pressed) rrect(bx, by, bw, bh, r, P.ink, 30);
   // label (+ icon)
   char lab[48];
-  int iconW = (b.style == B_CALL) ? 18 : 0;
+  int iconW = (b.style == B_CALL && !rowNoIcon) ? 18 : 0;
   bool play = !strcmp(b.id, "start") || !strcmp(b.id, "next");
   if (play) iconW = 18;
   // Narrow button: drop to the small face, then drop the icon, before cutting the label.
@@ -824,18 +825,22 @@ static void callRow(const Btn *calls, int nCalls, int x, int x1, int y, int h, i
   int n = min(nCalls, 4);
   if (n <= 0) return;
   auto widthFor = [&](int k) { return (x1 - x - (k - 1) * 8) / k; };
-  for (; n > 2; n--) {
+  for (; n > 2; n--) {  // keep a button only while every label fits whole in the small face
     int bw = widthFor(n);
     bool ok = true;
     for (int i = 0; i < n; i++)
-      if (textW(F_B3, calls[i].label) > bw - 20 - 18) ok = false;
+      if (textW(F_B3, calls[i].label) > bw - 20) ok = false;
     if (ok) break;
   }
   int bw = widthFor(n);
-  bool big = true;
-  for (int i = 0; i < n; i++)
+  bool big = true, bolts = true;  // one face and the bolt on all of them or none, so the row matches
+  for (int i = 0; i < n; i++) {
     if (textW(F_B1, calls[i].label) > bw - 24 - 18) big = false;
+    if (textW(F_B3, calls[i].label) > bw - 20 - 18) bolts = false;
+  }
+  rowNoIcon = !big && !bolts;
   for (int i = 0; i < n; i++) button(x + i * (bw + 8), y, bw, h, calls[i], big ? F_B1 : F_B3, r);
+  rowNoIcon = false;
 }
 
 static const Btn *findBtn(const Screen &s, const char *id) {

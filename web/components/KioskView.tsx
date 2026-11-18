@@ -249,18 +249,21 @@ const labelW = (label: string, size: number) => label.length * size * 0.5;
  * Same rule as the firmware's callRow: as many Call it! buttons as fit with their whole label and bolt
  * (at most 4, at least 2), all in one face.
  */
-function callRow<T extends { label: string }>(calls: T[], width: number): { shown: T[]; bw: number; small: boolean } {
+function callRow<T extends { label: string }>(calls: T[], width: number): { shown: T[]; bw: number; small: boolean; noIcon: boolean } {
   let n = Math.min(calls.length, 4);
   const bwFor = (k: number) => (width - (k - 1) * 8) / k;
-  while (n > 2 && calls.slice(0, n).some((c) => labelW(c.label, 15) > bwFor(n) - 20 - 18)) n--;
+  // keep a button only while every label fits whole in the small face
+  while (n > 2 && calls.slice(0, n).some((c) => labelW(c.label, 15) > bwFor(n) - 20)) n--;
   const shown = calls.slice(0, n);
   const bw = n ? bwFor(n) : 0;
-  return { shown, bw, small: shown.some((c) => labelW(c.label, 20) > bw - 30 - 18) };
+  // one face, and the bolt on all of them or none, so the row matches
+  const small = shown.some((c) => labelW(c.label, 20) > bw - 30 - 18);
+  return { shown, bw, small, noIcon: small && shown.some((c) => labelW(c.label, 15) > bw - 20 - 18) };
 }
 
-function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending, small: forceSmall }: {
+function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending, small: forceSmall, noIcon }: {
   b: KioskButton & { enabled?: boolean }; x: number; y: number; w: number; h: number; f?: FontKey; r?: number;
-  style?: string; onTouch: (id: string) => void; pending?: boolean; small?: boolean;
+  style?: string; onTouch: (id: string) => void; pending?: boolean; small?: boolean; noIcon?: boolean;
 }) {
   const st = STYLE[style ?? b.style ?? "plain"] ?? STYLE.plain;
   const enabled = b.enabled !== false;
@@ -268,7 +271,7 @@ function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending, smal
   const font = F[f];
   // same fallback as the firmware: long label on a narrow button -> small face, then no icon
   const small = forceSmall ?? labelW(b.label, font.size) > w - 30 - (b.id === "start" || b.id === "next" || call ? 18 : 0);
-  const iconFits = !small || labelW(b.label, 15) <= w - 20 - 18;
+  const iconFits = !noIcon && (!small || labelW(b.label, 15) <= w - 20 - 18);
   const play = (b.id === "start" || b.id === "next") && iconFits;
   return (
     <button
@@ -504,7 +507,7 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
           {(() => {
             const row = callRow(calls, w);
             return row.shown.map((c, i) => (
-              <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={row.small} x={x0 + i * (row.bw + 8)} y={330} w={row.bw} h={60} r={16} onTouch={onTouch} pending={pending === c.id} />
+              <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={row.small} noIcon={row.noIcon} x={x0 + i * (row.bw + 8)} y={330} w={row.bw} h={60} r={16} onTouch={onTouch} pending={pending === c.id} />
             ));
           })()}
         </div>
@@ -800,7 +803,7 @@ function Result({ s, onTouch, pending, fresh }: Ctx) {
   const endW = end ? (has ? Math.min(120, labelW(end.label, 20) + 44) : next ? 120 : 230) : 0;
   if (next) x += nextW + 12;
   if (end) x1 -= endW + 12;
-  const { shown: calls, bw, small } = callRow(allCalls, x1 - x);
+  const { shown: calls, bw, small, noIcon } = callRow(allCalls, x1 - x);
   return (
     <div key={s.question} className="hk-fill">
       <Wordmark x={20} y={40} />
@@ -839,7 +842,7 @@ function Result({ s, onTouch, pending, fresh }: Ctx) {
       <div className="hk-rise" style={d(900)}>
         {next && <Button b={next} style={voided ? "brand" : "ink"} x={36} y={396} w={nextW} h={62} r={20} onTouch={onTouch} pending={pending === next.id} />}
         {calls.map((c, i) => (
-          <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={small} x={x + i * (bw + 8)} y={396} w={bw} h={62} r={18} onTouch={onTouch} pending={pending === c.id} />
+          <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={small} noIcon={noIcon} x={x + i * (bw + 8)} y={396} w={bw} h={62} r={18} onTouch={onTouch} pending={pending === c.id} />
         ))}
         {end && <Button b={end} style={next ? "white" : "ink"} x={764 - endW} y={396} w={endW} h={62} r={20} onTouch={onTouch} pending={pending === end.id} />}
       </div>
