@@ -31,6 +31,33 @@ market.gemini?: { prob: number; label: string; asOf: string; url?: string; live:
                                                   // Gemini's YES probability for comparable questions; live=false means
                                                   // the API was unreachable and this is the bundled last-seen snapshot (asOf is real)
 // extras: market.priceAtLock (YES price when trading locked), market.voided, market.rationale (why the model says what it says)
+market.gemini.source?: 'live' | 'snapshot' | 'replay'  // replay = Gemini's real price at this moment of the replayed real game
+market.geminiAtOpen?: number | null               // Gemini's YES probability when the question opened (null = not comparable)
+market.trail?: { at: number /* wall ms */; room: number; gemini: number | null }[]
+                                                  // room (YES price) vs Gemini over time: a point when either moves,
+                                                  // always one at open and one at lock (max 120). Draw both lines on the TV.
+
+game.sport?: 'nfl' | 'soccer' | 'nba' | null
+game.league?: string | null                       // "NFL", "NBA", "Premier League" (real replayed games)
+game.date?: string | null                         // local date of the real game, "2026-11-15"
+game.real?: boolean                               // true = real play-by-play (ESPN), not a hand-written demo
+game.source?: { provider: 'ESPN'; event: string; url: string | null } | null
+
+gemini?: {                                        // game-level Gemini block, null when the game has no Gemini mapping
+  event: string;                                  // ticker base, e.g. "NFL-2611152125-SF-DAL"
+  url: string | null;                             // the moneyline's page on gemini.com
+  source: 'live' | 'snapshot' | 'replay';
+  live: boolean;                                  // true only for prices fetched from Gemini just now
+  asOf: string;                                   // ISO; for 'replay' it is the real time of the play on screen
+  note: string;                                   // one sentence to show as is, e.g. "Gemini's real price at this moment
+                                                  // of the game (Nov 15, 6:02 PM ET). The market settled Nov 15."
+  settled: boolean;                               // the game's Gemini markets have settled
+  moneyline: { home: { code: string|null; prob: number|null }; away: {...}; draw: number|null } | null
+  total: { line: number; over: number|null } | null   // the total line nearest 50%
+  track: { t: number /* replay ms */; p: number /* Gemini home-win prob */ }[]
+                                                  // replayed real games: Gemini's home-win probability from kickoff
+                                                  // to now (<= 80 points; empty before the clock starts)
+} | null
 
 captions?: { id: number; at: number; text: string }[]          // newest last, about 10 kept; ids only increase
 scorecard?: { room: number|null; model: number|null; gemini: number|null; n: number; verdict: string }
@@ -84,6 +111,7 @@ unchanged after it resolves). The caption leads with the call: "Penalty called! 
 | `GET /api/tts?text=...&persona=nfl` or `?code=ABCD&id=<caption id>` | | `audio/mpeg` (ElevenLabs, cached by hash); `&format=wav` gives 22 kHz mono WAV. **204** when `ELEVENLABS_API_KEY` is unset; 502/504 when ElevenLabs fails. On anything but 200, read the caption with Web Speech |
 | `GET /api/kiosk/audio?kiosk=1&after=<id>` | | unchanged shape `{id, url, text}`. Still serves the WAV sound effects; with `ELEVENLABS_API_KEY` set, every caption is also an item whose `url` is `/api/tts?code=..&id=..&format=wav` (the announcer on the speaker). Ids only increase (captions share the event id counter) |
 | `GET/POST /api/lobby/:code/moment` | `{kind}` | list / open a "Call it" moment (see above) |
+| `GET /api/gemini/markets` `?league=NFL,NBA,EPL&team=DAL` | | Market discovery: `{asOf, live, source: 'live'\|'snapshot'\|'unavailable', note, leagues, count, games: [{base, league, title, startTime, isLive, url, home: {code, name, prob}, away, draw, volume}], ours: [{gameId, title, event, real, date, settled, hasPriceHistory, liveNow, upcoming: [game...]}]}`. Full-game moneylines Gemini is trading, soonest first (default leagues NFL, NBA, EPL; also NHL NCAAF NCAAM MLB MLS UCL). `ours` lists the Gemini games our teams play next. Cached 2 min; when Gemini is down it serves the last good list (`live: false`, real `asOf`), never a 5xx |
 | `POST /api/lobby/:code/deposit` | `{cents}` | demo: `{credited}`; coinbase: `{url}`; **solana**: `{url: "solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle&message=..", solanaPay: true, reference, recipient, mint, amount}`. Show `url` as a QR and an "Open in wallet" link, then poll `/deposit/sync` every 3 s |
 | `POST /api/lobby/:code/deposit/sync` | | `{credited, pending}`. Solana: finds the payment by its reference on devnet, checks USDC reached the treasury, credits once per signature |
 | `POST /api/lobby/:code/faucet` (x-player-token) | `{address}` | solana only: $20 test USDC + 0.005 SOL (for fees) to that wallet, once per player per lobby. `{cents, usdcSig, solSig, explorer}` |
@@ -118,6 +146,33 @@ lock event and resolves it from the play-by-play. The next question opens by its
 **Lock now**, **It was YES/NO** and **Next question** taps still work. `questionCount` is the length of the
 script when nobody taps; `qIndex` counts questions asked.
 
+### Real games (built from ESPN play-by-play and Gemini price history)
+
+| Game id (kiosk tile) | Real game | Gemini event | Gemini prices |
+|---|---|---|---|
+| `nfl-sf-dal` (tile 1) | 49ers 46, Cowboys 40, NFL, Nov 15 2026 | `NFL-2611152125-SF-DAL` | pregame + in-game history (moneyline, total 56.5, 1st quarter and 1st half winners) |
+| `nba-okc-lac` (tile 2) | Clippers 113, Thunder 112, NBA, Nov 13 2026 | `NBA-2611140330-OKC-LAC` | pregame + history (moneyline, total 220.5) |
+| `epl-mun-avl` (tile 3) | Man United 4, Aston Villa 4, Premier League, Nov 8 2026 | `EPL-2611081630-AVL-MUN` | listed and settled, but it never traded: no prices, the model prices alone |
+| `nfl-lac-bal` | Chargers 23, Ravens 20, NFL Monday night, Nov 16 2026 | `NFL-2611170115-LAC-BAL` | pregame + history (moneyline, total, quarter and half winners) |
+| `nfl-mia-ind` | Colts 24, Dolphins 22, NFL, Nov 15 2026 | `NFL-2611151800-MIA-IND` | pregame + history (moneyline, total, 3rd quarter and 1st half winners) |
+
+Each plays in about 6.5 to 7 minutes. Rebuild or add games with `node scripts/build-replays.mjs [id]` (or
+`--league nfl|nba|eng.1 --event <ESPN event id> --id replay-x`), then register the file in
+`lib/replay/timeline.ts` and add a `config/games.json` entry with `kind: "replay"` and `replay: <id>`; league,
+date, source and the Gemini mapping are read from the file. Nothing calls ESPN at runtime.
+
+Gemini on a real game: the markets settled after the game, so the live API has no prices. The replay file holds
+Gemini's real 5-minute price history, and **at replay time T the lobby holds Gemini's real price at the moment of
+the real game that T shows** (`source: "replay"`, `asOf` = that real time). Questions comparable to a Gemini
+market (moneyline, the total line, quarter and half winners, crunch-time "hold on") show it, record it at open
+(`geminiAtOpen`) and at lock (scorecard), and draw it in `market.trail`. The pregame question opens at Gemini's
+price a minute before kickoff and the pricing models are calibrated to it.
+
+NBA questions (`nba-okc-lac`): pregame winner, free-throw trips ("Will Shai Gilgeous-Alexander make both free
+throws?", league 78% per shot), next score out of a timeout (team with the ball ~68%), a made three in the first
+two minutes of a quarter, quarter winner with about 2:30 left while the quarter is in doubt, crunch-time hold-on,
+late total at the projected pace. Kiosk "Call it" moments for NBA: `free_throws`, `timeout`, `three`.
+
 ## Env vars
 
 | Var | Needed for | Default |
@@ -137,8 +192,13 @@ script when nobody taps; `qIndex` counts questions asked.
 
 - **Upstash**: Vercel > Storage > Upstash for Redis > connect to the project (sets `KV_REST_API_*`). Required on Vercel.
 - **ElevenLabs**: create an API key at elevenlabs.io (Text to Speech permission) and set `ELEVENLABS_API_KEY` in Vercel.
+  **Not set yet** (checked Nov 18 with `vercel env pull` on the `huddle-live` project: only the Upstash vars are
+  there), so `/api/tts` answers 204 and the TV uses Web Speech. The request (`POST /v1/text-to-speech/{voice}/stream`,
+  `xi-api-key`, `output_format=mp3_44100_128` or `pcm_22050`, `model_id: eleven_flash_v2_5`, `voice_settings`) was
+  checked against ElevenLabs' current API reference and is tested against a mock (`test/games-live.test.mts`).
 - **Gemini**: nothing; the public API needs no key. If it is down, the Titans at Cowboys game uses the bundled
-  Nov 16 snapshot (shown with `live: false` and its real `asOf`).
+  Nov 16 snapshot (shown with `live: false` and its real `asOf`). Settled markets are never fetched again: the
+  stored pregame snapshot is used and `note` says so. Real replayed games need no network for Gemini at all.
 - **Solana (optional, devnet only)**, from `web/`:
   1. `node scripts/solana-setup.mjs` prints a new treasury address and `SOLANA_TREASURY_SECRET_KEY=...`. Keep the
      secret out of git and chat; put it in `web/.env.local` and Vercel env vars.

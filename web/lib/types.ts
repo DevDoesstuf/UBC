@@ -52,9 +52,14 @@ export interface Game {
   /** Gemini Prediction Markets mapping for the game. */
   gemini?: GeminiGameConfig;
   /** Sport, for "Call it" moments (default: the replay's sport, else from the persona). */
-  sport?: "nfl" | "soccer";
+  sport?: "nfl" | "soccer" | "nba";
   /** "Call it" moment kinds the kiosk offers for this game (see MOMENT_KINDS in lib/moments.ts). */
   moments?: string[];
+  /** Real replayed games: league label, local date of the game, and where the play-by-play came from (from the replay file). */
+  league?: string;
+  date?: string;
+  real?: boolean;
+  source?: { provider: string; event: string; url: string | null } | null;
 }
 
 export interface Player {
@@ -117,6 +122,10 @@ export interface Market {
   model?: number | null;
   /** Gemini's comparable YES quote (refreshed while open, frozen at lock). */
   gemini?: GeminiRef | null;
+  /** Gemini's YES probability when the question opened (null = no comparable Gemini market). */
+  geminiAtOpen?: number | null;
+  /** Room vs Gemini over time: a point whenever either price moves, plus open and lock (max 120). */
+  trail?: { at: number; room: number; gemini: number | null }[];
   /** How to find the Gemini quote again: a hint for replay questions, or a fixed contract for clip questions. */
   geminiKey?: { hint?: GeminiHint; yesTeam?: string; event?: string; contract?: string } | null;
   /** YES price when trading locked (the room's forecast for the scorecard). */

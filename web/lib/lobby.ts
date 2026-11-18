@@ -12,12 +12,12 @@ import { kvDel, kvGet, kvSet, withLock } from "./store";
 import { getGame, hasVideo, isReplay } from "./games";
 import * as lmsr from "./lmsr";
 import { captionLine, isBigTrade, type CaptionEvent, type Persona } from "./announcer";
-import { geminiForGame, refForContract, refForHint, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot } from "./gemini";
+import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTrack, replaySnapshotAt, sourceOf, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot } from "./gemini";
 import { buildScorecard } from "./scorecard";
 import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePairs, settlePool, takerStakeFor, MAX_ODDS, MIN_ODDS } from "./modes";
 import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
 import { findMoment, kioskSafe, MOMENT_KINDS, type MomentKind, type MomentSport } from "./moments";
-import { getTimeline } from "./replay/timeline";
+import { getTimeline, wallAt } from "./replay/timeline";
 import type { Game, Lobby, LobbyEvent, Market, MarketMode, Offer, Player, Side, WithdrawalRecord } from "./types";
 import { MARKET_MODES } from "./types";
 
@@ -148,12 +148,54 @@ function geminiConfigFor(game: Game | undefined): GeminiGameConfig | undefined {
   return { event: i > 0 ? t.slice(0, i) : t };
 }
 
-function refreshMarketGemini(l: Lobby): void {
+function refreshMarketGemini(l: Lobby, now: number = Date.now()): void {
   const m = l.market;
   if (!m || !m.geminiKey || l.phase !== "open") return;
   const k = m.geminiKey;
   const ref = k.event && k.contract ? refForContract(l.gemini ?? null, k.event, k.contract) : refForHint(l.gemini ?? null, k.hint, k.yesTeam);
-  if (ref) m.gemini = ref;
+  if (ref) {
+    m.gemini = ref;
+    noteTrail(m, now);
+  }
+}
+
+/** The replayed real game's Gemini track for this game, if it has one (Gemini's real prices, by replay time). */
+function replayGeminiOf(l: Lobby) {
+  const g = getGame(l.gameId);
+  const t = g?.replay ? getTimeline(g.replay) : undefined;
+  return t?.gemini?.track && Object.keys(t.gemini.track).length ? { t, g: t.gemini } : null;
+}
+
+/**
+ * Replayed real games: Gemini's prices follow the replay. At replay time T the lobby holds Gemini's real
+ * prices at the moment of the real game that T shows (before the clock starts: just before kickoff).
+ */
+function syncReplayGemini(l: Lobby, now: number): void {
+  const rg = l.replay ? replayGeminiOf(l) : null;
+  if (!rg || !l.replay) return;
+  const atMs = replayMs(l.replay, now);
+  const snap = replaySnapshotAt(rg.g, atMs, l.replay.startedAt === null ? null : wallAt(rg.t, atMs));
+  if (snap && (!l.gemini || l.gemini.asOf !== snap.asOf || l.gemini.source !== "replay")) l.gemini = snap;
+}
+
+/** Room vs Gemini over time: adds a point when either price moved (always at open and lock). */
+function noteTrail(m: Market, now: number, force = false): void {
+  const trail = (m.trail ??= []);
+  const room = Math.round(yesPrice(m) * 1000) / 1000;
+  const gemini = m.gemini ? Math.round(m.gemini.prob * 1000) / 1000 : null;
+  const last = trail[trail.length - 1];
+  if (!force && last && last.room === room && last.gemini === gemini) return;
+  trail.push({ at: now, room, gemini });
+  if (trail.length > 120) trail.splice(1, trail.length - 120);
+}
+
+/** Called right after a market opens: the Gemini price at open and the first trail point. */
+function markOpen(l: Lobby, now: number): void {
+  const m = l.market;
+  if (!m) return;
+  refreshMarketGemini(l, now);
+  m.geminiAtOpen = m.gemini?.prob ?? null;
+  noteTrail(m, now, true);
 }
 
 /** Shared by clip and replay questions: a fresh market opened at prior `p` (null = 50/50, no model). */
@@ -240,7 +282,8 @@ function openReplayMarket(l: Lobby, q: PendingQ, yesPrior: number, lockAtWall: n
   });
   l.qIndex = qIndex;
   l.phase = "open";
-  refreshMarketGemini(l);
+  syncReplayGemini(l, now);
+  markOpen(l, now);
   announceOpen(l, l.market, now, moment);
 }
 
@@ -307,7 +350,8 @@ function tick(l: Lobby, now: number, dryRun = false): boolean {
       return true;
     }
   }
-  if (!dryRun && l.phase === "open") refreshMarketGemini(l);
+  if (!dryRun) syncReplayGemini(l, now);
+  if (!dryRun && l.phase === "open") refreshMarketGemini(l, now);
   return changed;
 }
 
@@ -333,6 +377,8 @@ export async function mutate(code: string, fn: (l: Lobby, now: number) => void, 
 
 /** Latest Gemini quotes for the lobby's game (30 s cache; never throws, never waits more than ~3 s). */
 async function geminiFor(l: Lobby): Promise<GeminiSnapshot | null> {
+  // Replayed real games follow Gemini's price history instead (syncReplayGemini, inside tick).
+  if (replayGeminiOf(l)) return null;
   const cfg = geminiConfigFor(getGame(l.gameId));
   if (!cfg) return null;
   return geminiForGame(cfg).catch(() => null);
@@ -371,7 +417,11 @@ export async function createLobby(kioskId: string, gameId: string, mode?: Market
   if (!game) throw new ApiError(404, "Unknown game");
   if (!game.live || game.questions.length === 0) throw new ApiError(400, `${game.title} is coming soon`);
   const now = Date.now();
-  const gemini = await geminiForGame(geminiConfigFor(game) as GeminiGameConfig).catch(() => null);
+  // A replayed real game starts from Gemini's prices just before its kickoff; other games ask Gemini now.
+  const track = isReplay(game) && game.replay ? getTimeline(game.replay)?.gemini : null;
+  const gemini = track?.track && Object.keys(track.track).length
+    ? replaySnapshotAt(track, 0, null)
+    : await geminiForGame(geminiConfigFor(game) as GeminiGameConfig).catch(() => null);
   for (let attempt = 0; attempt < 20; attempt++) {
     const code = Array.from(randomBytes(4), (b) => CODE_LETTERS[b % CODE_LETTERS.length]).join("");
     const l: Lobby = {
@@ -458,7 +508,7 @@ export function openMarket(l: Lobby, now: number): void {
     geminiKey: q.gemini ? { event: q.gemini.event, contract: q.gemini.contract } : null,
   });
   l.phase = "open";
-  refreshMarketGemini(l);
+  markOpen(l, now);
   announceOpen(l, l.market, now);
 }
 
@@ -486,10 +536,13 @@ function openReplayNext(l: Lobby, game: Game, now: number): void {
 export function lockMarket(l: Lobby, now: number = Date.now()): void {
   if (l.phase !== "open" || !l.market) throw new ApiError(400, "Trading is not open");
   const m = l.market;
+  // Gemini's price at the lock (while still open, so the refresh applies): the scorecard compares against it.
+  syncReplayGemini(l, now);
+  refreshMarketGemini(l, now);
   l.phase = "locked";
   m.lockAt = Math.min(m.lockAt, now);
   m.priceAtLock = yesPrice(m);
-  refreshMarketGemini(l);
+  noteTrail(m, now, true);
   if (modeOf(m) === "h2h") releaseOffers(l, m);
   addEvent(l, "lock", "Trading closed. Watch the play!", "lock");
   caption(l, { type: "lock", yesPct: m.priceAtLock * 100, mode: modeOf(m) }, now, m.questionId);
@@ -639,6 +692,7 @@ export function openMoment(l: Lobby, kind: string, now: number): void {
     source: { kind: "moment", moment: k, label: mk.label, rationale: w.rationale },
   });
   l.phase = "open";
+  markOpen(l, now);
   announceOpen(l, l.market, now, mk);
 }
 
@@ -725,6 +779,7 @@ export function buy(l: Lobby, p: Player, side: Side, cents: number, now: number)
   pos[side] += shares;
   pos.spent += cents;
   pushHistory(m, before);
+  noteTrail(m, now);
   m.trades.push({ at: now, playerId: p.id, name: p.name, side, cents, shares, priceAfter });
   if (m.trades.length > 60) m.trades.splice(0, m.trades.length - 60);
   if (isBigTrade(cents, volumeBefore)) caption(l, { type: "trade", name: p.name, side, cents, yesPctAfter: priceAfter * 100 }, now, `${p.id}${now}`);
@@ -779,6 +834,7 @@ export function takeOffer(l: Lobby, p: Player, offerId: string, cents: number, n
   taker.spent += fill.takerCents;
   setDisplayPrice(m, impliedYes(o.side, o.odds));
   pushHistory(m, before);
+  noteTrail(m, now);
   const priceAfter = yesPrice(m);
   m.trades.push({ at: now, playerId: p.id, name: p.name, side: takerSide, cents: fill.takerCents, shares: fill.takerCents / 100, priceAfter });
   if (m.trades.length > 60) m.trades.splice(0, m.trades.length - 60);
@@ -803,7 +859,9 @@ function marketExtras(l: Lobby, m: Market) {
   return {
     mode,
     model: m.model ?? null,
-    gemini: m.gemini ? { prob: m.gemini.prob, label: m.gemini.label, asOf: m.gemini.asOf, url: m.gemini.url, live: m.gemini.live } : null,
+    gemini: m.gemini ? { prob: m.gemini.prob, label: m.gemini.label, asOf: m.gemini.asOf, url: m.gemini.url, live: m.gemini.live, source: m.gemini.source ?? (m.gemini.live ? "live" : "snapshot") } : null,
+    geminiAtOpen: m.geminiAtOpen ?? null,
+    trail: (m.trail ?? []).map((p) => ({ at: p.at, room: p.room, gemini: p.gemini })),
     priceAtLock: m.priceAtLock ?? null,
     voided: m.voided ?? false,
     rationale: m.source && "rationale" in m.source ? m.source.rationale : null,
@@ -816,6 +874,44 @@ function marketExtras(l: Lobby, m: Market) {
             filled: o.filled, remaining: o.cents - o.filled, takeCents: o.open ? takerStakeFor(o.cents - o.filled, o.odds) : 0,
           }))
         : undefined,
+  };
+}
+
+/**
+ * The game-level Gemini block of the public view: where the prices come from, the moneyline and total as they
+ * stand, and (replayed real games) Gemini's home-win probability over the replay so far for the TV chart.
+ */
+export function geminiView(l: Lobby, now: number = Date.now()) {
+  const game = getGame(l.gameId);
+  const cfg = geminiConfigFor(game);
+  const s = l.gemini ?? null;
+  if (!cfg || !s) return null;
+  const ml = s.events.find((e) => e.kind === "moneyline" && !e.period);
+  const price = (code: string | undefined) => (code ? ml?.contracts.find((c) => c.ticker.toUpperCase() === code.toUpperCase())?.prob ?? null : null);
+  const total = s.events.find((e) => e.kind === "total" && !e.period);
+  const line = total?.contracts
+    .filter((c) => c.prob !== null)
+    .sort((a, b) => Math.abs((a.prob as number) - 0.5) - Math.abs((b.prob as number) - 0.5))[0];
+  const lineNum = line ? Number(/(\d+(?:\.\d+)?)/.exec(line.label)?.[1]) : NaN;
+  const rg = replayGeminiOf(l);
+  const atMs = l.replay ? replayMs(l.replay, now) : 0;
+  return {
+    event: cfg.event,
+    url: ml?.url ?? cfg.url ?? null,
+    source: sourceOf(s),
+    live: s.live,
+    asOf: s.asOf,
+    note: s.note ?? (s.live ? "Live from Gemini Prediction Markets." : "Last prices seen on Gemini."),
+    settled: isSettled(cfg, now),
+    moneyline: ml
+      ? {
+          home: { code: cfg.home ?? null, prob: price(cfg.home) },
+          away: { code: cfg.away ?? null, prob: price(cfg.away) },
+          draw: ml.contracts.find((c) => c.ticker.toUpperCase() === "D")?.prob ?? null,
+        }
+      : null,
+    total: line && Number.isFinite(lineNum) ? { line: lineNum, over: line.prob } : null,
+    track: rg && l.replay?.startedAt !== null ? replayMoneylineTrack(rg.g, cfg.home, atMs) : [],
   };
 }
 
@@ -846,8 +942,11 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
       ? {
           id: game.id, title: game.title, subtitle: game.subtitle ?? "", color: game.color ?? "#1d9e75",
           youtubeId: hasVideo(game) ? game.youtubeId : null, kind: game.kind ?? "clip", persona: personaOf(l), score,
+          sport: game.kind === "replay" ? sportOf(game) : game.sport ?? null,
+          league: game.league ?? null, date: game.date ?? null, real: game.real ?? false, source: game.source ?? null,
         }
       : null,
+    gemini: geminiView(l, now),
     mode: lobbyMode(l),
     moments: momentsFor(l).map((x) => ({ ...x, enabled: l.phase === "lobby" || l.phase === "result" })),
     qIndex: l.qIndex,

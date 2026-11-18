@@ -1,6 +1,6 @@
 // Types for replay games (ported from Huddle's @huddle/shared, trimmed to what the question engine needs).
 
-export type Sport = "soccer" | "nfl";
+export type Sport = "soccer" | "nfl" | "nba";
 
 export interface TeamRef {
   name: string;
@@ -24,7 +24,12 @@ export type GameEventType =
   | "period_start"
   | "period_end"
   | "final"
-  | "score_update";
+  | "score_update"
+  // basketball (NBA replays)
+  | "shot"
+  | "free_throw"
+  | "turnover"
+  | "timeout";
 
 /** One normalized sports event (see config/replays/README in the Huddle repo for the data conventions). */
 export interface GameEvent {
@@ -69,7 +74,7 @@ export function initialGameState(gameId: string, sport: Sport, home: TeamRef, aw
     home,
     away,
     score: { home: 0, away: 0 },
-    clock: { period: 0, display: sport === "soccer" ? "0'" : "15:00" },
+    clock: { period: 0, display: sport === "soccer" ? "0'" : sport === "nba" ? "12:00" : "15:00" },
     lastSeq: 0,
     counters: {},
     periodScores: [],
@@ -137,4 +142,25 @@ export interface GameInfo {
   title: string;
   home: TeamRef;
   away: TeamRef;
+}
+
+/**
+ * Gemini data a replay file carries (written by scripts/build-replays.mjs from Gemini's public API):
+ * the pregame snapshot (prices one minute before kickoff, the fallback and the calibration input) and
+ * `track`, Gemini's real price at each moment of the real game, keyed by replay time.
+ */
+export interface ReplayGemini {
+  /** Ticker base, e.g. "NFL-2611152125-SF-DAL". */
+  event: string;
+  home?: string;
+  away?: string;
+  /** Gemini event status when the file was built ("settled" for finished games). */
+  status?: string;
+  settledAt?: string | null;
+  kickoff?: string;
+  url?: string;
+  builtAt?: string;
+  snapshot?: { asOf: string; events: { ticker: string; title?: string; slug?: string; contracts: { ticker: string; label: string; bestBid?: string; bestAsk?: string; lastTradePrice?: string }[] }[] };
+  /** eventTicker -> contract code -> [[replay ms, probability], ...] (ascending, deduped). */
+  track?: Record<string, Record<string, [number, number][]>>;
 }

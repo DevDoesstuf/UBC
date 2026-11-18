@@ -50,7 +50,7 @@ export function reduce(state: GameState, event: GameEvent): GameState {
     const secs = data.secondsRemaining;
     if (typeof secs === 'number' && Number.isFinite(secs)) next.secondsRemaining = Math.max(0, secs);
     else {
-      const parsed = nflSecondsRemaining(event.clock?.period, event.clock?.display);
+      const parsed = state.sport === 'nba' ? nbaSecondsRemaining(event.clock?.period, event.clock?.display) : nflSecondsRemaining(event.clock?.period, event.clock?.display);
       if (parsed !== undefined) next.secondsRemaining = parsed;
     }
     if (event.type === 'final') next.secondsRemaining = 0;
@@ -112,6 +112,34 @@ export function reduce(state: GameState, event: GameEvent): GameState {
 
     case 'sub':
       if (side) inc(`subs_${side}`);
+      break;
+
+    // ---- basketball ----
+    case 'shot':
+      if (side) {
+        next.possession = side;
+        inc(`fga_${side}`);
+        if (data.three === true) inc(`threes_attempted_${side}`);
+        if (data.made === true) {
+          inc(`fgm_${side}`);
+          if (data.three === true) inc(`threes_${side}`);
+        }
+      }
+      break;
+
+    case 'free_throw':
+      if (side && data.trip !== true) {
+        inc(`fta_${side}`);
+        if (data.made === true) inc(`ftm_${side}`);
+      }
+      break;
+
+    case 'turnover':
+      if (side) inc(`turnovers_${side}`);
+      break;
+
+    case 'timeout':
+      if (typeof data.ball === 'string') next.possession = sideOf(base, data.ball) ?? next.possession;
       break;
 
     case 'drive_start':
@@ -238,6 +266,18 @@ export function sideOf(state: Pick<GameState, 'home' | 'away'>, team: string | u
   if (t === state.home.short.toUpperCase() || t === state.home.name.toUpperCase()) return 'home';
   if (t === state.away.short.toUpperCase() || t === state.away.name.toUpperCase()) return 'away';
   return undefined;
+}
+
+/** Seconds left in a 4 x 12:00 NBA game from the period and a "MM:SS" clock. Overtime counts its own 5:00. */
+export function nbaSecondsRemaining(period: number | undefined, display: string | undefined): number | undefined {
+  if (!period || !display) return undefined;
+  // ESPN shows "4:21" above a minute and "32.3" (seconds) below it.
+  const m = /^(\d{1,2}):(\d{2})(?:\.\d+)?$/.exec(display.trim());
+  const s = /^(\d{1,2})(?:\.\d+)?$/.exec(display.trim());
+  if (!m && !s) return undefined;
+  const inPeriod = m ? Number(m[1]) * 60 + Number(m[2]) : Number(s![1]);
+  if (period > 4) return Math.min(300, inPeriod);
+  return (4 - period) * 720 + Math.min(720, inPeriod);
 }
 
 /** Seconds left in a 4 x 15:00 NFL game from the period and a "MM:SS" clock. Overtime counts as 0. */

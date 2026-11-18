@@ -16,8 +16,31 @@ function replayQuestions(replayId: string | undefined, pregame: boolean): Questi
   }));
 }
 
-const GAMES: Game[] = (config.games as unknown as Game[]).map((g) => {
-  const kind = g.kind === "replay" ? "replay" : "clip";
+/**
+ * Real replayed games carry their league, date, source and Gemini mapping in the replay file (written by
+ * scripts/build-replays.mjs); a games.json entry only has to point at the file. Values in games.json win.
+ */
+function fromReplay(g: Game): Partial<Game> {
+  const t = g.kind === "replay" && g.replay ? getTimeline(g.replay) : undefined;
+  if (!t) return {};
+  const out: Partial<Game> = {};
+  if (t.meta.league) out.league = t.meta.league;
+  if (t.meta.date) out.date = t.meta.date;
+  if (t.meta.real) out.real = true;
+  if (t.meta.source) out.source = t.meta.source;
+  if (t.gemini?.event) {
+    out.gemini = {
+      event: t.gemini.event, home: t.gemini.home, away: t.gemini.away, snapshot: t.gemini.snapshot,
+      settledAt: t.gemini.settledAt ?? null, url: t.gemini.url,
+    };
+  }
+  if (t.info.sport) out.sport = t.info.sport;
+  return out;
+}
+
+const GAMES: Game[] = (config.games as unknown as Game[]).map((raw) => {
+  const kind = raw.kind === "replay" ? "replay" : "clip";
+  const g: Game = { ...fromReplay({ ...raw, kind }), ...raw };
   return {
     ...g,
     kind,

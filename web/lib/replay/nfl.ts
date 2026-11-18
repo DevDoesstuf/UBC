@@ -229,6 +229,51 @@ export function totalMeanFromLine(line: number, pOver: number, t: NflTable = NFL
   return line - t.points.sd_total * normalInv(clamp(1 - pOver, 0.02, 0.98));
 }
 
+/**
+ * Late in a quarter: who wins it, given the home lead within the quarter and the seconds left in it.
+ * Scores arrive as a Poisson process per team (the league's points per game at about 4.7 points a score,
+ * 35% field goals, 65% touchdowns); the home team's rate is tilted by its win probability. Exact over up to
+ * three scores per team, which covers > 99.9% of the mass for the last few minutes of a quarter.
+ */
+export function nflQuarterProbs(lead: number, secondsLeft: number, pHome = 0.5, t: NflTable = NFL_TABLE): { home: number; tie: number; away: number } {
+  const perTeam = (t.points.mean_total || 44) / 2;
+  const scoresPerSec = perTeam / 4.7 / GAME_SECONDS;
+  const tilt = clamp(pHome, 0.1, 0.9) / 0.5;
+  const lh = scoresPerSec * Math.max(0, secondsLeft) * Math.sqrt(tilt);
+  const la = scoresPerSec * Math.max(0, secondsLeft) / Math.sqrt(tilt);
+  // Points distribution for one team: k scores, each 3 (35%) or 7 (65%).
+  const dist = (lambda: number): Map<number, number> => {
+    const out = new Map<number, number>();
+    let fact = 1;
+    for (let k = 0; k <= 3; k++) {
+      if (k > 0) fact *= k;
+      const pk = Math.exp(-lambda) * lambda ** k / fact;
+      for (let fg = 0; fg <= k; fg++) {
+        let comb = 1;
+        for (let i = 0; i < fg; i++) comb = (comb * (k - i)) / (i + 1);
+        const p = pk * comb * 0.35 ** fg * 0.65 ** (k - fg);
+        const pts = 3 * fg + 7 * (k - fg);
+        out.set(pts, (out.get(pts) ?? 0) + p);
+      }
+    }
+    return out;
+  };
+  const dh = dist(lh);
+  const da = dist(la);
+  let home = 0;
+  let tie = 0;
+  let away = 0;
+  for (const [ph, qh] of dh) for (const [pa, qa] of da) {
+    const m = lead + ph - pa;
+    const q = qh * qa;
+    if (m > 0) home += q;
+    else if (m < 0) away += q;
+    else tie += q;
+  }
+  const s = home + tie + away || 1;
+  return { home: home / s, tie: tie / s, away: away / s };
+}
+
 export type PeriodKey = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'H1' | 'H2';
 
 /**
