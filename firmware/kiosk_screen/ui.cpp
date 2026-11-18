@@ -345,9 +345,9 @@ static void parseInto(Screen &s, JsonObjectConst j) {
   s.no = j["no"] | (100 - s.yes);
   s.move = j["move"] | 0;
   s.hasLock = !j["lockIn"].isNull();
-  s.lockIn = j["lockIn"] | 0;
-  s.lockInMs = j["lockInMs"] | (s.lockIn * 1000);
-  s.lockTotal = j["lockTotal"] | 0;
+  s.lockIn = constrain((int32_t)(j["lockIn"] | 0), (int32_t)0, (int32_t)86400);  // clamp: no overflow below
+  s.lockInMs = constrain((int32_t)(j["lockInMs"] | (s.lockIn * 1000)), (int32_t)0, (int32_t)86400000);
+  s.lockTotal = constrain((int32_t)(j["lockTotal"] | 0), (int32_t)0, (int32_t)86400);
   s.volume = j["volume"] | -1;
   s.pot = j["pot"] | -1;
   s.model = j["model"].isNull() ? -1 : (int)(j["model"] | -1);
@@ -532,7 +532,7 @@ static uint32_t seenAt(Seen &s, uint32_t h, bool firstPaint) {
 
 static void fmtMoney(int32_t cents, char *out, size_t cap, bool sign = false) {
   bool neg = cents < 0;
-  uint32_t c = neg ? -cents : cents;
+  uint32_t c = neg ? 0u - (uint32_t)cents : (uint32_t)cents;  // safe for INT32_MIN
   const char *pre = neg ? "-" : (sign ? "+" : "");
   if (c % 100 == 0 && c >= 1000) snprintf(out, cap, "%s$%u", pre, (unsigned)(c / 100));
   else snprintf(out, cap, "%s$%u.%02u", pre, (unsigned)(c / 100), (unsigned)(c % 100));

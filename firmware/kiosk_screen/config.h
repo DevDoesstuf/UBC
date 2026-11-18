@@ -76,5 +76,5 @@
 // ---------------------------------------------------------------- app
 #define POLL_MS 1000          // how often the screen asks the site for state
 #define HTTP_TIMEOUT_MS 6000
-#define STALE_MS 6000         // show the connection screen when no good reply for this long
+#define STALE_MS 10000        // show "Reconnecting" when no good reply for this long (longer than one slow request)
 #define TAP_DEBOUNCE_MS 250
