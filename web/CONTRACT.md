@@ -88,6 +88,39 @@ In pool and h2h mode `market.yesCents/noCents/priceYes/history` still work: pool
 YES (the model prior while empty), h2h shows the YES probability implied by the last matched offer.
 `me.position` in pool/h2h mode holds **dollars staked** per side (not $1 shares).
 
+### On-chain activity and "Pay on the box" (Solana money)
+
+```ts
+chain: null | {                      // null until something happened on chain for this lobby
+  settlement: 'vault' | 'treasury';  // vault = the party's huddle_vault program account holds the money
+  program: string | null;            // huddle_vault program id (vault only)
+  party: string | null;              // Party PDA, vault: its token vault PDA (vault only)
+  vault: string | null;
+  partyExplorer: string | null;      // explorer link of the Party account
+  status: 'open' | 'closing' | 'finalized' | 'settled' | null;
+  settled: boolean;                  // finalize landed: show "Settled on Solana" with settleTx.explorer
+  settledAt: number | null;
+  settleTx: { sig: string; explorer: string } | null;   // the finalize transaction
+  payout: { cents: number; to: string; sig: string; explorer: string } | null;  // the viewer's own payout
+  events: {                          // newest last, at most 20 (40 kept on the lobby)
+    kind: 'deposit'|'faucet'|'cashout'|'create'|'sweep'|'topup'|'close'|'state'|'finalize'|'withdraw'|'host';
+    label: string;                   // "Deposit", "Into the vault", "Final balance verified", "Settled on Solana", "Paid out"...
+    sig: string; explorer: string; at: number; cents: number | null; name: string | null /* player */;
+    via: 'server' | 'sync' | 'box' | 'quicknode' | null;  // who found it
+    streamed: boolean;               // a QuickNode Stream delivered this transaction too
+  }[];
+}
+boxPay: null | { name: string; cents: number; url: string; until: number; paidAt: number | null; mine: boolean }
+money.settlement: 'vault' | 'treasury' | null   // solana only
+money.boxPay: boolean                           // the phone may offer "Pay on the box"
+```
+
+The stored lobby (what `GET /api/kiosk/state`'s backend reads) has `Lobby.boxPay?: { playerId: string; name: string;
+cents: number; url: string /* solana: transfer-request URL */; reference: string; at: number; until: number /* ms
+epoch, ~90 s */; paidAt?: number | null } | null`. The box draws `url` as a QR with the name and amount and clears it on
+touch `pay:close`. The server sets `paidAt` when the payment is credited and clears `boxPay` about 4 s later, or at
+`until` when nobody paid.
+
 ## "Call it" moments (kiosk hardware)
 
 The host taps a moment on the kiosk the instant it happens; a market opens immediately with a model-priced
@@ -132,7 +165,10 @@ unchanged after it resolves). The caption leads with the call: "Penalty called! 
 | `POST /api/lobby/:code/deposit` | `{cents}` | demo: `{credited}`; coinbase: `{url}`; **solana**: `{url: "solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle&message=..", solanaPay: true, reference, recipient, mint, amount}`. Show `url` as a QR and an "Open in wallet" link, then poll `/deposit/sync` every 3 s |
 | `POST /api/lobby/:code/deposit/sync` | `{reference?}` | `{credited, pending}`. Solana: finds the payment by its reference on chain, checks USDC reached the treasury, credits once per signature (see [Solana money](#solana-money-money_modesolana)). Solana adds `payments: [{signature, cents, explorer}]` (credited now) and `refunded` (cents, only when a stuck cash-out came back). `pending: -1` = polled within 2.5 s, ask again |
 | `POST /api/lobby/:code/faucet` (x-player-token) | `{address}` | solana only: $20 test USDC + 0.005 SOL (only if the wallet has less) to that wallet in **one** transaction, once per player per lobby. `{cents, usdcSig, solSig, explorer}`; `solSig` is the same signature as `usdcSig`, or `null` when no SOL was sent. 400 with a readable `error` for a bad address |
-| `POST /api/lobby/:code/cashout` | `{address?}` | solana: sends the whole balance as test USDC to `address` (a Solana **wallet** address), or to the wallet the player deposited from / used the faucet with. `{cents, mode: "solana", to, txHash, explorer}`, plus `pending: true` when the send could not be confirmed (see below). 400 before anything moves for a token account, the treasury, the mint or a program; 502 (balance put back) when it surely failed |
+| `POST /api/lobby/:code/deposit/box` (x-player-token) | `{cents}` | solana only: same transfer request as `/deposit` (fresh reference, recorded like any deposit request) **and** shown on the box: sets `lobby.boxPay` (shape above) for ~90 s. `{url, reference, recipient, mint, amount, until}`. Credited once by `/deposit/sync`, the QuickNode webhook, or the lobby read path (checks the chain at most every 3 s while `boxPay` is open) |
+| `POST /api/lobby/:code/settle` | | `SETTLEMENT=vault`: runs the vault forward now and waits (sweeps credited deposits; after the session ended: top-up, close, signed balances, finalize, payouts). Idempotent; reads do the same in the background. `{ran, status, chain, error?}` |
+| `POST /api/quicknode/webhook` | the Stream's filter output | QuickNode Streams destination. Auth: `x-huddle-token: <QUICKNODE_STREAM_TOKEN>` (custom header), or QuickNode's `X-QN-Nonce` / `X-QN-Timestamp` / `X-QN-Signature` = hex HMAC-SHA256(token, nonce + timestamp + body), timestamp within 10 min. 401 otherwise, 503 when the token is unset. `{records, credited, deposits, vaultEvents}` |
+| `POST /api/lobby/:code/cashout` | `{address?}` | `SETTLEMENT=vault`: 400 until the session ended (the money is in the vault); then pays the player's settled amount from the vault to `address` or the paying wallet, or returns the payout already made (`{cents, vault: true, to, txHash, explorer}`). Otherwise solana: sends the whole balance as test USDC to `address` (a Solana **wallet** address), or to the wallet the player deposited from / used the faucet with. `{cents, mode: "solana", to, txHash, explorer}`, plus `pending: true` when the send could not be confirmed (see below). 400 before anything moves for a token account, the treasury, the mint or a program; 502 (balance put back) when it surely failed |
 
 `money` in the lobby view (solana mode): `{mode: "solana", payouts: "solana", asset: "test USDC on Solana devnet",
 solanaPay: true, faucet: true, depositOptions: [500, 1000, 2000]}`. In demo/coinbase it is unchanged (plus
@@ -170,6 +206,71 @@ deposit's own transfer fee, which the faucet covers.
   reachable and not mainnet, treasury has at least 0.02 SOL, `USDC_MINT` exists with 6 decimals, and the treasury
   can mint or holds at least $100. `checks` has the numbers (`cluster`, `treasurySol`, `treasuryUsdcCents`,
   `mint.treasuryIsMintAuthority`); it is cached for 15 s. Problems also appear in `warnings`.
+  `solana.vault`: `{requested, active, ready, programId, deployed, executable, boxSigner, explorer, problems,
+  nextSteps}` (`ready` = `SETTLEMENT=vault`, Solana ready and the program is deployed and executable).
+  `quicknode: {webhook, configured}`.
+
+### Vault settlement (`SETTLEMENT=vault`, with `MONEY_MODE=solana`)
+
+The party's money sits in its own account of the Anchor program `huddle_vault`
+(`GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu`, source in `programs/huddle_vault`; built
+`target/deploy/huddle_vault.so`), not in the treasury, and the end of the game settles through the program
+(`lib/vault.ts`). Without `SETTLEMENT=vault` everything above (plain treasury) is unchanged.
+
+| Step | On chain | When |
+|---|---|---|
+| Party | `create_party`: Party PDA `["party", treasury, sha256("huddle-party-v1\|CODE\|createdAt")]`, token vault PDA `["vault", party]` owned by the Party PDA, `box_signer` = a server-only key (`HUDDLE_BOX_SIGNER_SECRET_KEY`, else derived from the treasury key), bond 0, challenge 0 s, trusted-host mode | first credited deposit |
+| Deposit | The player pays the usual Solana Pay transfer request to the **treasury wallet** (any wallet works: the spec only lets a transfer request name a wallet, whose associated token account receives the tokens, and the vault is a PDA-owned account that no wallet can derive). Once it is credited, **one** treasury-paid transaction: treasury -> the player's seat token account -> program `deposit` -> vault -> close the empty seat token account. The seat (the program's `member`) is a key derived from the treasury key, the party and the player id; its Member PDA `["member", party, seat]` records the deposit | right after the credit (background), or `/settle` |
+| Top-up | If the room won more than it put in (LMSR house loss), the treasury deposits the difference as a house seat whose final balance is 0 | after the session ends |
+| Close | `request_close` signed by the host (the treasury) | after the session ends |
+| Balances | Per seat: an Ed25519 program instruction carrying the box signature over `"HUDDLE_STATE_V1" \|\| party \|\| seat \|\| nonce u64 LE \|\| balance u64 LE \|\| state_hash` (127 bytes, `state_hash` = sha256 of the lobby, player and final ledger line), then `submit_state`, which checks that signature through the instructions sysvar. Two seats per transaction | |
+| Finalize | `finalize` (the "Settled on Solana" link) | |
+| Payouts | Per player, **one** transaction: `withdraw` (vault -> seat, the only place the program pays) + transfer to the player's own wallet (the one they paid from, or the address given to `/cashout`) + close the seat token account. Then `withdraw_host` returns the house share and rounding dust to the treasury | players without a known wallet are paid when they cash out |
+
+- The treasury pays every fee and all rent (seat token accounts are closed again, their rent comes back). Players only
+  pay the fee of their own Solana Pay transfer (the faucet's SOL covers it).
+- Every step first reads the Party / Member accounts, so retries and parallel calls never repeat a step (a KV lock also
+  lets one run at a time). An unclear send keeps its signature and is checked before anything is resent.
+- Cash-out before the end answers 400 ("Your money is in this party's vault on Solana..."). Settlement starts by
+  itself: any `GET /api/lobby/:code` after the session ended runs it in the background (at most every 5 s), and
+  `POST /api/lobby/:code/settle` runs it and waits.
+- Every signature is in `lobby.vault` (`created`, `sweeps`, `topUp`, `closed`, `states`, `finalized`, `payouts`,
+  `hostPayout`) and in `chain.events` with an explorer link.
+
+### QuickNode Stream setup
+
+The Stream is the instant deposit feed; `/deposit/sync` polling stays as the fallback.
+
+| | |
+|---|---|
+| Network | Solana **Devnet** |
+| Dataset | **Block** (`getBlock`-shaped blocks; the filter also accepts "Programs + Logs") |
+| Filter | `web/quicknode/filter.js`, with `HUDDLE_PROGRAM_ID` and `WATCH_ACCOUNTS` (the treasury's USDC token account) filled in. `node scripts/solana-go-live.mjs` writes the filled copy to `web/.solana/quicknode-filter.js` |
+| Filter logic | Keep successful transactions that touch the vault program or the treasury's USDC token account; return per transaction `{signature, slot, blockTime, accounts, watched, huddle: [decoded vault instructions]}`; `null` when a batch has none (no delivery) |
+| Destination | Webhook `POST https://huddle-live-eight.vercel.app/api/quicknode/webhook`, compression none (gzip also works) |
+| Auth | Custom header `x-huddle-token: <QUICKNODE_STREAM_TOKEN>` (from `web/.solana/quicknode.token`), or set `QUICKNODE_STREAM_TOKEN` to the Stream's own security token and the `X-QN-Signature` HMAC is checked |
+
+Click by click (QuickNode's dashboard; names as in QuickNode's Streams docs, Nov 18 2026):
+
+1. Sign up at https://www.quicknode.com (the Free plan includes Streams) and open the dashboard.
+2. Run `node scripts/solana-go-live.mjs` first (see Human steps), so the program, the mint, the token and the filled
+   filter exist.
+3. **Streams** > **+ New Stream**. Name it `huddle-devnet`. Chain **Solana**, network **Devnet**. Start at the latest
+   block. If a batch size is asked, use 5 (QuickNode requires at least 5 on sub-second chains). **Next**.
+4. Dataset **Block**. **Fetch payload** shows a sample block.
+5. **Customize your payload**: delete the sample and paste all of `web/.solana/quicknode-filter.js` (or
+   `web/quicknode/filter.js` with the two values at the top filled in). **Run test**: it returns `null` for a block
+   without Huddle traffic; to see a record, make a deposit on devnet and test with that transaction's block (slot).
+6. Destination **Webhook**. URL `https://huddle-live-eight.vercel.app/api/quicknode/webhook`. Compression **None**.
+   Under **Custom headers** add `x-huddle-token` with the contents of `web/.solana/quicknode.token`
+   (`cat web/.solana/quicknode.token | pbcopy`; it is already in Vercel as `QUICKNODE_STREAM_TOKEN`).
+7. **Check Connection** (a 200 means the token matched; a 401 means the header is wrong), then **Create a Stream**.
+8. Check: deposit from a phone. Within a few seconds the deposit shows in `chain.events` with `via: "quicknode"` (or
+   `streamed: true` when polling got there first), and Vercel's logs show `POST /api/quicknode/webhook 200`.
+   If QuickNode pauses the Stream after failed deliveries, fix the cause and resume it in the dashboard.
+
+Not confirmed from QuickNode's docs: the exact devnet network string for the REST API and whether a filtered delivery
+is wrapped in `{data, metadata}` (the webhook accepts both), so use the dashboard rather than the REST API.
 
 Head-to-head odds: decimal odds for the maker's side. Backing YES with $10 at 1.30 means a taker matches it with
 $3; the winner of each matched pair gets both stakes ($13).
@@ -240,6 +341,10 @@ close quarter (random-walk margin, asked only between 15% and 60%). Kiosk "Call 
 | `MONEY_MODE=solana` | Solana Pay money (devnet test USDC) | `demo`. If the two vars below are missing or malformed it runs demo money and `/api/health` (`solana.problems`, `solana.nextSteps`, `warnings`) says why |
 | `SOLANA_TREASURY_SECRET_KEY` | treasury keypair (base58 or JSON byte array); receives deposits, pays cash-outs, fees and the faucet | |
 | `USDC_MINT` | the test USDC mint | |
+| `SETTLEMENT=vault` | parties settle through the `huddle_vault` program (needs `MONEY_MODE=solana`) | plain treasury |
+| `HUDDLE_VAULT_PROGRAM_ID` | the deployed `huddle_vault` | `GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu` |
+| `HUDDLE_BOX_SIGNER_SECRET_KEY` | the key that signs final balances (optional) | derived from the treasury key |
+| `QUICKNODE_STREAM_TOKEN` | the QuickNode webhook's shared secret | unset = webhook closed (503) |
 | `SOLANA_RPC_URL` | a devnet RPC (a keyed provider is fine; its key is redacted in `/api/health`) or `http://127.0.0.1:8899` for a local validator | `https://api.devnet.solana.com` (mainnet URLs and mainnet genesis are refused) |
 
 ## Human steps
@@ -276,4 +381,22 @@ close quarter (random-walk margin, asked only between 15% and 60%). Kiosk "Call 
     setup script, starts `next dev` with `MONEY_MODE=solana` and plays a party: faucet, Solana Pay deposit paid like
     Phantom, sync once, buy, resolve, cash-out checked on chain). `node scripts/solana-wallet.mjs pay '<solana:...>'
     --keypair <file>` pays any deposit QR from the command line (devnet or local).
+- **Go live with the vault (devnet), one command**, from `web/` of the Vercel-linked checkout
+  (`.claude/worktrees/ubc/web`, which has the treasury in `.solana/`):
+  1. `node scripts/solana-go-live.mjs --dry-run`. It prints the treasury address
+     (`59seNxDWGMwfyQ1ZtuDdSLeQn9rAc4WNcueUmCRrxdwH`) and exactly how much SOL is missing. On Nov 18 it read devnet's
+     rent for the 250,944-byte program: **1.278 SOL to deploy + 0.25 SOL working reserve = 1.53 SOL**. (A local
+     validator charges 1.750 SOL for the same deploy, measured; the script always asks the RPC.)
+  2. Open https://faucet.solana.com, sign in with GitHub, network **Devnet**, paste the treasury address and request
+     **5 SOL** (the maximum; at least 2). Deposits, settlements and payouts cost about 0.01 SOL per party after that.
+  3. `node scripts/solana-go-live.mjs`. It deploys `huddle_vault` at `GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu`
+     from `~/.config/huddle/devnet/huddle_vault-keypair.json` and `target/deploy/huddle_vault.so` (pass `--so` /
+     `--program-keypair` if they live elsewhere), prints the program id and deploy signature, creates the test USDC
+     mint, generates `QUICKNODE_STREAM_TOKEN`, writes the filled QuickNode filter, sets the Vercel production env
+     (`MONEY_MODE`, `SETTLEMENT`, `HUDDLE_VAULT_PROGRAM_ID`, `USDC_MINT`, `SOLANA_TREASURY_SECRET_KEY`,
+     `QUICKNODE_STREAM_TOKEN`; secrets piped, never echoed) and runs `vercel deploy --prod --yes`.
+  4. Open `/api/health`: `money.settlement` is `"vault"`, `solana.ready` and `solana.vault.ready` are `true`.
+  5. Create the QuickNode Stream ([QuickNode Stream setup](#quicknode-stream-setup)).
+  - Test without devnet: `npm run test:vault-localnet` (local validator, program deployed, a whole party settled on
+    chain; `VAULT_E2E_LOG=1` prints every signature).
 - Privy was dropped (direction change): no `@privy-io` dependency and no `components/wallet` module.
