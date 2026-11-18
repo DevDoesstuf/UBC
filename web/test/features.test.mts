@@ -401,6 +401,55 @@ test("moments: replay game uses the engine's matching candidate, resolved by the
   assert.equal(totalMoney(l), deposited(l));
 });
 
+test("moments in a replay: no made-up situation; a call nobody settles is refunded and the replay goes on", async () => {
+  const { code, kiosk } = await setup("soccer-replay");
+  await kioskTouch(kiosk, "start", "http://x"); // the engine's penalty question
+  await kioskTouch(kiosk, "lock", "http://x");
+  await kioskTouch(kiosk, "resolve:yes", "http://x");
+  let l = (await lobby.getLobby(code))!;
+  // Far from any penalty: the call is refused with a reason instead of inventing "Will the penalty be scored?".
+  clock = l.replay!.startedAt! + 30_000;
+  l = (await lobby.getLobby(code))!;
+  if (l.phase === "open") await kioskTouch(kiosk, "lock", "http://x");
+  l = (await lobby.getLobby(code))!;
+  if (l.phase === "locked") await kioskTouch(kiosk, "resolve:no", "http://x");
+  l = (await lobby.getLobby(code))!;
+  if (l.replay!.state.lastEvent?.type !== "penalty_awarded") {
+    await assert.rejects(lobby.mutate(code, (x, now) => lobby.openMoment(x, "penalty", now)), /No penalty/);
+  }
+  // A template call the plays cannot settle: the phone says who settles it; refunded 45 s after the lock.
+  l = await lobby.mutate(code, (x, now) => lobby.openMoment(x, "free_kick", now));
+  assert.equal(l.market!.source!.kind, "moment");
+  await kioskTouch(kiosk, "lock", "http://x");
+  l = (await lobby.getLobby(code))!;
+  assert.equal(l.phase, "locked");
+  assert.equal(lobby.publicView(l, null, "http://x").market?.hostSettles, true);
+  advance(46_000);
+  l = (await lobby.getLobby(code))!;
+  assert.notEqual(l.phase, "locked");
+  assert.equal(l.market!.voided || l.market!.source?.kind !== "moment", true);
+});
+
+test("end caption names the same winner as the boards (balance + withdrawn)", async () => {
+  const { code } = await lobby.createLobby(String(kioskN++), "football");
+  const ids: string[] = [];
+  for (const [name, dep] of [["Ana", 2000], ["Ben", 1500], ["Cy", 500]] as const) {
+    await lobby.mutate(code, (x, now) => {
+      const p = lobby.join(x, name, now);
+      ids.push(p.id);
+      lobby.creditDeposit(x, p.id, dep, "demo", `demo-${p.id}`, now);
+    });
+  }
+  // Cy is up the most (+$3, worth $8) but Ana is worth the most ($20): the podium says Ana, so must the caption.
+  await lobby.mutate(code, (x) => {
+    x.players[ids[2]].balance = 800;
+    x.housePnl -= 300;
+  });
+  const l = await lobby.mutate(code, (x, now) => lobby.endSession(x, now));
+  const last = l.captions![l.captions!.length - 1].text;
+  assert.match(last, /Ana/);
+});
+
 test.after(() => {
   Date.now = realNow;
 });

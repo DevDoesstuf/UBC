@@ -23,6 +23,11 @@ export interface MomentKind {
   templates: string[];
   /** The question and its model prior, from the game situation when there is one. */
   write(ctx: MomentContext): { text: string; short: string; prior: number; rationale: string };
+  /**
+   * Replay games only (the play-by-play is the truth): null when the situation is on the field right now,
+   * else why the call cannot open (shown on the box). Without it the question would make the situation up.
+   */
+  onField?(state: GameState): string | null;
 }
 
 export interface MomentContext {
@@ -49,6 +54,7 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
   nfl: [
     {
       kind: "third_down", label: "3rd down", call: "Third down!", lockSecs: 20, templates: ["nfl.conversion"],
+      onField: (s) => (s.down === 3 || s.down === 4 ? null : "No 3rd down on the field right now"),
       write: ({ state }) => {
         const down = state?.down === 3 || state?.down === 4 ? state.down : 3;
         const distance = state?.distance ?? 5;
@@ -65,6 +71,7 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
     },
     {
       kind: "red_zone", label: "Red zone", call: "Red zone!", lockSecs: 25, templates: ["nfl.red_zone_td"],
+      onField: (s) => (s.possession && (s.yardline ?? 0) >= 80 ? null : "Nobody is in the red zone right now"),
       write: ({ state }) => {
         const yl = state?.yardline && state.yardline >= 80 ? state.yardline : 85;
         const rz = redZoneProbs(yl);
@@ -98,6 +105,7 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
   soccer: [
     {
       kind: "penalty", label: "Penalty!", call: "Penalty called!", lockSecs: 20, templates: ["soccer.penalty"],
+      onField: (s) => (s.lastEvent?.type === "penalty_awarded" ? null : "No penalty given right now"),
       write: ({ state }) => {
         const player = state?.lastEvent?.type === "penalty_awarded" ? state.lastEvent.player : undefined;
         const pr = penaltyProb(player);
@@ -110,6 +118,7 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
     },
     {
       kind: "corner", label: "Corner", call: "Corner kick!", lockSecs: 15, templates: ["soccer.corner_sot"],
+      onField: (s) => (s.lastEvent?.type === "corner" ? null : "No corner right now"),
       write: () => {
         const p = cornerShotOnTargetProb();
         return { text: "Shot on target from this corner?", short: "Corner: on target?", prior: p, rationale: `About ${pct(p)} of corners lead to a shot on target (StatsBomb open data).` };
@@ -137,9 +146,10 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
   nba: [
     {
       kind: "free_throws", label: "Free throws", call: "To the line!", lockSecs: 15, templates: ["nba.ft_trip"],
+      onField: (s) => (ftTripOpen(s) ? null : "Nobody is at the line right now"),
       write: ({ state }) => {
         const ev = state?.lastEvent;
-        const player = ev?.type === "free_throw" ? ev.player : undefined;
+        const player = state && ftTripOpen(state) ? ev?.player : undefined;
         const p = ftAllProb(2);
         return {
           text: player ? `Will ${player} make both free throws?` : "Both free throws made?", short: "Both FTs?", prior: p,
@@ -167,6 +177,15 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
     },
   ],
 };
+
+/** A free-throw trip is under way: the trip was awarded, or shots of it are still to come. */
+function ftTripOpen(s: GameState): boolean {
+  const ev = s.lastEvent;
+  if (ev?.type !== "free_throw") return false;
+  const d = ev.data as { trip?: unknown; n?: unknown; of?: unknown };
+  if (d.trip === true) return true;
+  return typeof d.n === "number" && typeof d.of === "number" && d.n < d.of;
+}
 
 export function findMoment(sport: MomentSport, kind: string): MomentKind | undefined {
   return MOMENT_KINDS[sport].find((m) => m.kind === kind);

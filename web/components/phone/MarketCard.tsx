@@ -589,7 +589,7 @@ function ResultRow({ l, m }: { l: Lobby; m: Mkt }) {
   if (l.phase === "locked")
     return (
       <p className="ph-line">
-        <Icon name="hourglass" size={16} /> Locked. Waiting for the result…
+        <Icon name="hourglass" size={16} /> {m.hostSettles ? "Locked. The host taps what happened on the box." : "Locked. Waiting for the result…"}
       </p>
     );
   if (l.phase !== "result" || !m.outcome) return null;

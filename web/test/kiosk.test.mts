@@ -26,8 +26,37 @@ test("kiosk v2: picker cards for every game, the old 4 tiles unchanged", async (
   assert.equal(replay.kind, "replay");
   assert.equal(replay.gemini, true);
   assert.ok(replay.home?.name && replay.away?.name && /^#[0-9A-F]{6}$/i.test(replay.home.color ?? ""));
-  assert.match(replay.date ?? "", /Nov 22/);
-  for (const c of s.cards!) assert.ok(LATIN1.test(c.title + c.sub + (c.league ?? "") + (c.date ?? "")), c.title);
+  // A hand-written demo has no real date (its startsAt is made up): the card says what it is instead.
+  assert.equal(replay.date, "Demo game");
+  // US leagues read "Away at Home", soccer "Home v Away"; names short enough for the card.
+  const sf = s.cards!.find((c) => c.id === "game:nfl-sf-dal")!;
+  assert.equal(sf.at, true);
+  assert.equal(sf.away?.nick, "49ers");
+  assert.equal(sf.home?.nick, "Cowboys");
+  assert.match(sf.date ?? "", /Nov 15/);
+  assert.equal(s.cards!.find((c) => c.id === "game:nba-okc-lac")!.at, true);
+  assert.equal(s.cards!.find((c) => c.id === "game:soccer-replay")!.at, false);
+  assert.equal(replay.away?.nick, "Titans");
+  for (const c of s.cards!) {
+    assert.ok(LATIN1.test(c.title + c.sub + (c.league ?? "") + (c.date ?? "")), c.title);
+    for (const t of [c.home, c.away]) if (t) assert.ok((t.nick ?? t.name).length <= 14, `${c.title}: ${t.nick}`);
+  }
+});
+
+test("kiosk: names the box can draw, avatar hash on the box-safe name, quarters for the NBA", async () => {
+  const { boxName, boxSafe, avatarHash } = await import("../lib/boxText.ts");
+  const { periodLabel } = await import("../lib/kiosk.ts");
+  assert.equal(boxName("李小龍"), "Player");
+  assert.equal(boxSafe("Zoë Łódź 李").trim(), "Zoë Lódz");
+  assert.equal(boxSafe("Renée"), "Renée");
+  // FNV-1a over UTF-8 bytes (what firmware strHash sees), e.g. "Zoë" = 5a 6f c3 ab
+  let h = 2166136261;
+  for (const b of [0x5a, 0x6f, 0xc3, 0xab]) h = Math.imul(h ^ b, 16777619) >>> 0;
+  assert.equal(avatarHash("Zoë"), h);
+  assert.equal(avatarHash("李小龍"), avatarHash("Player"));
+  assert.deepEqual([1, 2, 3, 4, 5].map((p) => periodLabel("nba", p)), ["Q1", "Q2", "Q3", "Q4", "OT"]);
+  assert.deepEqual([1, 2, 3].map((p) => periodLabel("soccer", p)), ["1st half", "2nd half", "ET"]);
+  assert.equal(periodLabel("nfl", 5), "OT");
 });
 
 test("kiosk v2: lobby roster, pot, calls; market timing, trades, model; result winners/losers; ended board", async () => {

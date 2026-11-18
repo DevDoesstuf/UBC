@@ -32,6 +32,8 @@ export class ApiError extends Error {
 const LOBBY_TTL_MS = 24 * 60 * 60 * 1000;
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I or O
 const MAX_PLAYERS = 12;
+/** Replay games: how long a host-called moment waits for It was YES/NO after it locks before it is refunded. */
+const HOST_RESULT_MS = 45_000;
 export const BUY_OPTIONS = [100, 200, 500]; // cents, the quick buttons on phones
 export const MIN_BUY = 25;
 export const MAX_BUY = 5000;
@@ -341,6 +343,13 @@ function tick(l: Lobby, now: number, dryRun = false): boolean {
     if (dryRun) return true;
     lockMarket(l, m.lockAt);
     if (l.replay?.pregame) parkPregame(l, now);
+    return true;
+  }
+  // Replay games keep playing: a host-called moment the plays cannot settle is refunded if nobody taps
+  // the result within HOST_RESULT_MS of the lock, so the automatic questions start again.
+  if (l.phase === "locked" && l.replay && m.resolveAt === null && m.source?.kind === "moment" && now >= m.lockAt + HOST_RESULT_MS) {
+    if (dryRun) return true;
+    voidMarket(l, "nobody tapped the result", now);
     return true;
   }
   if (l.phase === "locked" && !l.replay && m.resolveAt !== null && now >= m.resolveAt) {
@@ -685,6 +694,12 @@ export function openMoment(l: Lobby, kind: string, now: number): void {
       openReplayMarket(l, hit.q, hit.q.yesPrior, lockAtWall, hit.q.resolveAtMs !== null ? run.startedAt! + hit.q.resolveAtMs : null, now, mk);
       return;
     }
+    // No engine question: in a replay the plays are the truth, so never ask about a 3rd down, a penalty or a
+    // free-throw trip that is not happening on screen.
+    if (run.startedAt !== null && mk.onField) {
+      const why = mk.onField(run.state); // mutate() folded the plays up to now before this runs
+      if (why) throw new ApiError(400, why);
+    }
   }
   const w = mk.write({ state: run?.state ?? null });
   l.market = newMarket(l, now, {
@@ -740,8 +755,12 @@ export function endSession(l: Lobby, now: number = Date.now()): void {
   if (l.replay?.parkedMarket) settleParked(l, null, "the session ended before the final whistle", now);
   l.phase = "ended";
   addEvent(l, "end", "Session over. Cash out on your phone.", "tap");
-  const board = l.order.map((id) => l.players[id]).map((p) => ({ name: p.name, cents: p.balance + p.withdrawn - p.deposited }));
-  board.sort((a, b) => b.cents - a.cents);
+  // Same order as every board (box, TV, phone): what each player is worth (balance + withdrawn). The caption
+  // then says how far up the leader is (cents = profit), so it never names a different winner than the podium.
+  const board = l.order
+    .map((id) => l.players[id])
+    .map((p) => ({ name: p.name, worth: p.balance + p.withdrawn, cents: p.balance + p.withdrawn - p.deposited }))
+    .sort((a, b) => b.worth - a.worth);
   const sc = buildScorecard(l.scoreEntries ?? []);
   caption(l, { type: "end", leader: board[0] ?? null, verdict: sc.n ? sc.verdict : null }, now, "end");
 }
@@ -867,6 +886,8 @@ function marketExtras(l: Lobby, m: Market) {
     voided: m.voided ?? false,
     rationale: m.source && "rationale" in m.source ? m.source.rationale : null,
     moment: m.source?.kind === "moment" ? m.source.moment : m.source?.kind === "replay" ? m.source.moment ?? null : null,
+    /** true = nothing settles it by itself: the host taps It was YES/NO on the box. */
+    hostSettles: m.resolveAt === null && m.source?.kind !== "replay",
     pool: mode === "pool" ? { yesCents: m.pool?.yes ?? 0, noCents: m.pool?.no ?? 0 } : undefined,
     offers:
       mode === "h2h"
