@@ -7,7 +7,7 @@ import {
   Aurora, Avatar, Burst, GOLD_BURST, Icon, Kinetic, Mark, Roll, Wordmark, ordinal, useCoins, useFlip, useNewIds,
   useReplayClass, usd, usdShort, signedUsd, withAlpha, type IconName,
 } from "@/components/huddle";
-import { SIDE, SOLANA_ADDRESS, profitOf, ranked, type Lobby } from "./derive";
+import { SIDE, SOLANA_ADDRESS, profitOf, ranked, scoreSides, type Lobby } from "./derive";
 import { CodeTiles, Empty, InlineError, Money, SectionTitle, Sheet, cx, d } from "./ui";
 
 /** The server's lobby limit (lib/lobby.ts MAX_PLAYERS): a full lobby says so before anyone types a name. */
@@ -313,18 +313,19 @@ export function Header({ l, onMoney }: { l: Lobby; onMoney: () => void }) {
   const me = l.me!;
   const profit = profitOf(l);
   const s = l.game?.score;
+  const teams = scoreSides(l);
   const live = l.phase === "open" || (!!s && s.status === "live");
   return (
     <header className="ph-top">
       <div className="ph-top-in">
         <div className="ph-top-row">
-          {s ? (
-            <div className="ph-bug" role="group" aria-label={`${s.home} ${s.homeScore}, ${s.away} ${s.awayScore}${s.clock ? `, ${s.clock}` : ""}`}>
+          {s && teams ? (
+            <div className="ph-bug" role="group" aria-label={`${teams.label}${s.clock ? `, ${s.clock}` : ""}`}>
               <span className="ph-bug-teams" aria-hidden="true">
-                <span className="ph-team">{s.homeShort ?? s.home.slice(0, 3)}</span>
-                <Score n={s.homeScore} />
-                <Score n={s.awayScore} />
-                <span className="ph-team">{s.awayShort ?? s.away.slice(0, 3)}</span>
+                <span className="ph-team">{teams.left.short ?? teams.left.name.slice(0, 3)}</span>
+                <Score key="l" n={teams.left.score} />
+                <Score key="r" n={teams.right.score} />
+                <span className="ph-team">{teams.right.short ?? teams.right.name.slice(0, 3)}</span>
               </span>
               <span className="ph-bug-clock" aria-hidden="true">
                 {/* Same rule as the TV: before the clock starts (the pregame question) it is Pre-game, not live. */}
@@ -448,11 +449,11 @@ export function Leaderboard({ l, title = "Leaderboard" }: { l: Lobby; title?: st
         <ol className="ph-board" ref={list}>
           {rows.map((p, i) => {
             const mine = p.id === meId;
-            const lead = i === 0 && p.worth > 0;
+            const lead = p.lead;
             const net = p.worth - p.deposited;
             return (
               <li key={p.id} data-flip={p.id} className={cx("ph-row", lead && "lead", mine && !lead && "mine", fresh.has(p.id) ? "hd-pop" : "hd-rise")} style={d(Math.min(i, 8) * 50)}>
-                <span className={cx("hd-num ph-rank", lead && "gold")}>{i + 1}</span>
+                <span className={cx("hd-num ph-rank", lead && "gold")}>{p.rank}</span>
                 <Avatar name={p.name} size="2.5rem" />
                 <div className="ph-row-main">
                   <div className="ph-row-name">
@@ -564,10 +565,12 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
   const me = l.me!;
   const profit = profitOf(l);
   // Only players who bought in are ranked: a watcher with $0 is not "2nd of 12".
-  const rows = ranked(l).filter((p) => p.deposited > 0);
-  const rank = rows.findIndex((p) => p.id === me.id) + 1;
-  const s = l.game?.score;
-  const verdict = rank === 1 && profit > 0 ? "You won the room." : profit > 0 ? "Up on the night." : profit < 0 ? "Cooked tonight." : "Broke even.";
+  const rows = ranked(l, true);
+  const mine = rows.find((p) => p.id === me.id);
+  const rank = mine?.rank ?? 0;
+  const tied = !!mine && rows.some((p) => p.id !== me.id && p.rank === mine.rank);
+  const teams = scoreSides(l);
+  const verdict = mine?.lead && profit > 0 ? "You won the room." : rank === 1 && tied && profit > 0 ? "Tied for the top." : profit > 0 ? "Up on the night." : profit < 0 ? "Cooked tonight." : "Broke even.";
   const pot = useRef<HTMLSpanElement>(null);
   const amount = useRef<HTMLDivElement>(null);
   const [coins, fire] = useCoins();
@@ -581,12 +584,12 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
     <div className="ph-stackgap">
       <section className="ph-ft hd-card" aria-labelledby="ft-title">
         <p id="ft-title" className="ph-kicker ph-center">Full time</p>
-        {s && (
-          <p className="ph-ft-score" aria-label={`${s.home} ${s.homeScore}, ${s.away} ${s.awayScore}`}>
-            <span className="ph-team big" aria-hidden="true">{s.homeShort ?? s.home}</span>
-            <span className="hd-num ph-score big hd-pop" aria-hidden="true">{s.homeScore}</span>
-            <span className="hd-num ph-score big hd-pop" style={d(90)} aria-hidden="true">{s.awayScore}</span>
-            <span className="ph-team big" aria-hidden="true">{s.awayShort ?? s.away}</span>
+        {teams && (
+          <p className="ph-ft-score" aria-label={teams.label}>
+            <span className="ph-team big" aria-hidden="true">{teams.left.short ?? teams.left.name}</span>
+            <span className="hd-num ph-score big hd-pop" aria-hidden="true">{teams.left.score}</span>
+            <span className="hd-num ph-score big hd-pop" style={d(90)} aria-hidden="true">{teams.right.score}</span>
+            <span className="ph-team big" aria-hidden="true">{teams.right.short ?? teams.right.name}</span>
           </p>
         )}
         <div className="ph-ft-rule" />
@@ -597,10 +600,10 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
         <Kinetic as="p" text={verdict} className="hd-q ph-ft-verdict" delay={500} stagger={60} />
         {rank > 0 && (
           <p className="hd-rise ph-hint ph-center" style={d(800)}>
-            You finished {ordinal(rank)} of {rows.length}
+            You finished {tied ? "tied " : ""}{ordinal(rank)} of {rows.length}
           </p>
         )}
-        {rank === 1 && profit > 0 ? <Burst count={40} seed={11} y="45%" spread={16} delay={600} /> : profit > 0 ? <Burst count={14} seed={5} y="45%" spread={10} delay={600} /> : null}
+        {mine?.lead && profit > 0 ? <Burst count={40} seed={11} y="45%" spread={16} delay={600} /> : profit > 0 ? <Burst count={14} seed={5} y="45%" spread={10} delay={600} /> : null}
       </section>
 
       <section className="hd-card ph-cash" aria-labelledby="cash-title">
@@ -652,7 +655,7 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
 
 /** The podium as the box draws it: brand gradient 1st, ink 2nd, card 3rd. */
 function Podium({ l }: { l: Lobby }) {
-  const rows = ranked(l).filter((p) => p.deposited > 0).slice(0, 3);
+  const rows = ranked(l, true).slice(0, 3);
   const order = [1, 0, 2].filter((i) => rows[i]);
   return (
     <section aria-label="Podium" className="ph-podium">
@@ -664,7 +667,7 @@ function Podium({ l }: { l: Lobby }) {
             <span className="ph-pod-name ph-trunc">{p.name}</span>
             <span className="hd-num ph-pod-v">{usd(p.worth)}</span>
             <span className="ph-pod-block">
-              <span className="hd-num">{i + 1}</span>
+              <span className="hd-num">{p.rank}</span>
             </span>
           </div>
         );

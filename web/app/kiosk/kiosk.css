@@ -144,6 +144,11 @@
 
 /* scrolling lists: native momentum scrolling, thin bar */
 .hk-scroll { position: absolute; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(16, 38, 28, 0.3) transparent; }
+/* edge fades (ui.cpp picker): "there is more" above once scrolled, below while more is hidden */
+.hk-edge { position: absolute; left: 0; right: 10px; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 160ms var(--ease-out); }
+.hk-edge.top { top: 0; height: 14px; background: linear-gradient(to bottom, var(--canvas), rgba(246, 243, 234, 0)); }
+.hk-edge.bottom { bottom: 0; height: 26px; background: linear-gradient(to top, var(--canvas), rgba(246, 243, 234, 0)); }
+.hk-edge.on { opacity: 1; }
 
 /* lobby */
 .hk-join { overflow: hidden; color: #fff; }

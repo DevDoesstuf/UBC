@@ -2,6 +2,8 @@
 import type { LobbyData } from "@/components/client";
 import { sharesForSpend } from "@/lib/lmsr";
 import { poolPotential, takerStakeFor } from "@/lib/modes";
+import { awayFirst, inOrder } from "@/lib/matchup";
+import { standings, worthOf as worth } from "@/lib/standings";
 
 export type Side = "yes" | "no";
 export type Lobby = LobbyData;
@@ -106,17 +108,38 @@ export const momentLabel = (l: Lobby, kind: string | null | undefined): string |
 };
 
 /**
- * What a player is worth tonight: balance plus what they already cashed out. The lobby view only
- * carries `withdrawn` for me today; another player's is read when the server sends it.
+ * What a player is worth tonight (lib/standings.ts): balance, what they already cashed out, and their open
+ * positions at value (`open`, from the server). The lobby view carries `withdrawn` for every player; mine
+ * is read from `me` in case an older server sends it only there.
  */
 export function worthOf(l: Lobby, p: Lobby["players"][number]): number {
-  const out = p.id === l.me?.id ? l.me.withdrawn : (p as { withdrawn?: number }).withdrawn ?? 0;
-  return p.balance + (typeof out === "number" ? out : 0);
+  const out = p.id === l.me?.id ? l.me.withdrawn : p.withdrawn;
+  return worth({ balance: p.balance, withdrawn: typeof out === "number" ? out : 0, open: p.open });
 }
 
-/** Players by worth, best first (ties keep join order). */
-export function ranked(l: Lobby) {
-  return [...l.players].map((p) => ({ ...p, worth: worthOf(l, p) })).sort((a, b) => b.worth - a.worth);
+/**
+ * Players by worth, best first (ties keep join order), with a shared rank on ties and `lead` only for a sole
+ * leader. `boughtIn` ranks only players who put money in (a watcher with $0 is not "2nd of 12").
+ */
+export function ranked(l: Lobby, boughtIn = false) {
+  const players = boughtIn ? l.players.filter((p) => p.deposited > 0) : l.players;
+  return standings(players, (p) => worthOf(l, p));
+}
+
+type Side2 = { name: string; short?: string; score: number };
+
+/**
+ * The scorebug's two teams in drawing order (lib/matchup.ts): US leagues put the away team on the left like the
+ * game card ("49ers at Cowboys": SF 0 0 DAL), soccer the home team. null for games without a score.
+ */
+export function scoreSides(l: Lobby): { left: Side2; right: Side2; label: string } | null {
+  const s = l.game?.score;
+  if (!s) return null;
+  const home: Side2 = { name: s.home, short: s.homeShort ?? undefined, score: s.homeScore };
+  const away: Side2 = { name: s.away, short: s.awayShort ?? undefined, score: s.awayScore };
+  const at = awayFirst(l.game?.sport, l.game?.league);
+  const [left, right] = inOrder(home, away, at);
+  return { left, right, label: `${left.name} ${left.score}${at ? " at " : ", "}${right.name} ${right.score}` };
 }
 
 export const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;

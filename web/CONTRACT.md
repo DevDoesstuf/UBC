@@ -65,8 +65,19 @@ scorecard?: { room: number|null; model: number|null; gemini: number|null; n: num
 parked?: { text; yesCents; model; gemini; volume; mode; myPosition } | null
                                                   // replay: the pregame question, locked, settling at the final whistle
 me.stake?: { yes: number; no: number }            // pool mode: my cents on each side
-players[].withdrawn: number                       // cents already cashed out; boards rank by balance + withdrawn
+players[].withdrawn: number                       // cents already cashed out
+players[].open: number                            // cents in the running (or parked pregame) question at value:
+                                                  // market mode shares at the current price, pool/h2h stake at
+                                                  // cost (h2h includes unmatched offers); 0 once it settles
+                                                  // Boards rank by balance + withdrawn + open (lib/standings.ts
+                                                  // standings(): shared rank on a tie, `lead` only for a sole leader)
+market.losers: { name: string; cents: number }[]  // "Cooked": backed it, got nothing back (cents = stake), biggest
+                                                  // first; empty until it settles and when voided
 ```
+
+Scorebug order: US leagues (NFL, NBA, MLS) put the away team first like the game card, soccer elsewhere the home
+team: `awayFirst(game.sport, game.league)` in `lib/matchup.ts`. `game.score` keeps the real home/away; the kiosk
+JSON's `score` is in drawing order instead (`swapped: true` when the real away team is in `home*`).
 
 In pool and h2h mode `market.yesCents/noCents/priceYes/history` still work: pool shows the share of the pot on
 YES (the model prior while empty), h2h shows the YES probability implied by the last matched offer.

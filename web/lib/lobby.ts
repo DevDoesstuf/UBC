@@ -14,6 +14,7 @@ import * as lmsr from "./lmsr";
 import { captionLine, isBigTrade, type CaptionEvent, type Persona } from "./announcer";
 import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTrack, replaySnapshotAt, sourceOf, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot } from "./gemini";
 import { buildScorecard } from "./scorecard";
+import { losersOf, openValues, standings } from "./standings";
 import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePairs, settlePool, takerStakeFor, MAX_ODDS, MIN_ODDS } from "./modes";
 import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
 import { findMoment, kioskSafe, MOMENT_KINDS, type MomentKind, type MomentSport } from "./moments";
@@ -755,14 +756,12 @@ export function endSession(l: Lobby, now: number = Date.now()): void {
   if (l.replay?.parkedMarket) settleParked(l, null, "the session ended before the final whistle", now);
   l.phase = "ended";
   addEvent(l, "end", "Session over. Cash out on your phone.", "tap");
-  // Same order as every board (box, TV, phone): what each player is worth (balance + withdrawn). The caption
-  // then says how far up the leader is (cents = profit), so it never names a different winner than the podium.
-  const board = l.order
-    .map((id) => l.players[id])
-    .map((p) => ({ name: p.name, worth: p.balance + p.withdrawn, cents: p.balance + p.withdrawn - p.deposited }))
-    .sort((a, b) => b.worth - a.worth);
+  // Same order as every board (box, TV, phone): lib/standings.ts. The caption then says how far up the leader
+  // is (cents = profit), so it never names a different winner than the podium, and names nobody on a tie.
+  const board = standings(l.order.map((id) => l.players[id]));
+  const top = board.find((p) => p.lead);
   const sc = buildScorecard(l.scoreEntries ?? []);
-  caption(l, { type: "end", leader: board[0] ?? null, verdict: sc.n ? sc.verdict : null }, now, "end");
+  caption(l, { type: "end", leader: top ? { name: top.name, cents: top.worth - top.deposited } : null, verdict: sc.n ? sc.verdict : null }, now, "end");
 }
 
 function checkStake(p: Player, cents: number): void {
@@ -947,6 +946,7 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
   const py = m ? lmsr.priceYes(m.yes, m.no, m.b) : 0.5;
   const run = l.replay;
   const parked = run?.parkedMarket ?? null;
+  const open = openValues(l);
   const score = run
     ? {
         home: run.state.home.name, away: run.state.away.name, homeShort: run.state.home.short, awayShort: run.state.away.short,
@@ -996,6 +996,8 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
           lockIn: Math.max(0, Math.ceil((m.lockAt - now) / 1000)),
           outcome: m.outcome,
           winners: Object.entries(m.payouts).sort((a, b) => b[1] - a[1]).map(([id, cents]) => ({ name: name(id), cents })),
+          /** "Cooked": backed it and got nothing back (cents = stake), biggest first; empty until it settles. */
+          losers: losersOf(m).map((x) => ({ name: name(x.id), cents: x.cents })),
           trades: m.trades.slice(-10).reverse().map((t) => ({ name: t.name, side: t.side, cents: t.cents, at: t.at })),
           ...marketExtras(l, m),
         }
@@ -1003,7 +1005,8 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
     parked: parked
       ? { text: parked.text, yesCents: lmsr.toCents(parked.priceAtLock ?? yesPrice(parked)), model: parked.model ?? null, gemini: parked.gemini ?? null, volume: parked.volume, mode: modeOf(parked), myPosition: me ? parked.positions[me.id] ?? null : null }
       : null,
-    players: l.order.map((id) => ({ id, name: name(id), balance: l.players[id].balance, deposited: l.players[id].deposited, withdrawn: l.players[id].withdrawn })),
+    // open: cents in the running (or parked) question at value, so boards rank by worth (lib/standings.ts).
+    players: l.order.map((id) => ({ id, name: name(id), balance: l.players[id].balance, deposited: l.players[id].deposited, withdrawn: l.players[id].withdrawn, open: open[id] ?? 0 })),
     results: l.results.map((r) => ({
       text: r.text,
       outcome: r.outcome,

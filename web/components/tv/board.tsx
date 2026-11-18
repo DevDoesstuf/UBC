@@ -25,6 +25,8 @@ import {
 } from "@/components/huddle";
 import { money, payoutText, pctText, secsText, SIDE_LABEL, yesNo } from "./format";
 import { perDollar } from "@/components/phone/derive";
+import { awayFirst } from "@/lib/matchup";
+import { standings as rank, worthOf, type Standing } from "@/lib/standings";
 import { Sparkline, type Line } from "./Sparkline";
 
 export type L = LobbyData;
@@ -37,11 +39,16 @@ const MODE_LABEL = { market: "Market", pool: "Pool", h2h: "Head to head" } as co
 
 export const joinHost = (url: string) => url.replace(/^https?:\/\//, "");
 
-/** What a player is worth tonight: balance plus anything already cashed out (a cash-out never drops a rank). */
-export const worth = (p: Player) => p.balance + (p.withdrawn ?? 0);
+/**
+ * What a player is worth tonight (lib/standings.ts): balance, anything already cashed out (a cash-out never
+ * drops a rank) and open positions at value (a buy never drops a rank either).
+ */
+export const worth = (p: Player) => worthOf(p);
 
-/** Players by worth, then by who joined first. */
-export const ranked = (players: Player[]) => [...players].sort((a, b) => worth(b) - worth(a));
+export type Ranked = Standing<Player>;
+
+/** Players by worth, then by who joined first; shared rank on a tie, `lead` only for a sole leader. */
+export const ranked = (players: Player[]): Ranked[] => rank(players);
 
 /** What a "Call it" moment is called on the box ("Penalty!"), or null for a scripted question. */
 export function momentLabel(l: L, m: M): string | null {
@@ -52,10 +59,11 @@ export function momentLabel(l: L, m: M): string | null {
 
 /* ================================================================ top bar */
 
-function TeamScore({ short, name, score, away }: { short: string; name: string; score: number; away?: boolean }) {
+/** One side of the scorebug; `right` mirrors it (score square on the inside). */
+function TeamScore({ short, name, score, right }: { short: string; name: string; score: number; right?: boolean }) {
   const beat = useReplayClass(score, "hd-beat");
   return (
-    <span className={`tv-team ${away ? "away" : ""}`}>
+    <span className={`tv-team ${right ? "away" : ""}`}>
       <span className="tv-team-name" title={name}>{short}</span>
       <span className={`hd-num tv-team-score ${beat}`}>
         <Roll text={String(score)} flash={false} duration={700} />
@@ -64,24 +72,32 @@ function TeamScore({ short, name, score, away }: { short: string; name: string; 
   );
 }
 
-/** Replay games: the scorebug pill (score squares roll and beat on a score, clock with the live dot). */
-export function Scorebug({ score, persona }: { score: Score; persona?: string }) {
+/**
+ * Replay games: the scorebug pill (score squares roll and beat on a score, clock with the live dot). US
+ * leagues put the away team first, like the game card ("49ers at Cowboys": SF on the left), soccer the home team.
+ */
+export function Scorebug({ score, persona, sport, league }: { score: Score; persona?: string; sport?: string | null; league?: string | null }) {
   const live = !!score.started && score.status !== "final";
   const period = persona === "nfl" && score.period ? `Q${score.period}` : null;
+  const at = awayFirst(sport, league);
+  const home = <TeamScore key="home" short={score.homeShort || score.home} name={score.home} score={score.homeScore} right={at} />;
+  const away = <TeamScore key="away" short={score.awayShort || score.away} name={score.away} score={score.awayScore} right={!at} />;
   return (
     <div
       className="hd-drop tv-scorebug"
       role="group"
-      aria-label={`${score.home} ${score.homeScore}, ${score.away} ${score.awayScore}, ${score.clock}`}
+      aria-label={at
+        ? `${score.away} ${score.awayScore} at ${score.home} ${score.homeScore}, ${score.clock}`
+        : `${score.home} ${score.homeScore}, ${score.away} ${score.awayScore}, ${score.clock}`}
     >
-      <TeamScore short={score.homeShort || score.home} name={score.home} score={score.homeScore} />
+      {at ? away : home}
       <span className="tv-clock">
         <span className="hd-num tv-clock-time">{period ? `${period} · ` : ""}{score.clock}</span>
         <span className="tv-clock-state">
           {score.status === "final" ? "Full time" : live ? (<><span className="live-dot" aria-hidden="true" />Replay</>) : "Pre-game"}
         </span>
       </span>
-      <TeamScore short={score.awayShort || score.away} name={score.away} score={score.awayScore} away />
+      {at ? home : away}
     </div>
   );
 }
@@ -362,7 +378,8 @@ export function OffersCard({ m, compact = false, locked = false }: { m: M; compa
 
 /**
  * result-flood: the winner's colour floods the stage from its own share of the split, the split drains, the
- * winner word stamps in, confetti sized to the moment, and the callers' card rises with a glint on each name.
+ * winner word stamps in, confetti sized to the moment, and the callers' card rises with a glint on each name,
+ * next to who got cooked (backed the other side and got nothing back), like the box's result screen.
  */
 export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }) {
   const voided = !!m.voided;
@@ -370,6 +387,8 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
   const atLock = m.priceAtLock ?? m.yesCents / 100;
   const winShare = outcome === "yes" ? atLock : 1 - atLock;
   const pot = m.winners.reduce((a, w) => a + w.cents, 0);
+  const losers = m.losers ?? [];
+  const shown = compact ? 2 : 3;
   const bits = voided ? 0 : Math.min(48, 14 + m.winners.length * 6 + Math.round(pot / 500));
   const forecasts = [
     { id: "room", label: "Room at lock", p: atLock },
@@ -411,17 +430,30 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
           </div>
         </div>
         {!voided && (
-          <div className="hd-rise tv-reveal-cards" style={delay(760)}>
+          <div className={`hd-rise tv-reveal-cards ${!compact && forecasts.length > 0 ? "three" : ""}`} style={delay(760)}>
             <div className="tv-reveal-card">
               <p className="tv-reveal-card-h up"><Icon name="up" /> Called it</p>
-              {m.winners.slice(0, compact ? 2 : 3).map((w, i) => (
-                <p key={w.name} className="hd-shine tv-winner" style={delay(1000 + i * 180)}>
+              {m.winners.slice(0, shown).map((w, i) => (
+                <p key={`${w.name}-${i}`} className="hd-shine tv-winner" style={delay(1000 + i * 180)}>
                   <Avatar name={w.name} size="1.9rem" />
                   <span className="grow">{w.name}</span>
                   <span className="hd-num">{money(w.cents)} <span className="tv-paid">paid</span></span>
                 </p>
               ))}
+              {m.winners.length > shown && <p className="tv-more">+{m.winners.length - shown} more</p>}
               {m.winners.length === 0 && <p className="tv-empty">Nobody called it. Brutal.</p>}
+            </div>
+            <div className="tv-reveal-card">
+              <p className="tv-reveal-card-h down"><Icon name="down" /> Cooked</p>
+              {losers.slice(0, shown).map((w, i) => (
+                <p key={`${w.name}-${i}`} className="hd-fade tv-winner tv-loser" style={delay(1100 + i * 180)}>
+                  <Avatar name={w.name} size="1.9rem" />
+                  <span className="grow">{w.name}</span>
+                  <span className="hd-num">{money(w.cents)} <span className="tv-paid">lost</span></span>
+                </p>
+              ))}
+              {losers.length > shown && <p className="tv-more">+{losers.length - shown} more</p>}
+              {losers.length === 0 && <p className="tv-empty">Clean sweep.</p>}
             </div>
             {!compact && forecasts.length > 0 && (
               <div className="tv-reveal-card soft">
@@ -554,7 +586,7 @@ export function LobbyStage({ l }: { l: L }) {
 
 /* ================================================================ people */
 
-/** Leaderboard card (side column): the leader's row is ink with a gold rank badge; rows slide on reorder. */
+/** Leaderboard card (side column): the sole leader's row is ink with a gold rank badge (none on a tie); rows slide on reorder. */
 export function Leaderboard({ players, max = 5 }: { players: Player[]; max?: number }) {
   const rows = ranked(players).slice(0, max);
   const list = useFlip<HTMLOListElement>(rows.map((p) => p.id).join(","));
@@ -562,9 +594,9 @@ export function Leaderboard({ players, max = 5 }: { players: Player[]; max?: num
     <section className="hd-rise tv-card tv-board" aria-labelledby="tv-board-h" style={delay(200)}>
       <h2 id="tv-board-h" className="tv-card-title"><Icon name="trophy" /> Leaderboard</h2>
       <ol ref={list}>
-        {rows.map((p, i) => (
-          <li key={p.id} data-flip={p.id} className={i === 0 ? "lead" : ""}>
-            <span className={`tv-rank hd-num ${i === 0 ? "gold" : ""}`}>{i + 1}</span>
+        {rows.map((p) => (
+          <li key={p.id} data-flip={p.id} className={p.lead ? "lead" : ""}>
+            <span className={`tv-rank hd-num ${p.lead ? "gold" : ""}`}>{p.rank}</span>
             <Avatar name={p.name} size="1.9rem" />
             <span className="grow">{p.name}</span>
             <span className="hd-num tv-bal"><Roll text={money(worth(p))} value={worth(p)} /></span>
@@ -582,11 +614,11 @@ export function LeaderRail({ players, max = 4 }: { players: Player[]; max?: numb
   const list = useFlip<HTMLOListElement>(rows.map((p) => p.id).join(","));
   return (
     <ol ref={list} className="tv-leaders" aria-label="Leaderboard">
-      {rows.map((p, i) => (
-        <li key={p.id} data-flip={p.id} className={`tv-chip ${i === 0 ? "lead" : ""}`}>
+      {rows.map((p) => (
+        <li key={p.id} data-flip={p.id} className={`tv-chip ${p.lead ? "lead" : ""}`}>
           <span className="tv-chip-av">
             <Avatar name={p.name} size="1.85rem" />
-            <span className={`hd-num tv-chip-rank ${i === 0 ? "gold" : ""}`}>{i + 1}</span>
+            <span className={`hd-num tv-chip-rank ${p.lead ? "gold" : ""}`}>{p.rank}</span>
           </span>
           <span className="tv-chip-name">{p.name}</span>
           <span className="hd-num"><Roll text={money(worth(p))} value={worth(p)} /></span>
@@ -691,10 +723,12 @@ export function ScorecardPanel({ card, compact = false }: { card: Card; compact?
 
 const PODIUM_ORDER = [1, 0, 2];
 
-function Podium({ rows }: { rows: Player[] }) {
+function Podium({ rows }: { rows: Ranked[] }) {
+  // A tie at the top has no winner: no crown, no shine, the shared rank on both blocks.
+  const lead = !!rows[0]?.lead;
   return (
     <div className="tv-podium" aria-label="Podium">
-      {rows[0] && <Burst seed={7} count={36} x="50%" y="30%" spread={16} delay={1100} />}
+      {rows[0] && <Burst seed={7} count={lead ? 36 : 18} x="50%" y="30%" spread={16} delay={1100} />}
       {PODIUM_ORDER.map((idx) => {
         const p = rows[idx];
         if (!p) return <div key={idx} className="tv-podium-col" aria-hidden="true" />;
@@ -702,13 +736,13 @@ function Podium({ rows }: { rows: Player[] }) {
         return (
           <div key={p.id} className={`tv-podium-col p${idx + 1}`}>
             <div className="hd-pop tv-podium-who" style={delay(at + 200)}>
-              {idx === 0 && <span className="hd-float tv-crown big"><Icon name="crown" title="Winner" /></span>}
+              {idx === 0 && lead && <span className="hd-float tv-crown big"><Icon name="crown" title="Winner" /></span>}
               <Avatar name={p.name} size={idx === 0 ? "3rem" : "2.4rem"} />
-              <span className={`tv-podium-name ${idx === 0 ? "hd-shine" : ""}`} style={delay(at + 900)}>{p.name}</span>
+              <span className={`tv-podium-name ${idx === 0 && lead ? "hd-shine" : ""}`} style={delay(at + 900)}>{p.name}</span>
               <span className="hd-num tv-podium-bal"><Roll text={money(worth(p))} value={worth(p)} flash={false} duration={1100} /></span>
             </div>
             <div className="tv-podium-block-clip">
-              <div className="hd-rise tv-podium-block" style={delay(at)}><span className="hd-num">{idx + 1}</span></div>
+              <div className="hd-rise tv-podium-block" style={delay(at)}><span className="hd-num">{p.rank}</span></div>
             </div>
           </div>
         );
@@ -718,7 +752,7 @@ function Podium({ rows }: { rows: Player[] }) {
 }
 
 /** End of game: the podium, the rest of the table, "Who's smarter?" and every question's answer. */
-export function EndStage({ l, standings }: { l: L; standings: Player[] }) {
+export function EndStage({ l, standings }: { l: L; standings: Ranked[] }) {
   const card = l.scorecard;
   return (
     <div className="tv-end">
@@ -730,7 +764,7 @@ export function EndStage({ l, standings }: { l: L; standings: Player[] }) {
           <ol className="tv-end-rest" start={4}>
             {standings.slice(3, 7).map((p, i) => (
               <li key={p.id} className="hd-rise" style={delay(1000 + i * 90)}>
-                <span className="hd-num tv-rank">{i + 4}</span>
+                <span className="hd-num tv-rank">{p.rank}</span>
                 <Avatar name={p.name} size="1.75rem" />
                 <span className="grow">{p.name}</span>
                 <span className="hd-num">{money(worth(p))}</span>

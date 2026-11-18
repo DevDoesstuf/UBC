@@ -12,7 +12,7 @@ import { avatarHash } from "@/lib/boxText";
 
 const P = {
   canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ruleStrong: "#CFC8B8", ink: "#10261C",
-  ink2: "#3E5247", muted: "#6C7A70", accent: "#12A150", deep: "#0B7A3E", lime: "#7CCB4E", yes: "#1468FF",
+  ink2: "#3E5247", muted: "#616D64", accent: "#12A150", deep: "#0B7A3E", lime: "#7CCB4E", yes: "#1468FF",
   yes600: "#0B57E6", no: "#FF6B00", no600: "#B84300", hot: "#E5484D", gold: "#E8A33D", white: "#FFFFFF",
   accentTint: "#E3F2E7",
 };
@@ -291,12 +291,53 @@ function Button({ b, x, y, w, h, f = "B1", r = 18, style, onTouch, pending, smal
 
 // ---------------------------------------------------------------- shared pieces
 
+/**
+ * A scrolling list with the firmware's edge fades (ui.cpp picker): canvas fades in at the top once scrolled and
+ * at the bottom while there is more below, so a long list (10+ players) visibly continues.
+ */
+function ScrollList({ x, y, w, h, label, live, children }: { x: number; y: number; w: number; h: number; label: string; live?: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ top: false, bottom: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const top = el.scrollTop > 2;
+      const bottom = el.scrollTop < el.scrollHeight - el.clientHeight - 2;
+      setEdge((e) => (e.top === top && e.bottom === bottom ? e : { top, bottom }));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro?.disconnect();
+    };
+  }, []);
+  return (
+    <div className="hk-abs" style={{ left: x, top: y, width: w, height: h }}>
+      <div ref={ref} className="hk-scroll" style={{ left: 0, top: 0, width: w, height: h }} aria-label={label} aria-live={live ? "polite" : undefined}>
+        {children}
+      </div>
+      <i className={`hk-edge top ${edge.top ? "on" : ""}`} aria-hidden="true" />
+      <i className={`hk-edge bottom ${edge.bottom ? "on" : ""}`} aria-hidden="true" />
+    </div>
+  );
+}
+
+/**
+ * Like ui.cpp: `home*` on the left, `away*` on the right. The server sends the teams in drawing order, so for
+ * "Away at Home" games (`swapped`) the left team is the real away team: the label then reads "49ers 0 at Cowboys 0".
+ */
 function Scorebug({ s, rx, y, h, elRef }: { s: KioskScreen; rx: number; y: number; h: number; elRef?: Ref<HTMLDivElement> }) {
   const sc = s.score!;
   const live = sc.status === "live";
   const sub = sc.status === "final" ? "Final" : sc.period || (live ? "Live" : "Pre");
+  const label = `${sc.home} ${sc.homeScore}${sc.swapped ? " at " : ", "}${sc.away} ${sc.awayScore}, ${sc.clock}`;
   return (
-    <div ref={elRef} className="hk-abs hk-lift hk-scorebug hk-drop" style={{ right: 800 - rx, top: y, height: h, borderRadius: h / 2 }} aria-label={`${sc.home} ${sc.homeScore}, ${sc.away} ${sc.awayScore}, ${sc.clock}`}>
+    <div ref={elRef} className="hk-abs hk-lift hk-scorebug hk-drop" style={{ right: 800 - rx, top: y, height: h, borderRadius: h / 2 }} aria-label={label}>
       <i className="hk-bar" style={{ background: sc.homeColor ?? P.ink2 }} />
       <b className="hk-body hk-w700">{sc.homeShort || "HOME"}</b>
       <span className="hk-score hk-num hk-w700 hk-c90">{sc.homeScore}</span>
@@ -369,7 +410,7 @@ function Select({ s, onTouch, fresh }: Ctx) {
       <Wordmark x={20} y={40} />
       <TitleRow title={s.title || "Pick a game"} subtitle={s.subtitle} />
       <LiveDot cx={776} cy={30} fresh={fresh} />
-      <div className="hk-scroll" style={{ left: 0, top: 62, width: 800, height: 418 }} aria-label="Games">
+      <ScrollList x={0} y={62} w={800} h={418} label="Games">
         <div style={{ position: "relative", height: 6 + Math.ceil(cards.length / 3) * 196 + 4 }}>
           {cards.map((c, i) => {
             const x = 16 + (i % 3) * 260;
@@ -424,7 +465,7 @@ function Select({ s, onTouch, fresh }: Ctx) {
             );
           })}
         </div>
-      </div>
+      </ScrollList>
     </>
   );
 }
@@ -478,7 +519,7 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
         <Mark cx={(w - 12) / 2 - 34} cy={50} R={18} lit={Math.max(1, Math.min(12, roster.length))} />
       </Box>
 
-      <div className="hk-scroll" style={{ left: x0 - 6, top: listY, width: w + 12, height: listBottom - listY }} aria-label="Players in the room" aria-live="polite">
+      <ScrollList x={x0 - 6} y={listY} w={w + 12} h={listBottom - listY} label="Players in the room" live>
         <div style={{ position: "relative", height: Math.ceil(roster.length / 2) * 60 }}>
           {roster.length === 0 && (
             <div className="hk-abs hk-rise hk-empty" style={{ left: 6, top: 2, width: w, height: 64, ...d(560) }}>
@@ -498,7 +539,7 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
             );
           })}
         </div>
-      </div>
+      </ScrollList>
 
       {calls.length > 0 && (
         <div className="hk-rise" style={d(600)}>
@@ -857,6 +898,20 @@ function Ended({ s, onTouch, pending, fresh }: Ctx) {
       const m = /^\d+\.\s+(.*?)\s+\$([\d.]+)$/.exec(l);
       return { name: m ? m[1] : l, cents: m ? Math.round(Number(m[2]) * 100) : 0, pnl: 0 };
     });
+  // rank and lead come from the server (lib/standings.ts: shared rank on a tie, no leader on a tie at the top).
+  // Older servers send neither: fall back to the position, a tie on worth meaning no leader.
+  const rankAt = (i: number): number => {
+    const r = (board[i] as { rank?: number }).rank;
+    if (typeof r === "number") return r;
+    let k = i;
+    while (k > 0 && board[k - 1].cents === board[i].cents) k--;
+    return k + 1;
+  };
+  const leadAt = (i: number): boolean => {
+    const l = (board[i] as { lead?: boolean }).lead;
+    if (typeof l === "boolean") return l;
+    return i === 0 && board[0].cents > 0 && !(board[1] && board[1].cents === board[0].cents);
+  };
   const nw = s.buttons.find((b) => b.id === "new");
   const slots = [
     { rank: 2, x: 24, h: 104, delay: 300 },
@@ -875,10 +930,10 @@ function Ended({ s, onTouch, pending, fresh }: Ctx) {
         return (
           <div key={rank}>
             <div className="hk-abs hk-podium" style={{ left: x, top: base - h, width: 112, height: h, background: rank === 1 ? GRAD : rank === 2 ? P.ink : P.card, boxShadow: rank === 3 ? `inset 0 0 0 1px ${P.rule}` : undefined, ...d(delay) }}>
-              {h > 50 && <T f="N2" x={56} y={58} w={112} align="center" color={rank === 3 ? P.ink : P.white}>{String(rank)}</T>}
+              {h > 50 && <T f="N2" x={56} y={58} w={112} align="center" color={rank === 3 ? P.ink : P.white}>{String(rankAt(rank - 1))}</T>}
             </div>
             <div className="hk-rise" style={d(delay + 260)}>
-              {rank === 1 && (
+              {rank === 1 && leadAt(0) && (
                 <svg className="hk-abs" style={{ left: x + 56 - 14, top: base - h - 92 - 26 }} width="28" height="22" viewBox="-12 -11 24 20" aria-hidden="true">
                   <path d="M-11 3 L-11 -8 L-3 3 Z M-6 3 L0 -10 L6 3 Z M11 3 L11 -8 L3 3 Z" fill={P.gold} /><rect x="-11" y="2" width="22" height="6" rx="2" fill={P.gold} />
                 </svg>
@@ -896,10 +951,10 @@ function Ended({ s, onTouch, pending, fresh }: Ctx) {
       <div className="hk-scroll" style={{ left: 408, top: 104, width: 384, height: 286 }} aria-label="Final standings">
         <div style={{ position: "relative", height: board.length * 62 }}>
           {board.map((p, i) => {
-            const lead = i === 0;
+            const lead = leadAt(i);
             return (
               <div key={p.name + i} className={`hk-abs hk-row hk-slide-r ${lead ? "hk-lead" : "hk-lift"}`} style={{ left: 4, top: i * 62, width: 372, height: 56, ...d(300 + i * 70) }}>
-                <T f="N4" x={20} y={35} w={30} align="center" color={lead ? P.gold : P.muted}>{String(i + 1)}</T>
+                <T f="N4" x={20} y={35} w={30} align="center" color={lead ? P.gold : P.muted}>{String(rankAt(i))}</T>
                 <Avatar name={p.name} cx={54} cy={28} r={17} />
                 <T f="B1" x={80} y={35} w={180} color={lead ? P.white : P.ink}>{p.name}</T>
                 {p.pnl ? (

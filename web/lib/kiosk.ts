@@ -13,13 +13,16 @@
 // v2 (optional, additive; old firmware ignores them, the new firmware copes when any is missing):
 //   v: 2, palette {canvas,card,well,rule,ink,ink2,muted,accent,accentDeep,accentLight,yes,no,hot,gold} (hex)
 //   game {id,title,league,sport,kind,mode}, score {home,away,homeShort,awayShort,homeColor,awayColor,
-//     homeScore,awayScore,clock,period,status}, caption {id,text}
+//     homeScore,awayScore,clock,period,status,swapped}, caption {id,text}
+//     score is in drawing order (home* left, away* right): for "Away at Home" games (US leagues) the real away
+//     team is in home* and swapped is true, so the box draws away first without a firmware change.
 //   cards [{id,title,sub,enabled,league,kind,date,color,gemini,home?,away?}]   select: EVERY game (tiles = first 4)
 //   roster [{name,cents,deposited}], pot (cents), calls [{id,label,enabled}]    lobby/result ("Call it!" moments)
 //   volume (cents), lockInMs, lockTotal (s), model (cents|null), gemini {cents,label,live}|null,
 //     trades [{name,side,cents,price}] newest first, moment, mode              market/locked
 //   winners [{name,cents,profit}], losers [{name,cents}], lockYes (cents)      result
-//   leaderboard [{name,cents,pnl}], scorecard {room,model,gemini,n,verdict}     ended
+//   leaderboard [{name,cents,pnl,rank,lead}], scorecard {room,model,gemini,n,verdict}     ended
+//     (rank shared on a tie, lead only for a sole leader; the firmware reads name, cents, pnl)
 import QRCode from "qrcode";
 import { allGames, getGame } from "./games";
 import { getTimeline } from "./replay/timeline";
@@ -32,6 +35,8 @@ import {
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
 import { boxName, boxSafe } from "./boxText";
+import { awayFirst } from "./matchup";
+import { losersOf, openValues, standings } from "./standings";
 import type { Game, Lobby } from "./types";
 
 // ---------------------------------------------------------------- "Call it!" moments
@@ -119,7 +124,8 @@ export interface KioskScreen {
   winners?: { name: string; cents: number; profit: number }[];
   losers?: { name: string; cents: number }[];
   lockYes?: number | null;
-  leaderboard?: { name: string; cents: number; pnl: number }[];
+  /** Best first (lib/standings.ts). rank is shared on a tie; lead is true only for a sole leader. */
+  leaderboard?: { name: string; cents: number; pnl: number; rank?: number; lead?: boolean }[];
   scorecard?: { room: number | null; model: number | null; gemini: number | null; n: number; verdict: string };
 }
 
@@ -159,12 +165,18 @@ export interface KioskScore {
   clock: string;
   period: string;
   status: string;
+  /** true: the teams are in drawing order for an "Away at Home" game, so `home*` holds the real away team. */
+  swapped?: boolean;
 }
 
-/** The shared Huddle design tokens (green + ivory). The firmware has the same defaults built in. */
+/**
+ * The shared Huddle design tokens (green + ivory, app/globals.css). The firmware has the same defaults built
+ * in and takes these as overrides, so a token changed here reaches the box without reflashing: muted is
+ * #616D64 (4.9:1 on canvas, 5.3:1 on card, 4.5:1 on well; the firmware's built-in #6C7A70 is 4.07:1).
+ */
 export const KIOSK_PALETTE = {
   canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ink: "#10261C", ink2: "#3E5247",
-  muted: "#6C7A70", accent: "#12A150", accentDeep: "#0B7A3E", accentLight: "#7CCB4E", yes: "#1468FF",
+  muted: "#616D64", accent: "#12A150", accentDeep: "#0B7A3E", accentLight: "#7CCB4E", yes: "#1468FF",
   no: "#FF6B00", hot: "#E5484D", gold: "#E8A33D",
 } as const;
 
@@ -241,20 +253,32 @@ function gameCard(g: Game): KioskCard {
   return {
     id: `game:${g.id}`, title: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled,
     league, kind: g.kind ?? "clip", date, color: hex(g.color), gemini: !!g.gemini?.event,
-    // US leagues write "Away at Home"; soccer writes "Home v Away".
-    ...(home && away ? { home, away, at: sport !== "soccer" } : {}),
+    // US leagues (MLS too) write "Away at Home"; soccer elsewhere writes "Home v Away" (lib/matchup.ts).
+    ...(home && away ? { home, away, at: awayFirst(sport, typeof x.league === "string" ? x.league : league) } : {}),
   };
 }
 
+/**
+ * The scorebug. The firmware (ui.cpp scorebug) draws the `home*` fields on the left and the `away*` fields on
+ * the right, so for "Away at Home" games (US leagues, lib/matchup.ts) the two teams are swapped here: the real
+ * away team goes in `home*` and is drawn first, like the game card and the phone and TV scorebugs. `swapped`
+ * says so (true = `home*` holds the real away team); the firmware does not read it.
+ */
 function scoreOf(l: Lobby): KioskScore | undefined {
   const run = l.replay;
   if (!run) return undefined;
   const st = run.state;
+  const game = getGame(l.gameId);
+  const left = { name: k(st.home.name), short: k(st.home.short), color: hex(st.home.color), score: st.score.home };
+  const right = { name: k(st.away.name), short: k(st.away.short), color: hex(st.away.color), score: st.score.away };
+  const swapped = awayFirst(st.sport ?? game?.sport, game?.league);
+  const [a, b] = swapped ? [right, left] : [left, right];
   return {
-    home: k(st.home.name), away: k(st.away.name), homeShort: k(st.home.short), awayShort: k(st.away.short),
-    homeColor: hex(st.home.color), awayColor: hex(st.away.color),
-    homeScore: st.score.home, awayScore: st.score.away, clock: k(st.clock.display),
+    home: a.name, away: b.name, homeShort: a.short, awayShort: b.short,
+    homeColor: a.color, awayColor: b.color,
+    homeScore: a.score, awayScore: b.score, clock: k(st.clock.display),
     period: periodLabel(st.sport, st.clock.period), status: String(st.status ?? ""),
+    swapped,
   };
 }
 
@@ -326,10 +350,7 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       .filter(([, c]) => c > 0)
       .sort((a, b) => b[1] - a[1])
       .map(([id, c]) => ({ name: kn(l.players[id]?.name ?? "?"), cents: c, profit: c - (m.positions[id]?.spent ?? 0) }));
-    const losers = Object.entries(m.positions)
-      .filter(([id, pos]) => pos.spent > 0 && !(m.payouts[id] > 0))
-      .sort((a, b) => b[1].spent - a[1].spent)
-      .map(([id, pos]) => ({ name: kn(l.players[id]?.name ?? "?"), cents: pos.spent }));
+    const losers = losersOf(m).map((x) => ({ name: kn(l.players[x.id]?.name ?? "?"), cents: x.cents }));
     return {
       ...base,
       winners, losers, volume: m.volume,
@@ -337,9 +358,9 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       calls: callsOf(l),
     };
   }
-  const board = [...players]
-    .map((p) => ({ name: kn(p.name), cents: p.balance + p.withdrawn, pnl: p.balance + p.withdrawn - p.deposited }))
-    .sort((a, b) => b.cents - a.cents);
+  const open = openValues(l);
+  const board = standings(players.map((p) => ({ ...p, open: open[p.id] ?? 0 })))
+    .map((p) => ({ name: kn(p.name), cents: p.worth, pnl: p.worth - p.deposited, rank: p.rank, lead: p.lead }));
   const sc = buildScorecard(l.scoreEntries ?? []);
   return { ...base, leaderboard: board, scorecard: { room: sc.room, model: sc.model, gemini: sc.gemini, n: sc.n, verdict: k(sc.verdict) } };
 }
@@ -457,12 +478,13 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
   }
 
   // ended
-  const board = [...players].sort((a, b) => b.balance + b.withdrawn - (a.balance + a.withdrawn));
+  const open = openValues(l);
+  const board = standings(players.map((p) => ({ ...p, open: open[p.id] ?? 0 })));
   return {
     screen: "ended", kiosk: kioskId, color: "gray", footer: footerL,
     title: "Session over",
     subtitle: "Thanks for playing. Cash out on your phone",
-    lines: board.slice(0, 6).map((p, i) => k(`${i + 1}.  ${kn(p.name)}  ${usd(p.balance + p.withdrawn)}`)),
+    lines: board.slice(0, 6).map((p) => k(`${p.rank}.  ${kn(p.name)}  ${usd(p.worth)}`)),
     buttons: [{ id: "new", label: "New game", style: "yes" }],
   };
 }
