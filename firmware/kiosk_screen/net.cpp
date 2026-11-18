@@ -56,7 +56,8 @@ static void request(HTTPClient &http, WiFiClient &client, bool post, const Strin
     code = http.GET();
   }
   // 200 = screen. 400/401 on a touch = screen plus an "error" message to show. Both are drawable.
-  if (code == 200 || code == 400 || code == 401) {
+  // Any other 4xx/5xx that carries a screen (a 404 for a stale game card, a 500) is drawable the same way.
+  if (code == 200 || (code >= 400 && code < 600 && post) || code == 401) {
     String body = http.getString();
     if (body.length() > 0 && body[0] == '{') publish(body, code);
     else setError("Server sent something that is not JSON", code);

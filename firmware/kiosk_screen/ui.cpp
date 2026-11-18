@@ -2142,11 +2142,14 @@ static void scene(const NetStatus &st) {
 }
 
 static uint32_t lastFrame = 0, lastAmbient = 0;
+static uint32_t badJsonSince = 0;  // first unparseable reply since the last good one (0 = none)
+static bool uiReady = false;       // screens and frame buffer allocated (uiBegin)
 
 bool uiFrame(const NetStatus &st) {
+  if (!uiReady) return false;
   NOW = millis();
   // connection state
-  bool stale = !haveScreen || st.lastOkMs == 0 || NOW - st.lastOkMs > STALE_MS;
+  bool stale = !haveScreen || st.lastOkMs == 0 || NOW - st.lastOkMs > STALE_MS || (badJsonSince && NOW - badJsonSince > STALE_MS);
   if (stale != lastStale) {
     fullDirty = true;
     staleSince = NOW;
@@ -2242,6 +2245,7 @@ static int hitAt(int x, int y) {
 
 const char *uiTouch(bool down, int16_t x, int16_t y) {
   static char out[40];
+  if (!uiReady) return nullptr;
   uint32_t now = millis();
   if (down && !T.down) {  // finger down
     T = {};
@@ -2322,12 +2326,16 @@ static bool sameLayout(const Screen &a, const Screen &b) {
 }
 
 void uiSetJson(const String &body) {
+  if (!uiReady) return;
   NOW = millis();
   DeserializationError err = deserializeJson(doc, body.c_str(), body.length());
   if (err) {
     Serial.printf("[ui] bad JSON: %s\n", err.c_str());
+    // net.cpp counted the reply as good; if only bad replies arrive, uiFrame shows "Reconnecting" after STALE_MS.
+    if (!badJsonSince) badJsonSince = NOW ? NOW : 1;
     return;
   }
+  badJsonSince = 0;
   JsonObjectConst j = doc.as<JsonObjectConst>();
   parseInto(*nxt, j);
   // palette from the site (optional)
@@ -2422,7 +2430,8 @@ void uiSetJson(const String &body) {
   memcpy(n.clock, c.clock, sizeof(keepClock));
   memcpy(n.period, c.period, sizeof(keepPeriod));
   memcpy(n.scoreStatus, c.scoreStatus, sizeof(keepStatus));
-  if (layoutChange || memcmp(&n, &c, sizeof(Screen)) != 0) fullDirty = true;
+  bool changed = layoutChange || memcmp(&n, &c, sizeof(Screen)) != 0;
+  if (changed) fullDirty = true;
   n.lockIn = keepIn;
   n.lockInMs = keepMs;
   n.homeScore = keepH;
@@ -2434,8 +2443,12 @@ void uiSetJson(const String &body) {
     strlcpy(toast, n.error, sizeof(toast));
     tToast = NOW;
   }
-  if (tapped[0]) fullDirty = true;
-  tapped[0] = 0;  // the server answered: the press is done
+  // The press is done when the screen changes or the server refuses it. A poll that was already in flight
+  // (same screen, no error) leaves the pending dots; they time out after 2.5 s otherwise.
+  if (tapped[0] && (changed || n.error[0])) {
+    fullDirty = true;
+    tapped[0] = 0;
+  }
   Screen *t = cur;
   cur = nxt;
   nxt = t;
@@ -2449,11 +2462,19 @@ void uiBegin() {
   defaultPalette();
   cur = (Screen *)ps_calloc(1, sizeof(Screen));
   nxt = (Screen *)ps_calloc(1, sizeof(Screen));
-  if (!cur || !nxt) {
+  if (!cur || !nxt) {  // free the one that worked, then try internal RAM for both
+    free(cur);
+    free(nxt);
     cur = (Screen *)calloc(1, sizeof(Screen));
     nxt = (Screen *)calloc(1, sizeof(Screen));
   }
-  dr::begin();
+  bool fbOk = dr::begin();
+  uiReady = cur && nxt && fbOk;
+  if (!uiReady) {
+    // Never draw through a null buffer (that crash-loops the board): stay dark and say why on the serial port.
+    Serial.printf("[ui] out of memory: screens %s, frame buffer %s. Enable PSRAM (OPI) in the board settings.\n",
+                  cur && nxt ? "ok" : "FAILED", fbOk ? "ok" : "FAILED");
+  }
 }
 
 void uiBootScreen(const char *line) {

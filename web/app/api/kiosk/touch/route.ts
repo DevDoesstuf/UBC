@@ -26,6 +26,9 @@ export async function POST(req: Request) {
     const error = e instanceof Error ? e.message : String(e);
     if (status === 500) console.error("[kiosk touch]", error);
     const screen = await kioskScreen(kiosk, baseUrl(req)).catch(() => null);
-    return json({ ...(screen ?? {}), error }, status);
+    // Every firmware draws a 400 (screen + error toast); a 404 (a stale game card after a deploy) or a 500
+    // would fail silently on the old builds. 401 stays 401 (the box shows the key problem).
+    const sent = status === 401 ? 401 : screen ? 400 : status;
+    return json({ ...(screen ?? {}), error: status === 500 ? "Something went wrong. Try again" : error }, sent);
   }
 }
