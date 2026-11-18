@@ -11,7 +11,7 @@ import { randomBytes } from "crypto";
 import { kvDel, kvGet, kvSet, withLock } from "./store";
 import { getGame, hasVideo, isReplay } from "./games";
 import * as lmsr from "./lmsr";
-import { captionLine, isBigTrade, type CaptionEvent, type Persona } from "./announcer";
+import { captionLine, isBigTrade, speechLine, toSpeech, type CaptionEvent, type Persona } from "./announcer";
 import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTrack, replaySnapshotAt, sourceOf, toEngineQuotes, type GeminiGameConfig, type GeminiSnapshot, type LabelTeam } from "./gemini";
 import { buildScorecard } from "./scorecard";
 import { losersOf, openValues, standings } from "./standings";
@@ -41,6 +41,10 @@ export const MAX_BUY = 5000;
 const MAX_CAPTIONS = 10;
 /** Pregame question of a replay game (the Gemini-comparable moneyline) trades this long before kickoff. */
 export const PREGAME_TRADE_MS = 20_000;
+/** The "last call" tick (sounds/lastcall.wav, about 3.5 s of ticks) fires this long before a market locks... */
+export const LAST_CALL_MS = 4500;
+/** ...on markets that trade at least this long (shorter windows are all announcement anyway). */
+export const LAST_CALL_MIN_WINDOW_MS = 10_000;
 
 const lobbyKey = (code: string) => `lobby:${code}`;
 const kioskKey = (id: string) => `kiosk:${id}`;
@@ -96,14 +100,18 @@ export function personaOf(l: Lobby): Persona {
 }
 
 function caption(l: Lobby, ev: CaptionEvent, now: number, seed = ""): void {
-  const text = captionLine(ev, personaOf(l), `${l.code}|${seed}|${(l.captions?.length ?? 0)}`);
+  const persona = personaOf(l);
+  const s = `${l.code}|${seed}|${(l.captions?.length ?? 0)}`;
+  const text = captionLine(ev, persona, s);
   if (!text) return;
+  // The spoken version (speaker and TV voice): shorter, numbers in words. Same variant as the caption.
+  const say = speechLine(ev, persona, s) || toSpeech(text);
   const caps = (l.captions ??= []);
   const last = caps.length ? caps[caps.length - 1].id : 0;
   // Captions share the event id counter, so the speaker's audio stream (events + captions) never repeats an id.
   const id = Math.max(last + 1, l.eventSeq + 1, now);
   l.eventSeq = id;
-  caps.push({ id, at: now, text, kind: ev.type });
+  caps.push({ id, at: now, text, kind: ev.type, say });
   if (caps.length > MAX_CAPTIONS) caps.splice(0, caps.length - MAX_CAPTIONS);
 }
 
@@ -239,7 +247,8 @@ function newMarket(l: Lobby, now: number, o: {
 }
 
 function announceOpen(l: Lobby, m: Market, now: number, moment?: MomentKind): void {
-  addEvent(l, "start", moment ? `${moment.call} ${m.text}` : `Trading open: ${m.text}`, "start");
+  // A host-called moment ("Call it!") gets the siren; every other market opens with the whoosh.
+  addEvent(l, "start", moment ? `${moment.call} ${m.text}` : `Trading open: ${m.text}`, moment ? "siren" : "start");
   caption(l, {
     type: "start", call: moment?.call ?? null, text: m.text, yesPct: yesPrice(m) * 100, modelPct: m.model == null ? null : m.model * 100,
     gemini: m.gemini ? { label: m.gemini.label, pct: m.gemini.prob * 100 } : null,
@@ -275,10 +284,38 @@ function replayHost(l: Lobby): ReplayHost {
     resolveParked: (outcome, reason, wall) => settleParked(l, outcome, reason, wall),
     open: (q, yesPrior, lockAtWall, resolveAtWall, wall) => openReplayMarket(l, q, yesPrior, lockAtWall, resolveAtWall, wall),
     gameEvent: (ev) => {
-      const big = ev.type === "goal" || ev.type === "final" || (ev.type === "play_result" && ev.data.touchdown === true) || ev.type === "drive_end" && ev.data.result === "fg";
-      if (big && ev.text) caption(l, { type: "play", text: ev.text }, Date.now(), `ev${ev.seq}`);
+      const kind = ev.type === "goal" ? "goal" : ev.type === "final" ? "final" : ev.type === "play_result" && ev.data.touchdown === true ? "touchdown" : ev.type === "drive_end" && ev.data.result === "fg" ? "fg" : null;
+      if (!kind) return;
+      const team = teamName(l, ev.team);
+      const score = scoreLine(l, ev.score);
+      // A score in a replay game: the crowd cheers (speaker and TV), then the announcer calls it.
+      const what = kind === "final" ? `Final${score ? `: ${score}` : ""}` : `${kind === "fg" ? "Field goal" : kind === "goal" ? "Goal" : "Touchdown"}${team ? `, ${team}` : ""}!`;
+      addEvent(l, "play", what, "cheer");
+      if (ev.text) caption(l, { type: "play", text: ev.text, kind, team, score }, Date.now(), `ev${ev.seq}`);
     },
   };
+}
+
+/** "Cowboys" (NFL: the nickname) or "Aston Villa" (soccer) for a team short code in a replay game. */
+function teamName(l: Lobby, short: string | undefined): string | null {
+  const st = l.replay?.state;
+  if (!short || !st) return null;
+  const [home, away] = labelTeams(l);
+  if (st.home.short === short || home?.code === short) return home?.name ?? null;
+  if (st.away.short === short || away?.code === short) return away?.name ?? null;
+  return null;
+}
+
+/** "Cowboys 24, 49ers 17" (leader first) from a replay event's score ({home, away} or [home, away]). */
+function scoreLine(l: Lobby, score: unknown): string | null {
+  if (!l.replay?.state || !score) return null;
+  const s = score as { home?: number; away?: number } | number[];
+  const h = Array.isArray(s) ? s[0] : s.home;
+  const a = Array.isArray(s) ? s[1] : s.away;
+  if (typeof h !== "number" || typeof a !== "number") return null;
+  const [home, away] = labelTeams(l);
+  if (!home || !away) return null;
+  return h >= a ? `${home.name} ${h}, ${away.name} ${a}` : `${away.name} ${a}, ${home.name} ${h}`;
 }
 
 function openReplayMarket(l: Lobby, q: PendingQ, yesPrior: number, lockAtWall: number, resolveAtWall: number | null, now: number, moment?: MomentKind): void {
@@ -356,6 +393,13 @@ function tick(l: Lobby, now: number, dryRun = false): boolean {
     if (l.replay?.pregame) parkPregame(l, now);
     return true;
   }
+  // Last call: once per market, a few seconds before it locks (the speaker ticks down to the lock clunk).
+  if (l.phase === "open" && !m.lastCall && now >= m.lockAt - LAST_CALL_MS && m.lockAt - m.openedAt >= LAST_CALL_MIN_WINDOW_MS) {
+    if (dryRun) return true;
+    m.lastCall = true;
+    addEvent(l, "lastcall", `Last call: ${Math.max(1, Math.ceil((m.lockAt - now) / 1000))} seconds!`, "lastcall");
+    changed = true;
+  }
   // Replay games keep playing: a host-called moment the plays cannot settle is refunded if nobody taps
   // the result within HOST_RESULT_MS of the lock, so the automatic questions start again.
   if (l.phase === "locked" && l.replay && m.resolveAt === null && m.source?.kind === "moment" && now >= m.lockAt + HOST_RESULT_MS) {
@@ -405,21 +449,22 @@ async function geminiFor(l: Lobby): Promise<GeminiSnapshot | null> {
 }
 
 /** Read a lobby, applying any timer transition that is due. Returns null when it does not exist. */
-export async function getLobby(code: string): Promise<Lobby | null> {
+export async function getLobby(code: string, opts: { gemini?: boolean } = {}): Promise<Lobby | null> {
   code = normCode(code);
   if (!code) return null;
   const l = await read(code);
   if (!l) return null;
-  const g = l.phase === "open" || l.phase === "lobby" ? await geminiFor(l) : null;
+  // gemini: false (the speaker's audio poll) never waits on a Gemini quote; the timers still run.
+  const g = opts.gemini !== false && (l.phase === "open" || l.phase === "lobby") ? await geminiFor(l) : null;
   const stale = !!g && (!l.gemini || g.at !== l.gemini.at || g.live !== l.gemini.live);
   if (stale || tick(l, Date.now(), true)) return mutate(code, () => {}, g);
   return l;
 }
 
-export async function getKioskLobby(kioskId: string): Promise<Lobby | null> {
+export async function getKioskLobby(kioskId: string, opts: { gemini?: boolean } = {}): Promise<Lobby | null> {
   const code = await kvGet(kioskKey(kioskId));
   if (!code) return null;
-  const l = await getLobby(code);
+  const l = await getLobby(code, opts);
   if (!l) await kvDel(kioskKey(kioskId));
   return l;
 }
@@ -499,7 +544,7 @@ export function creditDeposit(l: Lobby, playerId: string, cents: number, source:
   p.balance += cents;
   p.deposited += cents;
   l.deposits[ref] = { playerId, cents, at: now, source, ref };
-  addEvent(l, "deposit", `${p.name} added ${usd(cents)}`);
+  addEvent(l, "deposit", `${p.name} added ${usd(cents)}`, "coin");
   return true;
 }
 
@@ -660,7 +705,8 @@ export function resolveMarket(l: Lobby, outcome: Side, now: number): void {
   if (m.source?.kind !== "moment") l.qIndex = m.qIndex + 1;
   const winners = winnersOf(l, m, outcome);
   const head = outcome === "yes" ? "YES!" : "NO!";
-  addEvent(l, "result", winners.length ? `${head} ${winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ")}` : `${head} No winners this time.`, "win");
+  // Somebody won: fanfare. Nobody did: the room goes "aww".
+  addEvent(l, "result", winners.length ? `${head} ${winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ")}` : `${head} No winners this time.`, winners.length ? "win" : "lose");
   const atLock = m.priceAtLock ?? yesPrice(m);
   caption(l, { type: "result", outcome, winners, atLockPct: (outcome === "yes" ? atLock : 1 - atLock) * 100 }, now, m.questionId);
   if (l.replay && l.replay.startedAt === null && !l.replay.parked && m.source?.kind === "replay") {
@@ -761,7 +807,7 @@ function settleParked(l: Lobby, outcome: Side | null, reason: string | null, now
   recordScore(l, m, outcome);
   l.results.push({ qIndex: m.qIndex, text: m.text, outcome, volume: m.volume, payouts: { ...m.payouts } });
   const winners = winnersOf(l, m, outcome);
-  addEvent(l, "result", `Pregame call: ${outcome === "yes" ? "YES" : "NO"}! ${winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ") || "No winners."}`, "win");
+  addEvent(l, "result", `Pregame call: ${outcome === "yes" ? "YES" : "NO"}! ${winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ") || "No winners."}`, winners.length ? "win" : "lose");
   const atLock = m.priceAtLock ?? yesPrice(m);
   caption(l, { type: "result", outcome, winners, atLockPct: (outcome === "yes" ? atLock : 1 - atLock) * 100 }, now, `parked-${m.questionId}`);
 }
@@ -770,7 +816,7 @@ export function endSession(l: Lobby, now: number = Date.now()): void {
   if (l.phase === "open" || l.phase === "locked") throw new ApiError(400, "Resolve the current question first");
   if (l.replay?.parkedMarket) settleParked(l, null, "the session ended before the final whistle", now);
   l.phase = "ended";
-  addEvent(l, "end", "Session over. Cash out on your phone.", "tap");
+  addEvent(l, "end", "Session over. Cash out on your phone.", "coin");
   // Same order as every board (box, TV, phone): lib/standings.ts. The caption then says how far up the leader
   // is (cents = profit), so it never names a different winner than the podium, and names nobody on a tie.
   const board = standings(l.order.map((id) => l.players[id]));
