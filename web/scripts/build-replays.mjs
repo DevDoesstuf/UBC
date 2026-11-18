@@ -589,12 +589,14 @@ async function geminiFor(league, kickoffIso, teams) {
       use = use.filter((x) => x.p > 0.06 && x.p < 0.94).sort((a, b) => Math.abs(a.p - 0.5) - Math.abs(b.p - 0.5)).slice(0, 5);
       if (use[0]) tracked.push({ ev: k.ev, c: use[0].c });
     } else {
-      for (const x of contracts) if ((candleOf.get(x.c.instrumentSymbol) ?? []).length) tracked.push({ ev: k.ev, c: x.c });
+      // Every contract that ever traded is tracked; ones with no trade before kickoff are listed without a price.
+      use = contracts.filter((x) => (candleOf.get(x.c.instrumentSymbol) ?? []).length);
+      for (const x of use) tracked.push({ ev: k.ev, c: x.c });
     }
     if (!use.length) continue;
     snapEvents.push({
       ticker: k.ev.ticker, title: k.ev.title, ...(k.ev.slug ? { slug: k.ev.slug } : {}),
-      contracts: use.map((x) => ({ ticker: x.c.ticker, label: x.c.label, lastTradePrice: x.p.toFixed(3) })),
+      contracts: use.map((x) => ({ ticker: x.c.ticker, label: x.c.label, ...(x.p !== null ? { lastTradePrice: x.p.toFixed(3) } : {}) })),
     });
   }
   const order = (t) => (/-M$/.test(t) ? 0 : /-T$|-REGT$/.test(t) ? 1 : 2);
