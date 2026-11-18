@@ -1,0 +1,312 @@
+/*
+ * The box screen preview (/kiosk?id=1): 800 x 480, mirrors firmware/kiosk_screen/ui.cpp.
+ * Kickoff motion in green + ivory. Fail-safe: every element's resting style is its final state; keyframes only
+ * describe the journey (`from` frames) and are time-based, so a background tab or reduced motion shows content.
+ */
+@font-face {
+  font-family: "HK Bricolage";
+  src: url("/kiosk/fonts/bricolage-grotesque-latin.woff2") format("woff2");
+  font-weight: 200 800;
+  font-stretch: 75% 100%;
+  font-display: block;
+}
+@font-face {
+  font-family: "HK Archivo";
+  src: url("/kiosk/fonts/archivo-latin-wdth.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: block;
+}
+@font-face {
+  font-family: "HK Atkinson";
+  src: url("/kiosk/fonts/atkinson-hyperlegible-next-latin.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: block;
+}
+
+.hk-page {
+  position: fixed;
+  inset: 0;
+  background: #10261c;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.hk {
+  --canvas: #f6f3ea;
+  --card: #fffdf8;
+  --well: #eeeae0;
+  --rule: #e2ddd0;
+  --ink: #10261c;
+  --ink-2: #3e5247;
+  --muted: #6c7a70;
+  --accent: #12a150;
+  --deep: #0b7a3e;
+  --lime: #7ccb4e;
+  --yes: #1468ff;
+  --no: #ff6b00;
+  --hot: #e5484d;
+  --gold: #e8a33d;
+  --grad: linear-gradient(90deg, #0b7a3e, #12a150 50%, #7ccb4e);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snap: cubic-bezier(0.85, 0, 0.15, 1);
+  --spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  width: 800px;
+  height: 480px;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: "HK Atkinson", system-ui, sans-serif;
+  color-scheme: light;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transform-origin: center;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  .hk {
+    --spring: linear(0, 0.034, 0.099, 0.185, 0.281, 0.38, 0.477, 0.568, 0.65, 0.723, 0.795, 0.847, 0.891, 0.926, 0.954, 0.975, 0.991, 1.003, 1.011, 1.016, 1.019, 1.02, 1.019, 1.016, 1.012, 1.008, 1.005, 1.003, 1.001, 1);
+    --bounce: linear(0, 0.058, 0.192, 0.351, 0.531, 0.688, 0.834, 0.942, 1.022, 1.078, 1.107, 1.118, 1.114, 1.1, 1.082, 1.062, 1.042, 1.025, 1.01, 1, 0.992, 0.988, 0.986, 0.986, 0.988, 0.99, 0.994, 0.997, 1, 1.001, 1.002, 1.001, 1);
+  }
+}
+.hk-fill { position: absolute; inset: 0; }
+.hk-abs { position: absolute; }
+.hk-t { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hk-head { font-family: "HK Bricolage", system-ui, sans-serif; }
+.hk-body { font-family: "HK Atkinson", system-ui, sans-serif; }
+.hk-num { font-family: "HK Archivo", "Arial Narrow", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.hk-w400 { font-weight: 400; }
+.hk-w600 { font-weight: 600; }
+.hk-w700 { font-weight: 700; }
+.hk-w800 { font-weight: 800; }
+.hk-c75 { font-stretch: 75%; }
+.hk-c82 { font-stretch: 82%; }
+.hk-c90 { font-stretch: 90%; }
+.hk-clamp2 { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* surfaces */
+.hk-lift { box-shadow: 0 1px 2px rgba(16, 38, 28, 0.06), 0 4px 10px -2px rgba(16, 38, 28, 0.12); }
+.hk-avatar { border-radius: 999px; color: #fff; display: grid; place-items: center; line-height: 1; }
+.hk-dot { width: 10px; height: 10px; border-radius: 999px; }
+.hk-fresh::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: inherit; animation: hk-ping 1.6s var(--ease-out) infinite; }
+.hk-dotgold { width: 12px; height: 12px; border-radius: 99px; background: var(--gold); }
+.hk-pill { position: absolute; height: 26px; padding: 0 12px; border-radius: 13px; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; white-space: nowrap; }
+.hk-live { display: inline-block; width: 7px; height: 7px; border-radius: 9px; background: var(--hot); margin-right: 2px; animation: hk-breathe 1.6s ease-in-out infinite; }
+
+/* buttons: squish on press, spring back on release */
+.hk-btn {
+  position: absolute;
+  border: 0;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(16, 38, 28, 0.08), 0 4px 10px -2px rgba(16, 38, 28, 0.16);
+  transition: transform 480ms var(--bounce), box-shadow 160ms var(--ease-out), filter 160ms var(--ease-out);
+}
+.hk-btn .hk-label { overflow: hidden; text-overflow: ellipsis; }
+/* Touch: every button takes at least a 64 px tall finger, even when it draws smaller (like the firmware). */
+.hk-btn::before { content: ""; position: absolute; left: 0; right: 0; top: min(0px, calc(50% - 32px)); bottom: min(0px, calc(50% - 32px)); }
+.hk-btn:active:not(:disabled) { transform: scale(0.96); box-shadow: none; filter: brightness(0.94); transition-duration: 90ms; transition-timing-function: var(--ease-out); }
+.hk-btn:focus-visible, .hk-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.hk-btn.hk-plain { box-shadow: inset 0 0 0 1px var(--rule), 0 1px 2px rgba(16, 38, 28, 0.06), 0 4px 10px -2px rgba(16, 38, 28, 0.12); }
+.hk-btn.hk-call { box-shadow: inset 0 0 0 2px rgba(18, 161, 80, 0.45); }
+.hk-btn.hk-off { box-shadow: none; cursor: default; }
+.hk-pending { position: absolute; right: 14px; bottom: 8px; display: flex; gap: 4px; }
+.hk-pending i { width: 4px; height: 4px; border-radius: 4px; background: currentColor; animation: hk-breathe 900ms ease-in-out infinite; }
+.hk-pending i:nth-child(2) { animation-delay: 160ms; }
+.hk-pending i:nth-child(3) { animation-delay: 320ms; }
+
+/* game cards */
+.hk-card {
+  position: absolute;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  border-radius: 22px;
+  background: var(--card);
+  overflow: hidden;
+  cursor: pointer;
+  color: var(--ink);
+  transition: transform 480ms var(--bounce), box-shadow 160ms var(--ease-out);
+}
+.hk-card:active:not([aria-disabled="true"]) { transform: scale(0.975); box-shadow: inset 0 0 0 3px var(--accent); transition-duration: 90ms; }
+.hk-card.hk-off { background: var(--well); cursor: default; }
+.hk-card.hk-off .hk-ribbon { opacity: 0.5; }
+.hk-ribbon { position: absolute; left: 0; right: 0; top: 0; height: 7px; }
+.hk-swatch { position: absolute; width: 8px; height: 28px; border-radius: 4px; }
+
+/* scrolling lists: native momentum scrolling, thin bar */
+.hk-scroll { position: absolute; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(16, 38, 28, 0.3) transparent; }
+
+/* lobby */
+.hk-join { overflow: hidden; color: #fff; }
+.hk-code { display: flex; justify-content: center; gap: 8px; }
+.hk-code span { width: 50px; height: 62px; border-radius: 14px; background: #fff; color: var(--ink); font-size: 44px; display: grid; place-items: center; line-height: 1; }
+.hk-row { border-radius: 16px; background: var(--card); }
+.hk-row.hk-lead { background: var(--ink); }
+.hk-empty { border: 2px dashed #cfc8b8; border-radius: 16px; }
+.hk-empty .hk-breathe { position: absolute; left: 17px; top: 27px; width: 10px; height: 10px; border-radius: 9px; background: var(--accent); }
+
+/* market */
+.hk-stage { border-radius: 30px; background: var(--card); overflow: hidden; }
+.hk-badge { height: 38px; padding: 0 16px 0 14px; border-radius: 19px; display: inline-flex; align-items: center; gap: 8px; color: #fff; font-size: 20px; }
+.hk-traded { font-size: 18px; color: var(--ink-2); white-space: nowrap; }
+.hk-traded .hk-num { font-size: 21px; color: var(--ink); }
+.hk-chip { padding: 0 14px; border-radius: 19px; background: var(--card); display: inline-flex; align-items: center; gap: 6px; }
+.hk-scorebug { background: var(--card); display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; white-space: nowrap; }
+.hk-scorebug b { font-size: 20px; }
+.hk-scorebug .hk-bar { width: 6px; height: 22px; border-radius: 3px; }
+.hk-scorebug .hk-score { min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--ink); color: #fff; font-size: 21px; display: grid; place-items: center; }
+.hk-scorebug .hk-clock { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; padding: 0 4px; }
+.hk-scorebug .hk-clock .hk-num { font-size: 21px; }
+.hk-scorebug small { font-size: 15px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px; }
+.hk-tile { position: absolute; inset: 0; border-radius: 22px; overflow: hidden; }
+.hk-tile::after { content: ""; position: absolute; left: 10px; right: 10px; top: 2px; height: 2px; background: rgba(255, 255, 255, 0.18); border-radius: 2px; }
+.hk-veil { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.45); border-radius: inherit; animation: hk-fade 420ms var(--ease-out) both; }
+.hk-split { position: absolute; left: 0; right: 0; height: 16px; border-radius: 8px; background: var(--no); overflow: hidden; }
+.hk-split::after { content: ""; position: absolute; left: 4px; right: 4px; top: 1px; height: 5px; background: rgba(255, 255, 255, 0.2); }
+.hk-split-yes { position: absolute; left: 0; top: 0; bottom: 0; background: var(--yes); border-right: 4px solid var(--card); transition: width 700ms var(--spring); }
+.hk-marker { transition: left 700ms var(--spring); }
+.hk-pros { font-size: 18px; color: var(--ink-2); white-space: nowrap; display: flex; align-items: baseline; gap: 4px; }
+.hk-pros b { font-size: 21px; color: var(--ink); margin-right: 18px; }
+.hk-pros small { font-size: 15px; color: var(--muted); }
+.hk-tri { display: inline-block; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 10px solid var(--ink); position: relative; top: -2px; }
+.hk-tri.hk-hollow::after { content: ""; position: absolute; left: -3px; top: -8.5px; border-left: 3px solid transparent; border-right: 3px solid transparent; border-top: 5px solid var(--card); }
+.hk-trade { display: flex; align-items: center; gap: 7px; font-size: 15px; white-space: nowrap; }
+.hk-trade .hk-name { max-width: 70px; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.hk-trade b { margin-left: auto; font-size: 21px; color: var(--ink); }
+.hk-titlerow { display: flex; align-items: baseline; gap: 16px; white-space: nowrap; overflow: hidden; }
+.hk-titlerow span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hk-ribbon + .hk-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -180px;
+  width: 180px;
+  background: linear-gradient(90deg, rgba(11, 122, 62, 0), rgba(18, 161, 80, 0.5) 50%, rgba(124, 203, 78, 0));
+  opacity: 0;
+  animation: hk-sweep 700ms var(--ease-out) 60ms;
+}
+.hk-flashout { position: absolute; inset: 0; background: #e3f2e7; opacity: 0; animation: hk-flashout 520ms var(--ease-out); pointer-events: none; }
+.hk-urgent-edge { box-shadow: inset 0 0 0 3px var(--hot); animation: hk-edge 1s var(--ease-out) infinite; }
+
+/* lock ring */
+.hk-ring-dots { position: absolute; inset: 0; overflow: visible; }
+.hk-ring-dot { transform-box: fill-box; transform-origin: center; transition: fill 240ms var(--ease-out), transform 420ms var(--bounce); }
+.hk-ring-dot[data-on="false"] { transform: scale(0.72); }
+.hk-urgent .hk-ring-dots { animation: hk-throb 1s var(--ease-out) infinite; transform-origin: center; }
+.hk-glow { position: absolute; border-radius: 999px; background: rgba(18, 161, 80, 0.07); }
+.hk-urgent .hk-glow { background: rgba(229, 72, 77, 0.16); animation: hk-glow 1s var(--ease-out) infinite; }
+.hk-beat { animation: hk-beat 420ms var(--ease-out); }
+.hk-snap { animation: hk-snap 420ms var(--ease-snap) both; }
+
+/* sparkline */
+.hk-draw { stroke-dasharray: 1; stroke-dashoffset: 0; animation: hk-draw 700ms var(--ease-out); }
+.hk-ping { transform-box: fill-box; transform-origin: center; animation: hk-ping 1.6s var(--ease-out) infinite; }
+
+/* digits */
+.hk-roll { display: inline-flex; overflow: visible; }
+.hk-digit { position: relative; display: inline-block; clip-path: inset(0 -0.15em); }
+.hk-sizer { visibility: hidden; display: block; }
+.hk-strip { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; transition: transform var(--roll, 560ms) var(--ease-out); }
+.hk-strip > span { display: block; text-align: center; }
+.hk-flash { animation: hk-flash 1.1s ease-in; }
+.hk-arrow { animation: hk-pop 820ms var(--bounce) both; }
+.hk-kick { animation: hk-kick 420ms var(--ease-out); }
+
+/* kinetic type */
+.hk-kinetic { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; }
+.hk-wm { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.06em 0.04em 0.16em; margin: -0.06em -0.04em -0.16em; }
+.hk-w { display: inline-block; animation: hk-word 520ms var(--bounce) both; animation-delay: var(--d, 0ms); }
+
+/* result */
+.hk-flood { position: absolute; inset: 0; transform: scaleX(1); animation: hk-flood 650ms var(--spring) 150ms both; }
+.hk-stamp { animation: hk-stamp 820ms var(--bounce) both; animation-delay: var(--d, 0ms); }
+.hk-shine { overflow: hidden; }
+.hk-shine::after { content: ""; position: absolute; top: 2px; bottom: 4px; left: 40px; width: 24px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent); transform: translateX(400px); animation: hk-shine 700ms var(--ease-out) both; animation-delay: var(--d, 0ms); pointer-events: none; }
+.hk-burst { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.hk-burst i { position: absolute; width: 7px; height: 10px; border-radius: 2px; opacity: 0; animation: hk-confetti 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) both; animation-delay: var(--d, 0ms); }
+
+/* ended */
+.hk-podium { border-radius: 18px 18px 0 0; transform-origin: bottom; animation: hk-grow 640ms var(--spring) both; animation-delay: var(--d, 0ms); }
+
+/* toast + reconnecting */
+.hk-toast {
+  position: absolute;
+  left: 50%;
+  top: 404px;
+  height: 52px;
+  padding: 0 24px 0 16px;
+  border-radius: 26px;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fff;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 2px var(--hot), 0 8px 20px -6px rgba(16, 38, 28, 0.4);
+  animation: hk-toast 360ms var(--bounce) both;
+}
+.hk-toast i { width: 20px; height: 20px; border-radius: 20px; background: var(--hot); display: grid; place-items: center; font-style: normal; font-size: 14px; }
+.hk-reconnect { position: absolute; left: 50%; top: 8px; height: 44px; padding: 0 20px 0 44px; transform: translateX(-50%); border-radius: 22px; background: var(--ink); color: #fff; font-size: 20px; display: flex; align-items: center; white-space: nowrap; }
+
+/* entrances: from-frames only */
+.hk-rise { animation: hk-rise 480ms var(--spring) both; animation-delay: var(--d, 0ms); }
+.hk-fade { animation: hk-fade 240ms var(--ease-out) both; animation-delay: var(--d, 0ms); }
+.hk-drop { animation: hk-drop 480ms var(--spring) both; animation-delay: var(--d, 0ms); }
+.hk-pop { animation: hk-pop 820ms var(--bounce) both; animation-delay: var(--d, 0ms); }
+.hk-zoom { animation: hk-zoom 480ms var(--spring) both; animation-delay: var(--d, 0ms); }
+.hk-slide-r { animation: hk-slide-r 520ms var(--spring) both; animation-delay: var(--d, 0ms); }
+.hk-slide-l { animation: hk-slide-l 480ms var(--spring) both; animation-delay: var(--d, 0ms); }
+.hk-breathe { animation: hk-breathe 1.6s ease-in-out infinite; }
+.hk-spin { animation: hk-spin 1.1s steps(12) infinite; }
+
+@keyframes hk-rise { from { transform: translateY(18px); opacity: 0; } }
+@keyframes hk-fade { from { opacity: 0; } }
+@keyframes hk-drop { from { transform: translateY(-18px); opacity: 0; } }
+@keyframes hk-pop { from { transform: scale(0.6); opacity: 0; } 40% { opacity: 1; } }
+@keyframes hk-zoom { from { transform: scale(0.965); opacity: 0; } }
+@keyframes hk-slide-r { from { transform: translateX(48px); opacity: 0; } }
+@keyframes hk-slide-l { from { transform: translateX(-40px); opacity: 0; } }
+@keyframes hk-word { from { transform: translateY(105%) rotate(7deg); opacity: 0; } }
+@keyframes hk-stamp { 0% { transform: translateY(-34px); opacity: 0; } 45% { opacity: 1; } }
+@keyframes hk-flood { from { transform: scaleX(var(--from, 0.5)); } }
+@keyframes hk-grow { from { transform: scaleY(0); } }
+@keyframes hk-sweep { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(956px); opacity: 0.4; } }
+@keyframes hk-flashout { from { opacity: 0.7; } to { opacity: 0; } }
+@keyframes hk-edge { 0% { box-shadow: inset 0 0 0 3px rgba(229, 72, 77, 0.9); } 70%, 100% { box-shadow: inset 0 0 0 3px rgba(229, 72, 77, 0.25); } }
+@keyframes hk-throb { 0% { transform: scale(1.06); } 40% { transform: scale(1); } }
+@keyframes hk-glow { 0% { transform: scale(1.12); opacity: 1; } 60% { transform: scale(0.96); opacity: 0.55; } }
+@keyframes hk-beat { from { transform: scale(1.32); } }
+@keyframes hk-snap { 0% { transform: scale(1.9) rotate(-12deg); opacity: 0; } 55% { transform: scale(0.92) rotate(2deg); opacity: 1; } 80% { transform: scale(1.04); } }
+@keyframes hk-draw { from { stroke-dashoffset: 0.25; } }
+@keyframes hk-ping { 0% { transform: scale(1); opacity: 0.55; } 80%, 100% { transform: scale(3.2); opacity: 0; } }
+@keyframes hk-flash { from { color: var(--flash); } }
+@keyframes hk-kick { from { transform: scale(1.035); } }
+@keyframes hk-shine { from { transform: translateX(-40px); } }
+@keyframes hk-confetti {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translate(var(--dx), calc(var(--dy) + 520px)) rotate(var(--rot)); opacity: 0; }
+}
+@keyframes hk-toast { from { transform: translate(-50%, 30px); opacity: 0; } }
+@keyframes hk-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes hk-spin { to { transform: rotate(360deg); } }
+
+/* The site's global button styles stop at the box. */
+:where(.hk) button { min-height: 0; border: 0; touch-action: manipulation; }
+:where(.hk) button:disabled { opacity: 1; cursor: default; }
+.hk .hk-card, .hk .hk-card:hover { background: var(--card); }
+.hk .hk-card.hk-off, .hk .hk-card.hk-off:hover { background: var(--well); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hk *, .hk *::before, .hk *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
+  .hk-burst, .hk-sweep, .hk-shine::after, .hk-ping { display: none; }
+}

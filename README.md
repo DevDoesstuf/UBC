@@ -210,6 +210,8 @@ All JSON. Phones identify themselves with the `x-player-token` header they get f
 
 Strings sent to the kiosk are limited to Latin-1, because the firmware fonts are Latin-1.
 
+**v2 fields (optional, additive).** The box renderer also reads `palette`, `game`, `score` (scorebug), `cards` (every game for the scrolling picker; `tiles` stays the first 4), `roster` + `pot` + `calls` (lobby, "Call it!" moments), `volume`, `lockInMs`, `lockTotal`, `model`, `gemini`, `trades` (market), `winners`, `losers`, `lockYes` (result), `leaderboard`, `scorecard` (ended). The full list is at the top of `web/lib/kiosk.ts`; `web/test/kiosk.test.mts` checks both the v1 and v2 shapes.
+
 ### Phone / watch API
 
 | Method + path | Body | Returns |
@@ -273,7 +275,21 @@ Peer-to-peer betting with real money is regulated as gambling in most places, an
 
 **Hardware:** Waveshare ESP32-S3-Touch-LCD-4.3 (Amazon B0CNCRZWVB), 800x480 IPS RGB panel (ST7262), GT911 5-point capacitive touch on I2C, CH422G IO expander (backlight, resets), 8 MB PSRAM. The **4.3B** variant has the same LCD/touch pins and works with the same code.
 
-The firmware draws the kiosk JSON and posts taps. The layout matches `web/components/KioskView.tsx` pixel for pixel, so the `/kiosk` page is the preview of what the ESP32 shows. Network runs on its own task (core 0), so touches stay responsive.
+The firmware draws the kiosk JSON and posts taps. The layout matches `web/components/KioskView.tsx`, so the `/kiosk` page is the preview of what the ESP32 shows. Network runs on its own task (core 0), so touches stay responsive.
+
+### The box renderer (Kickoff design, green + ivory)
+
+`ui.cpp` + `ui_draw.cpp` draw the original Huddle "Kickoff" box UI: a scrollable game picker (league, teams and colours, date, Gemini odds badge), the lobby with QR, code tiles, players sliding in and a "Call it!" grid, the market takeover (gradient sweep, kinetic question, rolling YES/NO prices with payouts, gliding split bar with Model/Gemini notches, stepped price line, recent trades, scorebug on replay games) with the LED-ring countdown that drains pixel by pixel and turns hot in the last 5 s, the lock snap, the result flood in the winner's colour with confetti and "Called it / Cooked" lists, and the podium with scrolling standings.
+
+- **Flicker-free and light.** It draws straight into the 768 KB PSRAM canvas that `board.cpp` already allocates, with anti-aliased shapes and 4-bit anti-aliased fonts (`ui_fonts.h`, cut from the same Bricolage Grotesque / Archivo / Atkinson Hyperlegible files the web uses by `firmware/tools/mkfonts.py`). Each frame it works out which rectangles changed and copies only those rows to the panel. A still screen draws nothing (ambient motion such as the live dot runs at 10 fps); animations run at about 30-40 fps; a full redraw happens only when the screen changes.
+- **Touch.** Tap = finger down and up on the same target (pressed state on touch-down, action on release); dragging a list scrolls it with momentum and a rubber band. Every target is at least 64 px tall. Taps are queued to the network task exactly as before.
+- **Wi-Fi loss.** The last screen stays up with a "Reconnecting" pill; after 15 s without the site it switches to the connection page (Wi-Fi, IP, last error), and recovers by itself.
+- **Data.** Everything still streams from the site (`GET /api/kiosk/state`). The v2 fields (see the top of `web/lib/kiosk.ts`) are optional: missing ones fall back to the v1 fields, so an older site still draws.
+- **Unchanged:** `board.cpp`, `net.cpp`, pins, panel timings, touch flags, libraries, board settings and `secrets.h`.
+
+**Upload (one step, Dev):** pull, open `firmware/kiosk_screen/kiosk_screen.ino` in Arduino IDE with the same Tools settings as before (ESP32S3 Dev Module, OPI PSRAM, 8 MB or 16 MB flash), and press Upload. The first compile after pulling takes a few minutes (the fonts are a 1.2 MB header). Or with arduino-cli: `arduino-cli compile --upload -p <port> --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB" firmware/kiosk_screen`.
+
+**Check it without the board:** `firmware/tools/sim/run.sh <out-dir> http://localhost:3000 1 < script.txt` builds the same `ui.cpp` for the desktop, drives the kiosk API (taps, phones joining, finger drags) and saves PNGs of exactly what the box draws (script commands at the top of `firmware/tools/sim/main.cpp`).
 
 ### What the kiosk needs physically
 
