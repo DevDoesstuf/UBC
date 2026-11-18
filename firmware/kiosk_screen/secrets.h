@@ -8,7 +8,7 @@
 
 // CHANGE ME: the laptop's IPv4 address on the hotspot (run ipconfig while connected to the hotspot),
 // with the laptop running npm run lan in the web folder. Later: "https://<your-site>.vercel.app".
-#define SERVER_URL "http://172.20.10.8:3000/"
+#define SERVER_URL "https://huddle-live-eight.vercel.app"
 
 #define KIOSK_ID "1"
 #define KIOSK_KEY ""
