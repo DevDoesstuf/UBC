@@ -32,21 +32,23 @@
   place-items: center;
   overflow: hidden;
 }
+/* Colours are the shared --k-* tokens (app/globals.css), the same values the firmware has built in. The fonts
+   above are the same files as app/fonts, under fixed family names so text can be measured like the firmware. */
 .hk {
-  --canvas: #f6f3ea;
-  --card: #fffdf8;
-  --well: #eeeae0;
-  --rule: #e2ddd0;
-  --ink: #10261c;
-  --ink-2: #3e5247;
-  --muted: #6c7a70;
-  --accent: #12a150;
-  --deep: #0b7a3e;
-  --lime: #7ccb4e;
-  --yes: #1468ff;
-  --no: #ff6b00;
-  --hot: #e5484d;
-  --gold: #e8a33d;
+  --canvas: var(--k-canvas);
+  --card: var(--k-card);
+  --well: var(--k-well);
+  --rule: var(--k-rule);
+  --ink: var(--k-ink);
+  --ink-2: var(--k-ink-2);
+  --muted: var(--k-ink-muted);
+  --accent: var(--k-green);
+  --deep: var(--k-green-deep);
+  --lime: var(--k-lime);
+  --yes: var(--k-yes);
+  --no: var(--k-no);
+  --hot: var(--k-hot);
+  --gold: var(--k-gold);
   --grad: linear-gradient(90deg, #0b7a3e, #12a150 50%, #7ccb4e);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-snap: cubic-bezier(0.85, 0, 0.15, 1);
