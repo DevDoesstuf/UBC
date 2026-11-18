@@ -25,7 +25,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
 
     if (MONEY_MODE === "solana") {
       const onlyRef = typeof body.reference === "string" && body.reference ? body.reference : undefined;
-      const r = await syncSolanaDeposits(l.code, token, { onlyRef });
+      // Stamp the check first, so the 2.5 s throttle also holds while the RPC is failing (no RPC storm).
+      await mutate(l.code, (lobby, now) => {
+        requirePlayer(lobby, token).lastSyncAt = now;
+      });
+      let r: Awaited<ReturnType<typeof syncSolanaDeposits>>;
+      try {
+        r = await syncSolanaDeposits(l.code, token, { onlyRef });
+      } catch (e) {
+        console.error("[deposit/sync]", e instanceof Error ? e.message : e);
+        throw new ApiError(502, "Can't reach Solana right now. Any payment you made is safe; this checks again by itself.");
+      }
       const refunded = await settlePendingCashouts(l.code, p.id).catch(() => 0);
       return json({
         ok: true,

@@ -30,7 +30,9 @@ export async function GET() {
       active: MONEY_MODE === "solana",
       ready: MONEY_MODE === "solana" && !!readiness?.ready,
       /** "devnet" (default), or what the RPC really is once checked ("localnet" for solana-test-validator). */
-      network: (readiness && "cluster" in readiness && readiness.cluster) || "devnet",
+      network:
+        (readiness && "cluster" in readiness && readiness.cluster) ||
+        (/mainnet/i.test(String(SOLANA_RPC_URL ?? "")) ? "mainnet (refused)" : /127\.0\.0\.1|localhost/.test(String(SOLANA_RPC_URL ?? "")) ? "localnet" : "devnet"),
       rpc: redactRpc(SOLANA_RPC_URL),
       problems: REQUESTED_MONEY_MODE === "solana" ? [...new Set([...solanaProblems(), ...(readiness?.problems ?? [])])] : [],
       nextSteps: readiness?.nextSteps ?? (REQUESTED_MONEY_MODE === "solana" ? ["Run `node scripts/solana-setup.mjs` in web/"] : []),

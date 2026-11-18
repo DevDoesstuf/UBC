@@ -477,6 +477,10 @@ export async function discoverMarkets(opts: { leagues?: string[]; fetch?: FetchL
   const key = `gemini:discover:${[...leagues].sort().join(",")}`;
   const lastKey = `${key}:last`;
   if (process.env.GEMINI_DISABLED === "1") return { asOf: new Date(now).toISOString(), live: false, source: "unavailable", note: "Gemini is turned off (GEMINI_DISABLED=1).", leagues, games: [] };
+  // Every asked-for league was unknown: say so (Gemini was never called, so it is not "unreachable").
+  if (!leagues.length) {
+    return { asOf: new Date(now).toISOString(), live: false, source: "unavailable", note: `No supported league asked for. Try ${DISCOVERY_LEAGUES.join(", ")}.`, leagues, games: [] };
+  }
   try {
     const hit = await kvGet(key);
     if (hit) {

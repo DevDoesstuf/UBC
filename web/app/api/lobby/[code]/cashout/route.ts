@@ -32,6 +32,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
       if (!l) throw new ApiError(404, "Lobby not found");
       const p = requirePlayer(l, token);
       await settlePendingCashouts(l.code, p.id).catch(() => 0);
+      // Nothing to send: say so before asking the RPC about the address (which fails while the RPC is down).
+      const fresh = await getLobby(code);
+      if (fresh && requirePlayer(fresh, token).balance <= 0) throw new ApiError(400, "Nothing to cash out");
       const to = address || p.solanaAddress || "";
       if (!to) throw new ApiError(400, "Enter the Solana address of your wallet");
       const problem = await destinationProblem(to);

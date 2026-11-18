@@ -47,7 +47,7 @@ export function moneyInfo() {
     /** "solana": cash-out sends devnet USDC to a Solana address (or the wallet the player deposited from). */
     payouts: (solana ? "solana" : MONEY_MODE === "coinbase" && !SANDBOX && PAYOUTS === "onchain" ? "onchain" : "test") as "solana" | "onchain" | "test",
     depositOptions: DEPOSIT_OPTIONS,
-    asset: solana ? "test USDC on Solana devnet" : "USDC on Base",
+    asset: solana ? "test USDC on Solana devnet" : MONEY_MODE === "coinbase" ? "USDC on Base" : "demo money (nothing real)",
     /** Solana: deposits are Solana Pay links; a faucet gives test USDC. */
     solanaPay: solana,
     faucet: solana,
