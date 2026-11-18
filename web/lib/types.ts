@@ -191,8 +191,11 @@ export interface WithdrawalRecord {
   at: number;
   to: string | null;
   txHash: string | null;
-  status: "demo" | "sent" | "failed";
+  /** "pending": a Solana cash-out was sent but not confirmed yet (settled on the player's next cash-out or sync). */
+  status: "demo" | "sent" | "failed" | "pending";
   error?: string;
+  /** Solana: the transaction's last valid block height (after it, an unseen transaction can never land). */
+  validUntil?: number;
 }
 
 export interface Lobby {
