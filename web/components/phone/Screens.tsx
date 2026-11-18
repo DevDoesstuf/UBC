@@ -448,11 +448,11 @@ export function Leaderboard({ l, title = "Leaderboard" }: { l: Lobby; title?: st
         <ol className="ph-board" ref={list}>
           {rows.map((p, i) => {
             const mine = p.id === meId;
-            const lead = i === 0 && p.worth > 0;
+            const lead = p.lead;
             const net = p.worth - p.deposited;
             return (
               <li key={p.id} data-flip={p.id} className={cx("ph-row", lead && "lead", mine && !lead && "mine", fresh.has(p.id) ? "hd-pop" : "hd-rise")} style={d(Math.min(i, 8) * 50)}>
-                <span className={cx("hd-num ph-rank", lead && "gold")}>{i + 1}</span>
+                <span className={cx("hd-num ph-rank", lead && "gold")}>{p.rank}</span>
                 <Avatar name={p.name} size="2.5rem" />
                 <div className="ph-row-main">
                   <div className="ph-row-name">
@@ -564,10 +564,12 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
   const me = l.me!;
   const profit = profitOf(l);
   // Only players who bought in are ranked: a watcher with $0 is not "2nd of 12".
-  const rows = ranked(l).filter((p) => p.deposited > 0);
-  const rank = rows.findIndex((p) => p.id === me.id) + 1;
+  const rows = ranked(l, true);
+  const mine = rows.find((p) => p.id === me.id);
+  const rank = mine?.rank ?? 0;
+  const tied = !!mine && rows.some((p) => p.id !== me.id && p.rank === mine.rank);
   const s = l.game?.score;
-  const verdict = rank === 1 && profit > 0 ? "You won the room." : profit > 0 ? "Up on the night." : profit < 0 ? "Cooked tonight." : "Broke even.";
+  const verdict = mine?.lead && profit > 0 ? "You won the room." : rank === 1 && tied && profit > 0 ? "Tied for the top." : profit > 0 ? "Up on the night." : profit < 0 ? "Cooked tonight." : "Broke even.";
   const pot = useRef<HTMLSpanElement>(null);
   const amount = useRef<HTMLDivElement>(null);
   const [coins, fire] = useCoins();
@@ -597,10 +599,10 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
         <Kinetic as="p" text={verdict} className="hd-q ph-ft-verdict" delay={500} stagger={60} />
         {rank > 0 && (
           <p className="hd-rise ph-hint ph-center" style={d(800)}>
-            You finished {ordinal(rank)} of {rows.length}
+            You finished {tied ? "tied " : ""}{ordinal(rank)} of {rows.length}
           </p>
         )}
-        {rank === 1 && profit > 0 ? <Burst count={40} seed={11} y="45%" spread={16} delay={600} /> : profit > 0 ? <Burst count={14} seed={5} y="45%" spread={10} delay={600} /> : null}
+        {mine?.lead && profit > 0 ? <Burst count={40} seed={11} y="45%" spread={16} delay={600} /> : profit > 0 ? <Burst count={14} seed={5} y="45%" spread={10} delay={600} /> : null}
       </section>
 
       <section className="hd-card ph-cash" aria-labelledby="cash-title">
@@ -652,7 +654,7 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
 
 /** The podium as the box draws it: brand gradient 1st, ink 2nd, card 3rd. */
 function Podium({ l }: { l: Lobby }) {
-  const rows = ranked(l).filter((p) => p.deposited > 0).slice(0, 3);
+  const rows = ranked(l, true).slice(0, 3);
   const order = [1, 0, 2].filter((i) => rows[i]);
   return (
     <section aria-label="Podium" className="ph-podium">
@@ -664,7 +666,7 @@ function Podium({ l }: { l: Lobby }) {
             <span className="ph-pod-name ph-trunc">{p.name}</span>
             <span className="hd-num ph-pod-v">{usd(p.worth)}</span>
             <span className="ph-pod-block">
-              <span className="hd-num">{i + 1}</span>
+              <span className="hd-num">{p.rank}</span>
             </span>
           </div>
         );

@@ -897,6 +897,20 @@ function Ended({ s, onTouch, pending, fresh }: Ctx) {
       const m = /^\d+\.\s+(.*?)\s+\$([\d.]+)$/.exec(l);
       return { name: m ? m[1] : l, cents: m ? Math.round(Number(m[2]) * 100) : 0, pnl: 0 };
     });
+  // rank and lead come from the server (lib/standings.ts: shared rank on a tie, no leader on a tie at the top).
+  // Older servers send neither: fall back to the position, a tie on worth meaning no leader.
+  const rankAt = (i: number): number => {
+    const r = (board[i] as { rank?: number }).rank;
+    if (typeof r === "number") return r;
+    let k = i;
+    while (k > 0 && board[k - 1].cents === board[i].cents) k--;
+    return k + 1;
+  };
+  const leadAt = (i: number): boolean => {
+    const l = (board[i] as { lead?: boolean }).lead;
+    if (typeof l === "boolean") return l;
+    return i === 0 && board[0].cents > 0 && !(board[1] && board[1].cents === board[0].cents);
+  };
   const nw = s.buttons.find((b) => b.id === "new");
   const slots = [
     { rank: 2, x: 24, h: 104, delay: 300 },
@@ -915,10 +929,10 @@ function Ended({ s, onTouch, pending, fresh }: Ctx) {
         return (
           <div key={rank}>
             <div className="hk-abs hk-podium" style={{ left: x, top: base - h, width: 112, height: h, background: rank === 1 ? GRAD : rank === 2 ? P.ink : P.card, boxShadow: rank === 3 ? `inset 0 0 0 1px ${P.rule}` : undefined, ...d(delay) }}>
-              {h > 50 && <T f="N2" x={56} y={58} w={112} align="center" color={rank === 3 ? P.ink : P.white}>{String(rank)}</T>}
+              {h > 50 && <T f="N2" x={56} y={58} w={112} align="center" color={rank === 3 ? P.ink : P.white}>{String(rankAt(rank - 1))}</T>}
             </div>
             <div className="hk-rise" style={d(delay + 260)}>
-              {rank === 1 && (
+              {rank === 1 && leadAt(0) && (
                 <svg className="hk-abs" style={{ left: x + 56 - 14, top: base - h - 92 - 26 }} width="28" height="22" viewBox="-12 -11 24 20" aria-hidden="true">
                   <path d="M-11 3 L-11 -8 L-3 3 Z M-6 3 L0 -10 L6 3 Z M11 3 L11 -8 L3 3 Z" fill={P.gold} /><rect x="-11" y="2" width="22" height="6" rx="2" fill={P.gold} />
                 </svg>
@@ -936,10 +950,10 @@ function Ended({ s, onTouch, pending, fresh }: Ctx) {
       <div className="hk-scroll" style={{ left: 408, top: 104, width: 384, height: 286 }} aria-label="Final standings">
         <div style={{ position: "relative", height: board.length * 62 }}>
           {board.map((p, i) => {
-            const lead = i === 0;
+            const lead = leadAt(i);
             return (
               <div key={p.name + i} className={`hk-abs hk-row hk-slide-r ${lead ? "hk-lead" : "hk-lift"}`} style={{ left: 4, top: i * 62, width: 372, height: 56, ...d(300 + i * 70) }}>
-                <T f="N4" x={20} y={35} w={30} align="center" color={lead ? P.gold : P.muted}>{String(i + 1)}</T>
+                <T f="N4" x={20} y={35} w={30} align="center" color={lead ? P.gold : P.muted}>{String(rankAt(i))}</T>
                 <Avatar name={p.name} cx={54} cy={28} r={17} />
                 <T f="B1" x={80} y={35} w={180} color={lead ? P.white : P.ink}>{p.name}</T>
                 {p.pnl ? (

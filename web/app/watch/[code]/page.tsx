@@ -27,6 +27,7 @@ import {
   ranked,
   type Clock,
   type Player,
+  type Ranked,
 } from "@/components/tv/board";
 import { Aurora, Icon, Kinetic, Mark, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
 import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
@@ -46,7 +47,7 @@ export default function WatchPage() {
   const player = useRef<YTPlayer | null>(null);
   const lastEvent = useRef<number | null>(null);
   const lastCaption = useRef<number | null>(null);
-  const standings = useRef<{ code: string; rows: Player[] } | null>(null);
+  const standings = useRef<{ code: string; rows: Ranked[] } | null>(null);
   const videoId = l?.game?.youtubeId ?? null;
   const announcer = useAnnouncer(code, sound);
 
@@ -165,7 +166,8 @@ export default function WatchPage() {
     else {
       const have = new Set(standings.current.rows.map((p) => p.id));
       const late = players.filter((p) => !have.has(p.id));
-      if (late.length) standings.current = { code, rows: [...standings.current.rows, ...late] };
+      const rows = standings.current.rows;
+      if (late.length) standings.current = { code, rows: [...rows, ...ranked(late).map((p, i) => ({ ...p, rank: rows.length + i + 1, lead: false }))] };
     }
   } else if (standings.current) standings.current = null;
 

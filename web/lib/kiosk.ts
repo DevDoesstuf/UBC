@@ -19,7 +19,8 @@
 //   volume (cents), lockInMs, lockTotal (s), model (cents|null), gemini {cents,label,live}|null,
 //     trades [{name,side,cents,price}] newest first, moment, mode              market/locked
 //   winners [{name,cents,profit}], losers [{name,cents}], lockYes (cents)      result
-//   leaderboard [{name,cents,pnl}], scorecard {room,model,gemini,n,verdict}     ended
+//   leaderboard [{name,cents,pnl,rank,lead}], scorecard {room,model,gemini,n,verdict}     ended
+//     (rank shared on a tie, lead only for a sole leader; the firmware reads name, cents, pnl)
 import QRCode from "qrcode";
 import { allGames, getGame } from "./games";
 import { getTimeline } from "./replay/timeline";
@@ -32,6 +33,7 @@ import {
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
 import { boxName, boxSafe } from "./boxText";
+import { openValues, standings } from "./standings";
 import type { Game, Lobby } from "./types";
 
 // ---------------------------------------------------------------- "Call it!" moments
@@ -119,7 +121,8 @@ export interface KioskScreen {
   winners?: { name: string; cents: number; profit: number }[];
   losers?: { name: string; cents: number }[];
   lockYes?: number | null;
-  leaderboard?: { name: string; cents: number; pnl: number }[];
+  /** Best first (lib/standings.ts). rank is shared on a tie; lead is true only for a sole leader. */
+  leaderboard?: { name: string; cents: number; pnl: number; rank?: number; lead?: boolean }[];
   scorecard?: { room: number | null; model: number | null; gemini: number | null; n: number; verdict: string };
 }
 
@@ -341,9 +344,9 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       calls: callsOf(l),
     };
   }
-  const board = [...players]
-    .map((p) => ({ name: kn(p.name), cents: p.balance + p.withdrawn, pnl: p.balance + p.withdrawn - p.deposited }))
-    .sort((a, b) => b.cents - a.cents);
+  const open = openValues(l);
+  const board = standings(players.map((p) => ({ ...p, open: open[p.id] ?? 0 })))
+    .map((p) => ({ name: kn(p.name), cents: p.worth, pnl: p.worth - p.deposited, rank: p.rank, lead: p.lead }));
   const sc = buildScorecard(l.scoreEntries ?? []);
   return { ...base, leaderboard: board, scorecard: { room: sc.room, model: sc.model, gemini: sc.gemini, n: sc.n, verdict: k(sc.verdict) } };
 }
@@ -461,12 +464,13 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
   }
 
   // ended
-  const board = [...players].sort((a, b) => b.balance + b.withdrawn - (a.balance + a.withdrawn));
+  const open = openValues(l);
+  const board = standings(players.map((p) => ({ ...p, open: open[p.id] ?? 0 })));
   return {
     screen: "ended", kiosk: kioskId, color: "gray", footer: footerL,
     title: "Session over",
     subtitle: "Thanks for playing. Cash out on your phone",
-    lines: board.slice(0, 6).map((p, i) => k(`${i + 1}.  ${kn(p.name)}  ${usd(p.balance + p.withdrawn)}`)),
+    lines: board.slice(0, 6).map((p) => k(`${p.rank}.  ${kn(p.name)}  ${usd(p.worth)}`)),
     buttons: [{ id: "new", label: "New game", style: "yes" }],
   };
 }

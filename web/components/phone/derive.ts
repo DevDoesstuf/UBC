@@ -2,6 +2,7 @@
 import type { LobbyData } from "@/components/client";
 import { sharesForSpend } from "@/lib/lmsr";
 import { poolPotential, takerStakeFor } from "@/lib/modes";
+import { standings, worthOf as worth } from "@/lib/standings";
 
 export type Side = "yes" | "no";
 export type Lobby = LobbyData;
@@ -106,17 +107,22 @@ export const momentLabel = (l: Lobby, kind: string | null | undefined): string |
 };
 
 /**
- * What a player is worth tonight: balance plus what they already cashed out. The lobby view only
- * carries `withdrawn` for me today; another player's is read when the server sends it.
+ * What a player is worth tonight (lib/standings.ts): balance, what they already cashed out, and their open
+ * positions at value (`open`, from the server). The lobby view carries `withdrawn` for every player; mine
+ * is read from `me` in case an older server sends it only there.
  */
 export function worthOf(l: Lobby, p: Lobby["players"][number]): number {
-  const out = p.id === l.me?.id ? l.me.withdrawn : (p as { withdrawn?: number }).withdrawn ?? 0;
-  return p.balance + (typeof out === "number" ? out : 0);
+  const out = p.id === l.me?.id ? l.me.withdrawn : p.withdrawn;
+  return worth({ balance: p.balance, withdrawn: typeof out === "number" ? out : 0, open: p.open });
 }
 
-/** Players by worth, best first (ties keep join order). */
-export function ranked(l: Lobby) {
-  return [...l.players].map((p) => ({ ...p, worth: worthOf(l, p) })).sort((a, b) => b.worth - a.worth);
+/**
+ * Players by worth, best first (ties keep join order), with a shared rank on ties and `lead` only for a sole
+ * leader. `boughtIn` ranks only players who put money in (a watcher with $0 is not "2nd of 12").
+ */
+export function ranked(l: Lobby, boughtIn = false) {
+  const players = boughtIn ? l.players.filter((p) => p.deposited > 0) : l.players;
+  return standings(players, (p) => worthOf(l, p));
 }
 
 export const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;

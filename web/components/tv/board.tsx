@@ -25,6 +25,7 @@ import {
 } from "@/components/huddle";
 import { money, payoutText, pctText, secsText, SIDE_LABEL, yesNo } from "./format";
 import { perDollar } from "@/components/phone/derive";
+import { standings as rank, worthOf, type Standing } from "@/lib/standings";
 import { Sparkline, type Line } from "./Sparkline";
 
 export type L = LobbyData;
@@ -37,11 +38,16 @@ const MODE_LABEL = { market: "Market", pool: "Pool", h2h: "Head to head" } as co
 
 export const joinHost = (url: string) => url.replace(/^https?:\/\//, "");
 
-/** What a player is worth tonight: balance plus anything already cashed out (a cash-out never drops a rank). */
-export const worth = (p: Player) => p.balance + (p.withdrawn ?? 0);
+/**
+ * What a player is worth tonight (lib/standings.ts): balance, anything already cashed out (a cash-out never
+ * drops a rank) and open positions at value (a buy never drops a rank either).
+ */
+export const worth = (p: Player) => worthOf(p);
 
-/** Players by worth, then by who joined first. */
-export const ranked = (players: Player[]) => [...players].sort((a, b) => worth(b) - worth(a));
+export type Ranked = Standing<Player>;
+
+/** Players by worth, then by who joined first; shared rank on a tie, `lead` only for a sole leader. */
+export const ranked = (players: Player[]): Ranked[] => rank(players);
 
 /** What a "Call it" moment is called on the box ("Penalty!"), or null for a scripted question. */
 export function momentLabel(l: L, m: M): string | null {
@@ -554,7 +560,7 @@ export function LobbyStage({ l }: { l: L }) {
 
 /* ================================================================ people */
 
-/** Leaderboard card (side column): the leader's row is ink with a gold rank badge; rows slide on reorder. */
+/** Leaderboard card (side column): the sole leader's row is ink with a gold rank badge (none on a tie); rows slide on reorder. */
 export function Leaderboard({ players, max = 5 }: { players: Player[]; max?: number }) {
   const rows = ranked(players).slice(0, max);
   const list = useFlip<HTMLOListElement>(rows.map((p) => p.id).join(","));
@@ -562,9 +568,9 @@ export function Leaderboard({ players, max = 5 }: { players: Player[]; max?: num
     <section className="hd-rise tv-card tv-board" aria-labelledby="tv-board-h" style={delay(200)}>
       <h2 id="tv-board-h" className="tv-card-title"><Icon name="trophy" /> Leaderboard</h2>
       <ol ref={list}>
-        {rows.map((p, i) => (
-          <li key={p.id} data-flip={p.id} className={i === 0 ? "lead" : ""}>
-            <span className={`tv-rank hd-num ${i === 0 ? "gold" : ""}`}>{i + 1}</span>
+        {rows.map((p) => (
+          <li key={p.id} data-flip={p.id} className={p.lead ? "lead" : ""}>
+            <span className={`tv-rank hd-num ${p.lead ? "gold" : ""}`}>{p.rank}</span>
             <Avatar name={p.name} size="1.9rem" />
             <span className="grow">{p.name}</span>
             <span className="hd-num tv-bal"><Roll text={money(worth(p))} value={worth(p)} /></span>
@@ -582,11 +588,11 @@ export function LeaderRail({ players, max = 4 }: { players: Player[]; max?: numb
   const list = useFlip<HTMLOListElement>(rows.map((p) => p.id).join(","));
   return (
     <ol ref={list} className="tv-leaders" aria-label="Leaderboard">
-      {rows.map((p, i) => (
-        <li key={p.id} data-flip={p.id} className={`tv-chip ${i === 0 ? "lead" : ""}`}>
+      {rows.map((p) => (
+        <li key={p.id} data-flip={p.id} className={`tv-chip ${p.lead ? "lead" : ""}`}>
           <span className="tv-chip-av">
             <Avatar name={p.name} size="1.85rem" />
-            <span className={`hd-num tv-chip-rank ${i === 0 ? "gold" : ""}`}>{i + 1}</span>
+            <span className={`hd-num tv-chip-rank ${p.lead ? "gold" : ""}`}>{p.rank}</span>
           </span>
           <span className="tv-chip-name">{p.name}</span>
           <span className="hd-num"><Roll text={money(worth(p))} value={worth(p)} /></span>
@@ -691,10 +697,12 @@ export function ScorecardPanel({ card, compact = false }: { card: Card; compact?
 
 const PODIUM_ORDER = [1, 0, 2];
 
-function Podium({ rows }: { rows: Player[] }) {
+function Podium({ rows }: { rows: Ranked[] }) {
+  // A tie at the top has no winner: no crown, no shine, the shared rank on both blocks.
+  const lead = !!rows[0]?.lead;
   return (
     <div className="tv-podium" aria-label="Podium">
-      {rows[0] && <Burst seed={7} count={36} x="50%" y="30%" spread={16} delay={1100} />}
+      {rows[0] && <Burst seed={7} count={lead ? 36 : 18} x="50%" y="30%" spread={16} delay={1100} />}
       {PODIUM_ORDER.map((idx) => {
         const p = rows[idx];
         if (!p) return <div key={idx} className="tv-podium-col" aria-hidden="true" />;
@@ -702,13 +710,13 @@ function Podium({ rows }: { rows: Player[] }) {
         return (
           <div key={p.id} className={`tv-podium-col p${idx + 1}`}>
             <div className="hd-pop tv-podium-who" style={delay(at + 200)}>
-              {idx === 0 && <span className="hd-float tv-crown big"><Icon name="crown" title="Winner" /></span>}
+              {idx === 0 && lead && <span className="hd-float tv-crown big"><Icon name="crown" title="Winner" /></span>}
               <Avatar name={p.name} size={idx === 0 ? "3rem" : "2.4rem"} />
-              <span className={`tv-podium-name ${idx === 0 ? "hd-shine" : ""}`} style={delay(at + 900)}>{p.name}</span>
+              <span className={`tv-podium-name ${idx === 0 && lead ? "hd-shine" : ""}`} style={delay(at + 900)}>{p.name}</span>
               <span className="hd-num tv-podium-bal"><Roll text={money(worth(p))} value={worth(p)} flash={false} duration={1100} /></span>
             </div>
             <div className="tv-podium-block-clip">
-              <div className="hd-rise tv-podium-block" style={delay(at)}><span className="hd-num">{idx + 1}</span></div>
+              <div className="hd-rise tv-podium-block" style={delay(at)}><span className="hd-num">{p.rank}</span></div>
             </div>
           </div>
         );
@@ -718,7 +726,7 @@ function Podium({ rows }: { rows: Player[] }) {
 }
 
 /** End of game: the podium, the rest of the table, "Who's smarter?" and every question's answer. */
-export function EndStage({ l, standings }: { l: L; standings: Player[] }) {
+export function EndStage({ l, standings }: { l: L; standings: Ranked[] }) {
   const card = l.scorecard;
   return (
     <div className="tv-end">
@@ -730,7 +738,7 @@ export function EndStage({ l, standings }: { l: L; standings: Player[] }) {
           <ol className="tv-end-rest" start={4}>
             {standings.slice(3, 7).map((p, i) => (
               <li key={p.id} className="hd-rise" style={delay(1000 + i * 90)}>
-                <span className="hd-num tv-rank">{i + 4}</span>
+                <span className="hd-num tv-rank">{p.rank}</span>
                 <Avatar name={p.name} size="1.75rem" />
                 <span className="grow">{p.name}</span>
                 <span className="hd-num">{money(worth(p))}</span>
