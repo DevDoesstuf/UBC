@@ -18,6 +18,7 @@ import {
   driveResultProbs,
   nearestHalf,
   NFL_TABLE,
+  nflQuarterProbs,
   nflWinProb,
   passProb,
   periodWinnerProbs,
@@ -69,6 +70,7 @@ export const TEMPLATES = {
   nflRunPass: 'nfl.run_pass',
   nflTotal: 'nfl.total_points',
   nflRedZone: 'nfl.red_zone_td',
+  nflQuarter: 'nfl.quarter_winner',
   nflWinner: 'nfl.winner',
   periodWinner: 'any.period_winner',
   nbaWinner: 'nba.winner',
@@ -178,7 +180,7 @@ export class HuddleQuestionEngine {
     const memo = this.touch(event);
     const blocked = new Set(open.filter(isLive).map((m) => m.templateId));
     const all =
-      state.sport === 'soccer' ? this.proposeSoccer(event, state, memo) : state.sport === 'nba' ? this.proposeNba(event, state, memo) : this.proposeNfl(event, state);
+      state.sport === 'soccer' ? this.proposeSoccer(event, state, memo) : state.sport === 'nba' ? this.proposeNba(event, state, memo) : this.proposeNfl(event, state, memo);
     return all.filter((c) => !blocked.has(c.templateId)).sort((a, b) => b.priority - a.priority);
   }
 
@@ -369,7 +371,7 @@ export class HuddleQuestionEngine {
     return out;
   }
 
-  private proposeNfl(event: GameEvent, state: GameState): MarketCandidate[] {
+  private proposeNfl(event: GameEvent, state: GameState, memo?: GameMemo): MarketCandidate[] {
     const out: MarketCandidate[] = [];
     const { home, away } = state;
     const strength = this.model(event.gameId).nfl;
@@ -547,6 +549,34 @@ export class HuddleQuestionEngine {
       // Red zone entry: this play moved the ball inside the 20 and the offense keeps a real chance.
       if (start !== undefined && start < 80 && start + gained >= 80 && !over && !kicked && (firstDown || down <= 2)) {
         out.push(this.redZoneCandidate(event.team, offenseNick, clamp(start + gained, 80, 99), score, seasons));
+      }
+    }
+
+    // Late in a quarter (2:30 to 0:30 left) and still in doubt: who wins the quarter? Gemini trades quarter
+    // moneylines, so in a replayed real game this shows Gemini's real in-game price beside the room's.
+    const period = event.clock?.period ?? state.clock.period;
+    const inPeriod = period >= 1 && period <= 4 ? secondsRemaining - (4 - period) * 900 : -1;
+    if (memo && (event.type === 'play_result' || event.type === 'snap' || event.type === 'drive_start') && inPeriod <= 150 && inPeriod >= 30 && !memo.fired.includes(`nfl.q${period}`)) {
+      const prev = state.periodScores.filter((x) => x.period < period).sort((a, b) => b.period - a.period)[0];
+      const startHome = prev?.home ?? 0;
+      const startAway = prev?.away ?? 0;
+      const lead = score.home - startHome - (score.away - startAway);
+      const q = nflQuarterProbs(lead, inPeriod, strength.pHome);
+      if (Math.max(q.home, q.away, q.tie) <= 0.8) {
+        memo.fired.push(`nfl.q${period}`);
+        const prior = normalizePrior({ home: q.home, tie: q.tie, away: q.away });
+        const label = `${ordinal(period)} quarter`;
+        const hn = nick(home, 'nfl');
+        const an = nick(away, 'nfl');
+        const clockText = `${Math.floor(inPeriod / 60)}:${String(Math.round(inPeriod % 60)).padStart(2, '0')}`;
+        const rationale = `${lead === 0 ? 'Level' : `${lead > 0 ? hn : an} up ${Math.abs(lead)}`} in the ${label} with ${clockText} left. Scores arrive at the league rate (about one every ${Math.round(4.7 / ((NFL_TABLE.points.mean_total || 44) / 2) * 60)} minutes per team, 35% field goals): ${hn} ${pct(prior.home!)}, tie ${pct(prior.tie!)}, ${an} ${pct(prior.away!)}.`;
+        out.push({
+          templateId: TEMPLATES.nflQuarter, kind: 'moment', question: `Who wins the ${label}?`, hook: `${clockText} left in the ${label}.`,
+          outcomes: [{ id: 'home', label: hn }, { id: 'tie', label: 'Tie' }, { id: 'away', label: an }], prior,
+          lockAfterSecs: 15, lockOnEvent: `period_end:${period}`,
+          resolver: { type: 'period_winner', params: { periods: [period], label, startHome, startAway, rationale } },
+          geminiHint: { kind: 'period_winner', period: `${period}Q` }, priority: 72, rationale,
+        });
       }
     }
 

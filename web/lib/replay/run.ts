@@ -143,6 +143,7 @@ export function toYesNo(c: MarketCandidate, state: GameState, ev: GameEvent): Om
       short = `${home} win ${label}?`;
       break;
     }
+    case "nfl.quarter_winner":
     case "nba.quarter_winner": {
       yesId = "home";
       const label = String(c.resolver.params.label ?? "quarter");
