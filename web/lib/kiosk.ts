@@ -161,10 +161,14 @@ export interface KioskScore {
   status: string;
 }
 
-/** The shared Huddle design tokens (green + ivory). The firmware has the same defaults built in. */
+/**
+ * The shared Huddle design tokens (green + ivory, app/globals.css). The firmware has the same defaults built
+ * in and takes these as overrides, so a token changed here reaches the box without reflashing: muted is
+ * #616D64 (4.9:1 on canvas, 5.3:1 on card, 4.5:1 on well; the firmware's built-in #6C7A70 is 4.07:1).
+ */
 export const KIOSK_PALETTE = {
   canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ink: "#10261C", ink2: "#3E5247",
-  muted: "#6C7A70", accent: "#12A150", accentDeep: "#0B7A3E", accentLight: "#7CCB4E", yes: "#1468FF",
+  muted: "#616D64", accent: "#12A150", accentDeep: "#0B7A3E", accentLight: "#7CCB4E", yes: "#1468FF",
   no: "#FF6B00", hot: "#E5484D", gold: "#E8A33D",
 } as const;
 

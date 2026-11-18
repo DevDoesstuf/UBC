@@ -2,7 +2,8 @@
    Shared by the box preview, the phones and the TV page. Kit styles: components/huddle/huddle.css.
    Fonts (bundled by app/layout.tsx, no runtime CDN): --font-head Bricolage Grotesque (headings),
    --font-num Archivo (numbers, tabular), --font-body Atkinson Hyperlegible Next (body).
-   Contrast: ink 15:1 on canvas, ink-2 7.6:1, muted 4.5:1; white on green-deep 5.4:1 (green #12A150
+   Contrast: ink 15:1 on canvas, ink-2 7.6:1, muted 4.9:1 (5.3:1 on card, 4.5:1 on well: small text passes AA
+   on every surface); white on green-deep 5.4:1 (green #12A150
    carries white text only at 18.7px bold or larger); white on yes 4.7:1; ink on no 6.6:1. */
 :root {
   --k-canvas: #F6F3EA;       /* ivory page */
@@ -14,7 +15,7 @@
   --k-rule-strong: #CBC4B2;  /* input rings */
   --k-ink: #10261C;          /* deep green-black text, dark chips */
   --k-ink-2: #3E5247;
-  --k-ink-muted: #6C7A70;
+  --k-ink-muted: #616D64;     /* small secondary text: >= 4.5:1 on canvas, card and well (was #6C7A70, 4.07:1) */
   --k-ink-faint: #949E96;    /* disabled text only */
 
   --k-green: #12A150;        /* the accent: lit ring pixels, "now", the room's number, big fills */

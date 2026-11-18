@@ -12,7 +12,7 @@ import { avatarHash } from "@/lib/boxText";
 
 const P = {
   canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ruleStrong: "#CFC8B8", ink: "#10261C",
-  ink2: "#3E5247", muted: "#6C7A70", accent: "#12A150", deep: "#0B7A3E", lime: "#7CCB4E", yes: "#1468FF",
+  ink2: "#3E5247", muted: "#616D64", accent: "#12A150", deep: "#0B7A3E", lime: "#7CCB4E", yes: "#1468FF",
   yes600: "#0B57E6", no: "#FF6B00", no600: "#B84300", hot: "#E5484D", gold: "#E8A33D", white: "#FFFFFF",
   accentTint: "#E3F2E7",
 };
