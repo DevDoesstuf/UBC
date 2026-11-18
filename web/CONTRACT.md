@@ -113,14 +113,46 @@ unchanged after it resolves). The caption leads with the call: "Penalty called! 
 | `GET/POST /api/lobby/:code/moment` | `{kind}` | list / open a "Call it" moment (see above) |
 | `GET /api/gemini/markets` `?league=NFL,NBA,EPL&team=DAL` | | Market discovery: `{asOf, live, source: 'live'\|'snapshot'\|'unavailable', note, leagues, count, games: [{base, league, title, startTime, isLive, url, home: {code, name, prob}, away, draw, volume}], ours: [{gameId, title, event, real, date, settled, hasPriceHistory, liveNow, upcoming: [game...]}]}`. Full-game moneylines Gemini is trading, soonest first (default leagues NFL, NBA, EPL; also NHL NCAAF NCAAM MLB MLS UCL). `ours` lists the Gemini games our teams play next. Cached 2 min; when Gemini is down it serves the last good list (`live: false`, real `asOf`), never a 5xx |
 | `POST /api/lobby/:code/deposit` | `{cents}` | demo: `{credited}`; coinbase: `{url}`; **solana**: `{url: "solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle&message=..", solanaPay: true, reference, recipient, mint, amount}`. Show `url` as a QR and an "Open in wallet" link, then poll `/deposit/sync` every 3 s |
-| `POST /api/lobby/:code/deposit/sync` | | `{credited, pending}`. Solana: finds the payment by its reference on devnet, checks USDC reached the treasury, credits once per signature |
-| `POST /api/lobby/:code/faucet` (x-player-token) | `{address}` | solana only: $20 test USDC + 0.005 SOL (for fees) to that wallet, once per player per lobby. `{cents, usdcSig, solSig, explorer}` |
-| `POST /api/lobby/:code/cashout` | `{address?}` | solana: sends the whole balance as devnet USDC to `address` (a Solana address), or to the wallet the player deposited from / used the faucet with. `{cents, mode: "solana", to, txHash, explorer}` |
+| `POST /api/lobby/:code/deposit/sync` | `{reference?}` | `{credited, pending}`. Solana: finds the payment by its reference on chain, checks USDC reached the treasury, credits once per signature (see [Solana money](#solana-money-money_modesolana)). Solana adds `payments: [{signature, cents, explorer}]` (credited now) and `refunded` (cents, only when a stuck cash-out came back). `pending: -1` = polled within 2.5 s, ask again |
+| `POST /api/lobby/:code/faucet` (x-player-token) | `{address}` | solana only: $20 test USDC + 0.005 SOL (only if the wallet has less) to that wallet in **one** transaction, once per player per lobby. `{cents, usdcSig, solSig, explorer}`; `solSig` is the same signature as `usdcSig`, or `null` when no SOL was sent. 400 with a readable `error` for a bad address |
+| `POST /api/lobby/:code/cashout` | `{address?}` | solana: sends the whole balance as test USDC to `address` (a Solana **wallet** address), or to the wallet the player deposited from / used the faucet with. `{cents, mode: "solana", to, txHash, explorer}`, plus `pending: true` when the send could not be confirmed (see below). 400 before anything moves for a token account, the treasury, the mint or a program; 502 (balance put back) when it surely failed |
 
 `money` in the lobby view (solana mode): `{mode: "solana", payouts: "solana", asset: "test USDC on Solana devnet",
 solanaPay: true, faucet: true, depositOptions: [500, 1000, 2000]}`. In demo/coinbase it is unchanged (plus
 `solanaPay: false, faucet: false`). Phones should show a Solana address field when `payouts === "solana"`
-(optional: without one, cash-out goes to the paying wallet).
+(optional: without one, cash-out goes to the paying wallet). `me.solanaAddress` (string | null: the wallet cash-out
+goes to by default, learned from the first payment or the faucet; prefill the field with it) and `me.fauceted`
+(boolean: hide the faucet button once used) are in every lobby view.
+
+### Solana money (`MONEY_MODE=solana`)
+
+Everything on chain is test USDC (a 6-decimal SPL token) on **devnet**, or on a local `solana-test-validator`. The
+treasury wallet receives deposits and pays every fee and token-account rent; players never need SOL except the
+deposit's own transfer fee, which the faucet covers.
+
+- **Deposit URL** (Solana Pay transfer request, checked against the spec and parsed the way Phantom/Solflare parse it):
+  `solana:<treasury wallet>?amount=<dollars>&spl-token=<USDC_MINT>&reference=<fresh pubkey>&label=Huddle&message=Huddle%20lobby%20ABCD&memo=huddle-ABCD`.
+  `amount` is a plain decimal in dollars with no exponent and no trailing zeros (`5`, `10.5`, `0.25`); text is
+  percent-encoded with `%20` for spaces (never `+`). The recipient is the treasury *wallet*; the wallet pays its
+  associated USDC account with a `transferChecked`, adds the reference as a read-only non-signer key, and puts the memo
+  in an SPL Memo instruction. The response's `amount` field stays `"5.00"` (two decimals) for display.
+- **Crediting**: `/deposit/sync` looks up the player's open references (newest 4, under an hour old, or only
+  `reference` when given) with `getSignaturesForAddress`, and credits the increase of `USDC_MINT` held by
+  treasury-owned accounts in each successful transaction (over/under-payments credit what arrived, rounded down to the
+  cent). Each signature is credited once per lobby (`deposits["sol-<signature>"]`) **and** claimed globally in the
+  store (`solsig:<signature>`), so one transaction carrying references from two lobbies is credited only once. Paid
+  references are dropped. Poll every 3 s while a QR is showing; it is cheap when nothing changed.
+- **Cash-out**: one transaction (create the recipient's USDC account if missing + `transferChecked`). If the treasury is
+  short and is the mint authority (the test mint), the shortfall is minted in the same transaction. When the RPC drops
+  mid-send the outcome is unknown: the response is `ok` with `pending: true`, the withdrawal is recorded with
+  `status: "pending"` and the signature, and the next `/cashout` or `/deposit/sync` from that player settles it (marked
+  `sent` once confirmed, or the money comes back to the balance once the transaction's blockhash has expired unseen).
+  It is never paid twice and never refunded while it could still land.
+- **`/api/health` → `solana`**: `{requested, active, ready, network, rpc, problems[], nextSteps[], treasury: {address,
+  mint, rpc} | null, checks}`. `active` = `MONEY_MODE=solana` with its env complete; `ready` = live checks passed: RPC
+  reachable and not mainnet, treasury has at least 0.02 SOL, `USDC_MINT` exists with 6 decimals, and the treasury
+  can mint or holds at least $100. `checks` has the numbers (`cluster`, `treasurySol`, `treasuryUsdcCents`,
+  `mint.treasuryIsMintAuthority`); it is cached for 15 s. Problems also appear in `warnings`.
 
 Head-to-head odds: decimal odds for the maker's side. Backing YES with $10 at 1.30 means a taker matches it with
 $3; the winner of each matched pair gets both stakes ($13).
@@ -183,10 +215,10 @@ late total at the projected pace. Kiosk "Call it" moments for NBA: `free_throws`
 | `GEMINI_API_BASE` | Gemini Prediction Markets | `https://api.gemini.com` (public, no key) |
 | `GEMINI_DISABLED=1` | turn Gemini off | |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis on Vercel (lobbies, Gemini and TTS caches) | memory |
-| `MONEY_MODE=solana` | Solana Pay money (devnet test USDC) | `demo`. If the two vars below are missing it runs demo money and `/api/health` (`solana.problems`, `warnings`) says why |
+| `MONEY_MODE=solana` | Solana Pay money (devnet test USDC) | `demo`. If the two vars below are missing or malformed it runs demo money and `/api/health` (`solana.problems`, `solana.nextSteps`, `warnings`) says why |
 | `SOLANA_TREASURY_SECRET_KEY` | treasury keypair (base58 or JSON byte array); receives deposits, pays cash-outs, fees and the faucet | |
 | `USDC_MINT` | the test USDC mint | |
-| `SOLANA_RPC_URL` | | `https://api.devnet.solana.com` (mainnet URLs are refused) |
+| `SOLANA_RPC_URL` | a devnet RPC (a keyed provider is fine; its key is redacted in `/api/health`) or `http://127.0.0.1:8899` for a local validator | `https://api.devnet.solana.com` (mainnet URLs and mainnet genesis are refused) |
 
 ## Human steps
 
@@ -199,15 +231,27 @@ late total at the projected pace. Kiosk "Call it" moments for NBA: `free_throws`
 - **Gemini**: nothing; the public API needs no key. If it is down, the Titans at Cowboys game uses the bundled
   Nov 16 snapshot (shown with `live: false` and its real `asOf`). Settled markets are never fetched again: the
   stored pregame snapshot is used and `note` says so. Real replayed games need no network for Gemini at all.
-- **Solana (optional, devnet only)**, from `web/`:
-  1. `node scripts/solana-setup.mjs` prints a new treasury address and `SOLANA_TREASURY_SECRET_KEY=...`. Keep the
-     secret out of git and chat; put it in `web/.env.local` and Vercel env vars.
-  2. Go to https://faucet.solana.com, pick **devnet**, paste the treasury address, request 1-5 SOL (the RPC
-     airdrop is closed, so this is a browser step; it may ask for a GitHub sign-in).
-  3. Run `SOLANA_TREASURY_SECRET_KEY=... node scripts/solana-setup.mjs` again: it creates a 6-decimal test USDC mint
-     owned by the treasury, mints $1,000 to it and prints `USDC_MINT=...` (the faucet route then mints for players).
-     Alternative: Circle's devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, funded at https://faucet.circle.com.
-  4. Set `MONEY_MODE=solana`, `SOLANA_TREASURY_SECRET_KEY`, `USDC_MINT` in Vercel; redeploy; check `/api/health` shows `solana.active: true`.
-  5. Players need a devnet wallet (Phantom/Solflare/Backpack with devnet enabled). The faucet route gives them test
-     USDC and a little SOL for the transfer fee; they deposit by opening the Solana Pay link.
+- **Solana (optional, devnet only)**, from `web/` (about 5 minutes):
+  1. `node scripts/solana-setup.mjs`. It creates the treasury key in `web/.solana/` (gitignored: `treasury.json`,
+     `treasury.secret`; the secret is never printed) and prints **`Treasury address: <address>`**. The devnet RPC
+     airdrop is closed, so it stops with "NEXT STEP (human)".
+  2. Open https://faucet.solana.com, pick **devnet**, paste the printed treasury address, request 1-5 SOL (it may ask
+     for a GitHub sign-in). 1 SOL pays for thousands of deposits, cash-outs and faucet drops.
+  3. Run `node scripts/solana-setup.mjs` again (add `--write-env-local` to also write `web/.env.local`). It creates a
+     6-decimal test USDC mint owned by the treasury (so the faucet and cash-outs can mint), mints the treasury $1,000,
+     and prints the env lines plus the exact `vercel env add ...` commands (the secret is piped from
+     `web/.solana/treasury.secret`). The same four lines, secret included, are in `web/.solana/vercel.env` for
+     Vercel's "Import .env". Re-running is safe: it reuses the key and the mint.
+     Alternative mint: Circle's devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` (set `USDC_MINT` before
+     step 3, fund the treasury at https://faucet.circle.com; the faucet route then sends from the treasury's balance).
+  4. In Vercel set `MONEY_MODE=solana`, `SOLANA_TREASURY_SECRET_KEY`, `USDC_MINT` (Production and Preview), redeploy,
+     and open `/api/health`: `solana.active` and `solana.ready` must be `true` (otherwise `solana.nextSteps` says what
+     is missing). Keep `web/.solana/` backed up privately: it is the treasury.
+  5. Players need a wallet on devnet (Phantom: Settings > Developer settings > Testnet mode, Solana devnet; Solflare
+     and Backpack have a devnet switch). The faucet button gives them $20 test USDC and SOL for the fee; they deposit
+     by scanning the QR or tapping "Open in wallet".
+  - Test without phones: `npm run test:localnet` (needs the Agave CLI: it starts `solana-test-validator`, runs the
+    setup script, starts `next dev` with `MONEY_MODE=solana` and plays a party: faucet, Solana Pay deposit paid like
+    Phantom, sync once, buy, resolve, cash-out checked on chain). `node scripts/solana-wallet.mjs pay '<solana:...>'
+    --keypair <file>` pays any deposit QR from the command line (devnet or local).
 - Privy was dropped (direction change): no `@privy-io` dependency and no `components/wallet` module.

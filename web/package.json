@@ -9,7 +9,10 @@
     "start": "next start",
     "lan": "next build && next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ./test/register.mjs --test test/*.test.mts"
+    "test": "node --import ./test/register.mjs --test test/*.test.mts",
+    "test:localnet": "node --import ./test/register.mjs --test test/solana-localnet.e2e.mts",
+    "solana:setup": "node scripts/solana-setup.mjs",
+    "solana:wallet": "node scripts/solana-wallet.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
