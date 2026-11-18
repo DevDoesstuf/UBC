@@ -980,7 +980,7 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
     parked: parked
       ? { text: parked.text, yesCents: lmsr.toCents(parked.priceAtLock ?? yesPrice(parked)), model: parked.model ?? null, gemini: parked.gemini ?? null, volume: parked.volume, mode: modeOf(parked), myPosition: me ? parked.positions[me.id] ?? null : null }
       : null,
-    players: l.order.map((id) => ({ id, name: name(id), balance: l.players[id].balance, deposited: l.players[id].deposited })),
+    players: l.order.map((id) => ({ id, name: name(id), balance: l.players[id].balance, deposited: l.players[id].deposited, withdrawn: l.players[id].withdrawn })),
     results: l.results.map((r) => ({
       text: r.text,
       outcome: r.outcome,

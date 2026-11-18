@@ -37,8 +37,11 @@ const MODE_LABEL = { market: "Market", pool: "Pool", h2h: "Head to head" } as co
 
 export const joinHost = (url: string) => url.replace(/^https?:\/\//, "");
 
-/** Players by balance, then by who joined first. */
-export const ranked = (players: Player[]) => [...players].sort((a, b) => b.balance - a.balance);
+/** What a player is worth tonight: balance plus anything already cashed out (a cash-out never drops a rank). */
+export const worth = (p: Player) => p.balance + (p.withdrawn ?? 0);
+
+/** Players by worth, then by who joined first. */
+export const ranked = (players: Player[]) => [...players].sort((a, b) => worth(b) - worth(a));
 
 /** What a "Call it" moment is called on the box ("Penalty!"), or null for a scripted question. */
 export function momentLabel(l: L, m: M): string | null {
@@ -557,7 +560,7 @@ export function Leaderboard({ players, max = 5 }: { players: Player[]; max?: num
             <span className={`tv-rank hd-num ${i === 0 ? "gold" : ""}`}>{i + 1}</span>
             <Avatar name={p.name} size="1.9rem" />
             <span className="grow">{p.name}</span>
-            <span className="hd-num tv-bal"><Roll text={money(p.balance)} value={p.balance} /></span>
+            <span className="hd-num tv-bal"><Roll text={money(worth(p))} value={worth(p)} /></span>
           </li>
         ))}
         {rows.length === 0 && <li className="tv-empty">Nobody yet. Scan to join.</li>}
@@ -579,7 +582,7 @@ export function LeaderRail({ players, max = 4 }: { players: Player[]; max?: numb
             <span className={`hd-num tv-chip-rank ${i === 0 ? "gold" : ""}`}>{i + 1}</span>
           </span>
           <span className="tv-chip-name">{p.name}</span>
-          <span className="hd-num"><Roll text={money(p.balance)} value={p.balance} /></span>
+          <span className="hd-num"><Roll text={money(worth(p))} value={worth(p)} /></span>
         </li>
       ))}
     </ol>
@@ -693,7 +696,7 @@ function Podium({ rows }: { rows: Player[] }) {
               {idx === 0 && <span className="hd-float tv-crown big"><Icon name="crown" title="Winner" /></span>}
               <Avatar name={p.name} size={idx === 0 ? "3rem" : "2.4rem"} />
               <span className={`tv-podium-name ${idx === 0 ? "hd-shine" : ""}`} style={delay(at + 900)}>{p.name}</span>
-              <span className="hd-num tv-podium-bal"><Roll text={money(p.balance)} value={p.balance} flash={false} duration={1100} /></span>
+              <span className="hd-num tv-podium-bal"><Roll text={money(worth(p))} value={worth(p)} flash={false} duration={1100} /></span>
             </div>
             <div className="tv-podium-block-clip">
               <div className="hd-rise tv-podium-block" style={delay(at)}><span className="hd-num">{idx + 1}</span></div>
@@ -721,7 +724,7 @@ export function EndStage({ l, standings }: { l: L; standings: Player[] }) {
                 <span className="hd-num tv-rank">{i + 4}</span>
                 <Avatar name={p.name} size="1.75rem" />
                 <span className="grow">{p.name}</span>
-                <span className="hd-num">{money(p.balance)}</span>
+                <span className="hd-num">{money(worth(p))}</span>
               </li>
             ))}
           </ol>

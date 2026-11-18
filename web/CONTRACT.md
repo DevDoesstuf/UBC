@@ -65,6 +65,7 @@ scorecard?: { room: number|null; model: number|null; gemini: number|null; n: num
 parked?: { text; yesCents; model; gemini; volume; mode; myPosition } | null
                                                   // replay: the pregame question, locked, settling at the final whistle
 me.stake?: { yes: number; no: number }            // pool mode: my cents on each side
+players[].withdrawn: number                       // cents already cashed out; boards rank by balance + withdrawn
 ```
 
 In pool and h2h mode `market.yesCents/noCents/priceYes/history` still work: pool shows the share of the pot on
