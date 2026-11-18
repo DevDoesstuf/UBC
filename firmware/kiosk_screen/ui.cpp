@@ -11,6 +11,7 @@
 #include "ui.h"
 #include <ArduinoJson.h>
 #include <math.h>
+#include <stddef.h>
 #include "config.h"
 #include "ui_draw.h"
 #include "ui_fonts.h"
@@ -94,6 +95,28 @@ struct TradeRow {
 };
 
 static const int MAX_CARDS = 16, MAX_PEOPLE = 16, MAX_BTN = 8, MAX_HIST = 64, MAX_LINES = 10;
+static const int MAX_CHART = 64, MAX_ODDS = 10, ODDS_HIST = 32;
+static const int PAY_QR = 96;  // pay QR up to 96 modules (version 19; a solana: URL at ECC L is version 9-11)
+
+// The odds graph under the market / locked / result view (JSON "chart").
+struct Chart {
+  bool has, hasGem;
+  int16_t n;
+  int8_t room[MAX_CHART];  // YES price 0-100
+  int8_t gem[MAX_CHART];   // Gemini 0-100, -1 = no price then
+  int16_t model;           // -1 = none
+  int16_t span;            // x 0-100 where the samples end
+  int16_t lock;            // x 0-100 of the lock, -1 = none
+  char outcome;            // 'Y', 'N', 0
+  char x0[16], x1[16];
+};
+struct OddsRow {
+  char label[84];
+  bool room;  // the room's open question (else a Gemini market)
+  int16_t p;
+  uint8_t nHist;
+  int8_t hist[ODDS_HIST];
+};
 
 struct Screen {
   Scr scr;
@@ -125,7 +148,23 @@ struct Screen {
   int homeScore, awayScore;
   char clock[12], period[12], scoreStatus[8];
   int scRoom, scModel, scGemini;  // Brier x1000, -1 = none
+  // Solana Pay card on top of any screen (JSON "pay"). payLeftMs ticks every poll: not part of the redraw test.
+  bool hasPay, payPaid;
+  char payName[24];
+  int32_t payCents, payLeftMs;
+  uint8_t payQrSize;  // 0 = no QR (the URL did not fit)
+  uint8_t payQr[PAY_QR][PAY_QR / 8];
+  // ---- page sections below the view. Compared by hash, so a new price there redraws only that section.
+  Chart chart;
+  OddsRow odds[MAX_ODDS];
+  int nOdds;
+  char oddsNote[144];
+  Person stand[MAX_PEOPLE];
+  int nStand;
+  bool standTie;
+  uint32_t chartHash, oddsHash, standHash;
 };
+#define SCREEN_CORE offsetof(Screen, chart)  // memcmp up to here decides a full redraw
 
 static Screen *cur = nullptr, *nxt = nullptr;
 static JsonDocument doc;
@@ -161,9 +200,14 @@ static bool measuring = false;
 static Rect dirty[16];
 static int nDirty = 0;
 static bool fullDirty = true;
+// Page scrolling: market, locked and result are taller than the screen. Their drawing code uses page
+// coordinates; pageY is how far the page is scrolled (screen y = page y - pageY). Marks, hits, clips and scroll
+// views convert here, so every component works unchanged inside a page. 0 everywhere else.
+static int pageY = 0;
 
 static void markR(Rect r) {
   if (!measuring || r.empty()) return;
+  r.y -= pageY;
   if (r.x < 0) { r.w += r.x; r.x = 0; }
   if (r.y < 0) { r.h += r.y; r.y = 0; }
   if (r.x + r.w > SCR_W) r.w = SCR_W - r.x;
@@ -192,6 +236,7 @@ static void markAmbient(int x, int y, int w, int h) {
 static Rect clipStack[8];
 static int clipDepth = 0;
 static void pushClip(int x, int y, int w, int h) {
+  y -= pageY;
   Rect c = getClip();
   if (clipDepth < 8) clipStack[clipDepth++] = c;
   int x0 = max<int>(c.x, x), y0 = max<int>(c.y, y), x1 = min<int>(c.x + c.w, x + w), y1 = min<int>(c.y + c.h, y + h);
@@ -211,7 +256,14 @@ static Hit hits[48];
 static int nHits = 0;
 static void hit(int x, int y, int w, int h, const char *id) {
   if (!measuring || !id || !id[0] || nHits >= 48) return;
-  // Clip hits to the current clip's measure-time view (scroll areas set it) by the caller.
+  // Clip hits to the current clip's measure-time view (scroll areas set it) by the caller. In a page: to the screen.
+  y -= pageY;
+  if (y < 0) {
+    h += y;
+    y = 0;
+  }
+  if (y + h > SCR_H) h = SCR_H - y;
+  if (h <= 0 || w <= 0) return;
   hits[nHits].r = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
   strlcpy(hits[nHits].id, id, sizeof(hits[nHits].id));
   nHits++;
@@ -222,10 +274,17 @@ struct Scroller {
   float off, vel, maxOff, dragFrom;
   uint32_t lastMove;
   bool used;
+  // The page (scrolls[PAGE]): full-screen, moved by shifting the frame buffer; snaps to its sections.
+  bool snapping;
+  float snapTo;
+  int16_t snaps[6];
+  int nSnaps;
 };
+static const int PAGE = 3;  // scrolls[PAGE] is the page scroller of market / locked / result
 static Scroller scrolls[4];
 static int scrollCount = 0;  // registered this frame
 static uint32_t lastScrollStep = 0;
+static uint32_t lastTouchAt = 0;  // any finger down (the page glides home after a minute untouched)
 
 struct TouchState {
   bool down, dragging;
@@ -247,15 +306,43 @@ static bool isPending(const char *id) { return tapped[0] && id && !strcmp(tapped
 // Scroll area: call while drawing; returns the offset to apply. contentH = full height of the content.
 static float scrollArea(int idx, int x, int y, int w, int h, int contentH) {
   Scroller &s = scrolls[idx];
-  s.view = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
+  s.view = {(int16_t)x, (int16_t)(y - pageY), (int16_t)w, (int16_t)h};
   s.maxOff = max(0, contentH - h);
   s.used = true;
   if (idx + 1 > scrollCount) scrollCount = idx + 1;
   return s.off;
 }
 
-static void resetScrolls() {
-  for (auto &s : scrolls) s = {};
+static void resetScrolls(bool keepPage = false) {
+  for (int i = 0; i < 4; i++)
+    if (!(keepPage && i == PAGE)) scrolls[i] = {};
+}
+
+// Glide the page to an offset (snaps, "Back to top", the More tab).
+static void pageGlide(float to) {
+  Scroller &p = scrolls[PAGE];
+  p.vel = 0;
+  p.snapTo = clampf(to, 0, max(0.f, p.maxOff));
+  p.snapping = true;
+  p.lastMove = NOW;
+}
+
+// Proximity snap: when the page comes to rest near the top of a section, it settles there (like the web page).
+static bool pageSnap() {
+  Scroller &p = scrolls[PAGE];
+  if (p.off < 0 || p.off > p.maxOff) return false;  // the rubber band handles the ends
+  int best = -1;
+  float bd = 1e9f;
+  for (int i = 0; i < p.nSnaps; i++) {
+    float d = fabsf(p.snaps[i] - p.off);
+    if (d < bd) {
+      bd = d;
+      best = i;
+    }
+  }
+  if (best < 0 || bd < 0.5f || bd >= 90) return false;
+  pageGlide(p.snaps[best]);
+  return true;
 }
 
 // ================================================================ parsing
@@ -320,6 +407,87 @@ static void parsePeople(Person *out, int &n, JsonArrayConst arr, const char *k1,
       p.rank = (int16_t)constrain((int32_t)(v["rank"] | 0), (int32_t)0, (int32_t)99);
     }
     n++;
+  }
+}
+
+static uint32_t memHash(const void *p, size_t n) {
+  const uint8_t *b = (const uint8_t *)p;
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
+  return h;
+}
+static int pct(JsonVariantConst v, int def) {  // 0-100, clamped; def when missing or not a number
+  if (!v.is<float>() && !v.is<int>()) return def;
+  return constrain((int)lroundf(v.as<float>()), 0, 100);
+}
+
+// Page sections and the pay card (all optional; missing fields leave them empty and the page short).
+static void parsePage(Screen &s, JsonObjectConst j) {
+  JsonObjectConst ch = j["chart"].as<JsonObjectConst>();
+  if (!ch.isNull()) {
+    Chart &c = s.chart;
+    for (JsonVariantConst v : ch["room"].as<JsonArrayConst>()) {
+      if (c.n >= MAX_CHART) break;
+      c.room[c.n++] = (int8_t)pct(v, 50);
+    }
+    int g = 0;
+    for (JsonVariantConst v : ch["gemini"].as<JsonArrayConst>()) {
+      if (g >= c.n) break;
+      c.gem[g] = (int8_t)pct(v, -1);
+      if (c.gem[g] >= 0) c.hasGem = true;
+      g++;
+    }
+    for (; g < MAX_CHART; g++) c.gem[g] = -1;
+    if (c.n == 1) c.room[c.n++] = c.room[0];  // one sample: a flat line
+    c.has = c.n >= 2;
+    c.model = (int16_t)pct(ch["model"], -1);
+    c.span = (int16_t)pct(ch["span"], 100);
+    if (c.span < 1) c.span = 1;
+    c.lock = (int16_t)pct(ch["lock"], -1);
+    const char *o = ch["outcome"] | "";
+    c.outcome = !strcmp(o, "YES") ? 'Y' : !strcmp(o, "NO") ? 'N' : 0;
+    CPY(c.x0, ch["x0"]);
+    CPY(c.x1, ch["x1"]);
+  }
+  for (JsonVariantConst v : j["odds"].as<JsonArrayConst>()) {
+    if (s.nOdds >= MAX_ODDS) break;
+    OddsRow &r = s.odds[s.nOdds];
+    CPY(r.label, v["label"]);
+    if (!r.label[0]) continue;
+    r.room = !strcmp(v["source"] | "", "room");
+    r.p = (int16_t)pct(v["p"], 50);
+    for (JsonVariantConst h : v["hist"].as<JsonArrayConst>()) {
+      if (r.nHist >= ODDS_HIST) break;
+      r.hist[r.nHist++] = (int8_t)pct(h, r.p);
+    }
+    s.nOdds++;
+  }
+  CPY(s.oddsNote, j["oddsNote"]);
+  parsePeople(s.stand, s.nStand, j["standings"].as<JsonArrayConst>(), "cents", "pnl");
+  s.standTie = s.nStand > 0 && !(j["standings"][0]["lead"] | false);
+  s.chartHash = memHash(&s.chart, sizeof(s.chart));
+  s.oddsHash = memHash(s.odds, sizeof(s.odds)) ^ memHash(s.oddsNote, sizeof(s.oddsNote)) ^ (uint32_t)s.nOdds;
+  s.standHash = memHash(s.stand, sizeof(s.stand)) ^ (uint32_t)s.nStand * 977u ^ (s.standTie ? 1u : 0u);
+
+  JsonObjectConst pay = j["pay"].as<JsonObjectConst>();
+  if (!pay.isNull()) {
+    s.hasPay = true;
+    CPY(s.payName, pay["name"]);
+    s.payCents = constrain((int32_t)(pay["cents"] | 0), (int32_t)0, (int32_t)100000000);
+    s.payLeftMs = constrain((int32_t)(pay["leftMs"] | 0), (int32_t)0, (int32_t)86400000);
+    s.payPaid = pay["paid"] | false;
+    int size = pay["qr"]["size"] | 0;
+    if (size > 0 && size <= PAY_QR) {
+      s.payQrSize = size;
+      int r = 0;
+      for (JsonVariantConst row : pay["qr"]["rows"].as<JsonArrayConst>()) {
+        if (r >= size) break;
+        const char *bits = row | "";
+        for (int c = 0; c < size && bits[c]; c++)
+          if (bits[c] == '1') s.payQr[r][c >> 3] |= 1 << (c & 7);
+        r++;
+      }
+    }
   }
 }
 
@@ -468,6 +636,7 @@ static void parseInto(Screen &s, JsonObjectConst j) {
     CPY(s.verdict, card["verdict"]);
   }
   CPY(s.caption, j["caption"]["text"]);
+  parsePage(s, j);
 }
 
 // ================================================================ animation state
@@ -486,6 +655,13 @@ static int32_t remBase = 0;     // ms to lock at remAt
 static uint32_t remAt = 0;
 static int lockTotalMs = 0;
 static char lastQuestion[220] = "";
+// Page sections: each animates in the first time it scrolls into view (0 = not seen yet on this screen).
+static uint32_t tChartIn = 0, tOddsIn = 0, tListIn = 0;
+// Pay card.
+static uint32_t tPay = 0, tPaid = 0;  // card appeared, payment landed
+static int32_t payBase = 0;           // ms left at payAt
+static uint32_t payAt = 0;
+static uint32_t payHiddenAt = 0;      // Close tapped: hide the card (2.5 s) while the site clears it
 
 struct RollState {
   char shown[16], prev[16];
@@ -2028,6 +2204,589 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
   }
 }
 
+// ---------------------------------------------------------------- pages: market / locked / result scroll down
+//
+// The first 480 px of the page are the screen as it always was. Under it: the odds graph, "Odds right now" and
+// recent trades + standings. Drag anywhere to scroll (momentum, rubber band, snaps to each section); the page
+// moves by shifting the frame buffer, so a scroll frame only draws the strip that came into view.
+
+static bool pageDrawnValid = false;  // the panel shows the page drawn at pageDrawnY
+static int pageDrawnY = 0;
+static int blitD = 0;  // rows the page shifts this frame (set before the measure pass)
+
+// Fixed elements drawn over a scrolling page (screen coordinates: sticky header, scrollbar, toast, pay card).
+// When the page shifts, their old pixels moved with it, so they and the band they slid through are redrawn.
+static Rect ovNow[8], ovPrev[8];
+static int nOvNow = 0, nOvPrev = 0;
+static void overlay(int x, int y, int w, int h) {
+  if (!measuring) return;
+  if (nOvNow < 8) ovNow[nOvNow++] = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
+  if (blitD) mark(x, y - abs(blitD), w, h + 2 * abs(blitD));
+}
+
+static bool hasPage(const Screen &s) {
+  return (s.scr == S_MARKET || s.scr == S_LOCKED || s.scr == S_RESULT) && (s.chart.has || s.nOdds > 0 || s.nStand > 0);
+}
+
+struct PageLayout {
+  int chartY, chartH, oddsY, oddsH, listY, listH, endY, contentH;
+};
+static PageLayout pageLayout(const Screen &s) {
+  PageLayout L;
+  L.chartY = SCR_H + 8;
+  L.chartH = s.chart.has ? 348 : 0;
+  L.oddsY = L.chartY + (L.chartH ? L.chartH + 20 : 0);
+  L.oddsH = 64 + max(1, s.nOdds) * 66;
+  L.listY = L.oddsY + L.oddsH + 12;
+  L.listH = 58 + constrain(max(s.nTrades, s.nStand), 1, 8) * 38 + 10;
+  L.endY = L.listY + L.listH + 20;
+  L.contentH = L.endY + 62 + 18;
+  return L;
+}
+
+// How much of [y, y+h) (page coordinates) is on screen.
+static int pageVis(int y, int h) { return min(y + h, pageY + SCR_H) - max(y, pageY); }
+static bool onPage(int y, int h) { return pageVis(y, h) > 0; }
+// A section animates in the first time a good part of it is on screen.
+static void seen(uint32_t &t, int y, int h) {
+  if (measuring && !t && pageVis(y, h) >= min(h / 3, 150)) t = NOW ? NOW : 1;
+}
+
+static Watch wChart, wOdds, wStand, wHdr, wPay;
+
+// A small line of earlier values (odds rows): auto-ranged, stepped for the room's price, end dot.
+static void miniLine(const int8_t *v, int n, int x, int y, int w, int h, uint16_t c, bool stepped) {
+  if (n < 2) return;
+  int lo = 100, hi = 0;
+  for (int i = 0; i < n; i++) {
+    lo = min<int>(lo, v[i]);
+    hi = max<int>(hi, v[i]);
+  }
+  int mid = (lo + hi) / 2, sp = max(20, hi - lo + 6);
+  lo = constrain(mid - sp / 2, 0, max(0, 100 - sp));
+  hi = lo + sp;
+  auto py = [&](int val) { return y + h - 2 - ((val - lo) * (h - 4)) / max(1, hi - lo); };
+  auto px = [&](int i) { return x + (i * (w - 6)) / (n - 1); };
+  for (int i = 1; i < n; i++) {
+    if (stepped) {
+      line(px(i - 1), py(v[i - 1]), px(i), py(v[i - 1]), 2.2f, c);
+      line(px(i), py(v[i - 1]), px(i), py(v[i]), 2.2f, c);
+    } else {
+      line(px(i - 1), py(v[i - 1]), px(i), py(v[i]), 2.2f, c);
+    }
+  }
+  circle(px(n - 1), py(v[n - 1]), 3.6f, c);
+}
+
+// The odds graph: room YES price over the question (stepped, filled), Gemini's price, the model's line, the lock,
+// the outcome; axis 0-100% with gridlines, current values at the right. Draws on left to right when it first shows.
+static void chartSection(const Screen &s, int y, int h) {
+  const Chart &c = s.chart;
+  if (!c.has) return;
+  seen(tChartIn, y, h);
+  watch(wChart, s.chartHash, 0, y - 4, SCR_W, h + 12);
+  if (!onPage(y - 10, h + 20)) return;
+  const int X = 12, W = 776;
+  card(X, y, W, h, 26);
+  text(F_H3, 32, y + 40, "Odds graph", P.ink);
+  textFit(F_B2, 32, y + 66, 736, s.question, P.ink2);
+  // legend (right to left on the title line)
+  int lx = 768;
+  const int ly = y + 34;
+  if (c.hasGem) {
+    lx -= textW(F_B3, "Gemini");
+    text(F_B3, lx, y + 40, "Gemini", P.ink2);
+    lx -= 30;
+    line(lx, ly, lx + 22, ly, 2.4f, P.ink);
+    tri(lx + 5, ly - 7, lx + 17, ly - 7, lx + 11, ly + 3, P.ink);
+    tri(lx + 8, ly - 5.5f, lx + 14, ly - 5.5f, lx + 11, ly - 0.5f, P.card);
+    lx -= 16;
+  }
+  if (c.model >= 0) {
+    lx -= textW(F_B3, "Model");
+    text(F_B3, lx, y + 40, "Model", P.ink2);
+    lx -= 30;
+    for (int k = 0; k < 3; k++) line(lx + k * 8, ly, lx + k * 8 + 5, ly, 2.2f, P.ink, 190);
+    lx -= 16;
+  }
+  lx -= textW(F_B3, "Room");
+  text(F_B3, lx, y + 40, "Room", P.ink2);
+  lx -= 30;
+  line(lx, ly, lx + 22, ly, 3.4f, P.yes);
+
+  const int px0 = 72, px1 = 668, py0 = y + 96, py1 = y + 300;
+  auto PY = [&](int v) { return py1 - (v * (py1 - py0)) / 100; };
+  auto PX = [&](int i) { return px0 + (int)(((int32_t)(px1 - px0) * c.span * i) / (100 * (c.n - 1))); };
+  const int spanX = px0 + (px1 - px0) * c.span / 100;
+  // still trading: the rest of the window up to the lock is shaded
+  bool future = s.scr == S_MARKET && spanX < px1 - 2;
+  if (future) fill(spanX, py0, px1 - spanX, py1 - py0, P.well, 170);
+  for (int v = 0; v <= 100; v += 25) {
+    int gy = PY(v);
+    fill(px0, gy, px1 - px0, 1, v == 50 ? P.ruleStrong : P.rule);
+    char lab[8];
+    snprintf(lab, sizeof(lab), "%d%%", v);
+    textRight(F_B3, px0 - 10, gy + 5, lab, P.muted);
+  }
+  // axis labels and the lock
+  text(F_B3, px0, py1 + 26, c.x0[0] ? c.x0 : "Open", P.muted);
+  textRight(F_B3, px1, py1 + 26, c.x1[0] ? c.x1 : "Now", P.muted);
+  // The lock marker (not where the outcome's marker stands: a host-settled question locks just before it).
+  int lockX = -1;
+  if (c.lock >= 0 && !(c.outcome && c.lock >= 96)) {
+    int lxp = px0 + (px1 - px0) * c.lock / 100;
+    lockX = lxp;
+    for (int yy = py0 + 4; yy < py1; yy += 10) fill(lxp - 1, yy, 2, 5, P.ink, 140);
+    iconLock(lxp, py0 - 6, 0.6f, P.ink);
+    if (lxp - px0 > 70 && px1 - lxp > 70) textCenter(F_B3, lxp, py1 + 26, "Locked", P.ink2);
+  }
+  if (future && px1 - spanX > 150) textCenter(F_B3, (spanX + px1) / 2, py1 - 14, "Trading until the lock", P.muted);
+  float rp = tChartIn ? prog(tChartIn, 120, 900) : 0;
+  if (rp < 1) mark(X, py0 - 30, W, py1 - py0 + 64);
+  // the model's price: a dashed line across, fading in
+  if (c.model >= 0) {
+    int my = PY(c.model);
+    uint8_t ma = (uint8_t)(170 * clampf(rp * 2, 0, 1));
+    for (int x = px0; x < px1; x += 14) line(x, my, min(x + 8, px1), my, 2.2f, P.ink, ma);
+  }
+  // the lines, revealed left to right
+  int revealX = px0 - 6 + (int)((spanX - px0 + 46) * eOut(rp));
+  pushClip(px0 - 8, py0 - 24, max(0, revealX - (px0 - 8)), py1 - py0 + 48);
+  int16_t xs[2 * MAX_CHART], ys[2 * MAX_CHART];
+  int k = 0;
+  for (int i = 0; i < c.n; i++) {
+    int px = PX(i), py = PY(c.room[i]);
+    if (k > 0) {
+      xs[k] = px;
+      ys[k] = ys[k - 1];
+      k++;
+    }
+    xs[k] = px;
+    ys[k] = py;
+    k++;
+  }
+  fillUnderLine(xs, ys, k, py1, mix(P.card, P.yes, 30), 255);
+  if (c.hasGem)
+    for (int i = 1; i < c.n; i++)
+      if (c.gem[i - 1] >= 0 && c.gem[i] >= 0) line(PX(i - 1), PY(c.gem[i - 1]), PX(i), PY(c.gem[i]), 2.4f, P.ink);
+  for (int i = 0; i + 1 < k; i++) line(xs[i], ys[i], xs[i + 1], ys[i + 1], 3.2f, P.yes);
+  popClip();
+  float ex = xs[k - 1], ey = ys[k - 1];
+  if (rp >= 1) {
+    if (s.scr == S_MARKET) {  // live: the end of the line pings
+      float p = (NOW % 1600) / 1600.f;
+      if (p < 0.8f) circle(ex, ey, 5 + 11 * eOut(p / 0.8f), P.yes, (uint8_t)(110 * (1 - p / 0.8f)));
+      markAmbient((int)ex - 20, (int)ey - 20, 40, 40);
+    }
+    circle(ex, ey, 5.5f, P.yes);
+    circle(ex, ey, 2.4f, P.card);
+  }
+  // the outcome: where it settled
+  uint8_t ta = (uint8_t)(255 * clampf((rp - 0.6f) * 2.5f, 0, 1));
+  if (c.outcome && ta) {
+    bool yes = c.outcome == 'Y';
+    int oy = PY(yes ? 100 : 0);
+    for (int yy = min((int)ey, oy) + 6; yy < max((int)ey, oy) - 6; yy += 9) fill((int)ex - 1, yy, 2, 4, yes ? P.yes : P.no600, ta);
+    ring(ex, oy, 12, 2.5f, yes ? P.yes : P.no, ta / 2);
+    circle(ex, oy, 8, yes ? P.yes : P.no, ta);
+    const char *lab = yes ? "It was YES" : "It was NO";
+    int labR = (int)ex - 18;
+    if (lockX > 0 && labR - lockX < 150 && lockX < labR) labR = lockX - 10;  // keep clear of the lock line
+    textRight(F_B1, labR, oy + (yes ? 24 : -10), lab, yes ? P.yes600 : P.no600, ta);
+  }
+  // current values, kept apart, at the right
+  struct Tag {
+    int y, v;
+    uint8_t kind;  // 0 room, 1 gemini, 2 model
+  } tags[3];
+  int nt = 0;
+  tags[nt++] = {PY(c.room[c.n - 1]), c.room[c.n - 1], 0};
+  if (c.hasGem) {
+    int g = -1;
+    for (int i = c.n - 1; i >= 0 && g < 0; i--) g = c.gem[i];
+    if (g >= 0) tags[nt++] = {PY(g), g, 1};
+  }
+  if (c.model >= 0) tags[nt++] = {PY(c.model), c.model, 2};
+  for (int a = 0; a < nt; a++)
+    for (int b = a + 1; b < nt; b++)
+      if (tags[b].y < tags[a].y) {
+        Tag t = tags[a];
+        tags[a] = tags[b];
+        tags[b] = t;
+      }
+  int ty[3];
+  for (int i = 0; i < nt; i++) ty[i] = i ? max(tags[i].y, ty[i - 1] + 30) : max(tags[i].y, py0 - 8);
+  int over = ty[nt - 1] - (py1 + 8);
+  if (over > 0)
+    for (int i = 0; i < nt; i++) ty[i] -= over;
+  for (int i = 0; i < nt; i++) {
+    char v[8];
+    snprintf(v, sizeof(v), "%d%%", tags[i].v);
+    int w = textW(F_N4, v) + 22, tx = 684;
+    uint16_t bg = tags[i].kind == 0 ? P.yes : tags[i].kind == 1 ? P.ink : P.card;
+    uint16_t fg = tags[i].kind == 2 ? P.ink : P.white;
+    int fromX = tags[i].kind == 0 ? (int)ex + 8 : (tags[i].kind == 2 ? px1 : spanX) + 4;
+    if (fromX < tx - 4) line(fromX, tags[i].y, tx - 2, ty[i], 1.2f, tags[i].kind == 0 ? P.yes : P.ink, ta / 3);
+    rrect(tx, ty[i] - 13, w, 26, 13, bg, ta);
+    if (tags[i].kind == 2) rrectStroke(tx, ty[i] - 13, w, 26, 13, 2, P.ink, ta);
+    text(F_N4, tx + 11, ty[i] + 7, v, fg, ta);
+  }
+}
+
+static void oddsRow(const OddsRow &r, int x, int y, int w, int h) {
+  card(x, y, w, h, 18);
+  if (r.room) rrectStroke(x, y, w, h, 18, 2, P.accent, 120);
+  int cx = x + 14, cy = y + (h - 26) / 2, cw;
+  if (r.room) {
+    cw = pill(cx, cy, 26, "Room", F_B3, P.accentTint, P.deep);
+  } else {
+    cw = textW(F_B3, "Gemini") + 36;
+    rrect(cx, cy, cw, 26, 13, P.ink);
+    tri(cx + 9, cy + 8, cx + 21, cy + 8, cx + 15, cy + 19, P.white);
+    tri(cx + 12, cy + 9.5f, cx + 18, cy + 9.5f, cx + 15, cy + 15, P.ink);
+    text(F_B3, cx + 26, cy + 18, "Gemini", P.white);
+  }
+  char v[8];
+  snprintf(v, sizeof(v), "%d%%", r.p);
+  textRight(F_N3, x + w - 16, y + h / 2 + 12, v, r.room ? P.yes600 : P.ink);
+  int valL = x + w - 16 - 86;
+  int sparkX = valL - 164;
+  bool spark = r.nHist >= 2;
+  if (spark) miniLine(r.hist, r.nHist, sparkX, y + 12, 150, h - 24, r.room ? P.yes : P.ink2, r.room);
+  int lx = cx + cw + 12;
+  textFit(F_B1, lx, y + h / 2 + 7, (spark ? sparkX - 18 : valL - 10) - lx, r.label, P.ink);
+}
+
+static void oddsSection(const Screen &s, int y, int h) {
+  seen(tOddsIn, y, h);
+  watch(wOdds, s.oddsHash, 0, y - 4, SCR_W, h + 8);
+  if (!onPage(y - 8, h + 16)) return;
+  text(F_H3, 24, y + 30, "Odds right now", P.ink);
+  if (s.oddsNote[0]) textFit(F_B3, 24, y + 52, 752, s.oddsNote, P.muted);
+  if (!s.nOdds) {
+    card(16, y + 64, 768, 58, 18);
+    text(F_B2, 34, y + 64 + 36, "No odds to show yet.", P.ink2);
+    return;
+  }
+  for (int i = 0; i < s.nOdds; i++) {
+    int ry = y + 64 + i * 66;
+    if (!onPage(ry - 8, 74)) continue;
+    float p = tOddsIn ? prog(tOddsIn, 60 + i * 70, 480) : 0;
+    if (p <= 0) {
+      mark(0, ry - 6, SCR_W, 72);
+      continue;
+    }
+    if (p < 1) {
+      layer((int)((1 - eBack(p, 1.2f)) * 40), 0, (uint8_t)(255 * clampf(p * 2, 0, 1)));
+      mark(0, ry - 6, SCR_W, 72);
+    }
+    oddsRow(s.odds[i], 16, ry, 768, 58);
+    layerReset();
+  }
+}
+
+static void listsSection(const Screen &s, int y, int h) {
+  seen(tListIn, y, h);
+  watch(wStand, s.standHash, 0, y - 4, SCR_W, h + 8);
+  if (!onPage(y - 8, h + 16)) return;
+  const int cw = 378, rowH = 38;
+  for (int side = 0; side < 2; side++) {
+    int x = side ? 406 : 16;
+    float p = tListIn ? prog(tListIn, side * 90, 520) : 0;
+    if (p <= 0) {
+      mark(x - 10, y - 10, cw + 20, h + 30);
+      continue;
+    }
+    if (p < 1) {
+      layer(0, (int)((1 - eBack(p, 1.2f)) * 24), (uint8_t)(255 * clampf(p * 2.2f, 0, 1)));
+      mark(x - 10, y - 10, cw + 20, h + 40);
+    }
+    card(x, y, cw, h, 22);
+    text(F_H3, x + 18, y + 36, side ? "Standings" : "Recent trades", P.ink);
+    int n = side ? min(8, s.nStand) : min(8, s.nTrades);
+    if (n == 0) text(F_B2, x + 18, y + 80, side ? "No players yet." : "No trades yet. Phones buy YES or NO.", P.ink2);
+    for (int i = 0; i < n; i++) {
+      int ry = y + 54 + i * rowH;
+      if (!side) {
+        const TradeRow &t = s.trades[i];
+        avatar(x + 30, ry + 15, 13, t.name);
+        char nm[24];
+        fit(F_B1, t.name, 126, nm, sizeof(nm));
+        text(F_B1, x + 52, ry + 22, nm, P.ink);
+        uint16_t col = t.yes ? P.yes600 : P.no600;
+        iconArrow(x + 192, ry + 14, 0.6f, t.yes, col);
+        text(F_B3, x + 202, ry + 20, t.yes ? "Yes" : "No", col);
+        if (t.price >= 0) {
+          char pr[8];
+          snprintf(pr, sizeof(pr), "@%d%%", t.price);
+          text(F_B3, x + 240, ry + 20, pr, P.muted);
+        }
+        char m[16];
+        fmtMoney(t.cents, m, sizeof(m));
+        textRight(F_N4, x + cw - 16, ry + 22, m, P.ink);
+      } else {
+        const Person &q = s.stand[i];
+        bool lead = i == 0 && !s.standTie;
+        if (lead) rrect(x + 8, ry - 4, cw - 16, 36, 12, P.ink);
+        char rk[4];
+        snprintf(rk, sizeof(rk), "%d", q.rank > 0 ? q.rank : i + 1);
+        textCenter(F_N4, x + 28, ry + 22, rk, lead ? P.gold : P.muted);
+        avatar(x + 60, ry + 14, 13, q.name);
+        char m[16], pl[16] = "";
+        fmtMoney(q.cents, m, sizeof(m));
+        int mw = textW(F_N4, m);
+        if (q.has2 && q.extra != 0) fmtMoney(q.extra, pl, sizeof(pl), true);
+        int pw = pl[0] ? textW(F_B3, pl) + 10 : 0;
+        textFit(F_B1, x + 82, ry + 22, cw - 82 - 16 - mw - pw - 10, q.name, lead ? P.white : P.ink);
+        textRight(F_N4, x + cw - 16, ry + 22, m, lead ? P.white : P.ink);
+        if (pl[0]) textRight(F_B3, x + cw - 16 - mw - 10, ry + 21, pl, lead ? P.lime : q.extra > 0 ? P.yes600 : P.no600);
+      }
+    }
+    layerReset();
+  }
+}
+
+static void shortBadge(const Screen &s, char *out, size_t cap) {
+  if (!strncmp(s.title, "Question ", 9)) {  // "Question 3 of 8" -> "Q3"
+    int n = 0;
+    out[n++] = 'Q';
+    for (const char *p = s.title + 9; *p >= '0' && *p <= '9' && n < (int)cap - 1; p++) out[n++] = *p;
+    out[n] = 0;
+  } else {
+    fit(F_B1, s.title[0] ? s.title : "Live", 120, out, cap);
+  }
+}
+
+// Fixed parts of a page: the slim header that slides in once the view is scrolled away (tap = back to the top),
+// the "more below" tab, the scrollbar.
+static void pageChrome(const Screen &s, int contentH, int py) {
+  Scroller &pg = scrolls[PAGE];
+  if (pg.maxOff <= 0) return;
+  // scrollbar
+  int barH = max(36, SCR_H * SCR_H / max(1, contentH));
+  int barY = (int)((SCR_H - barH) * clampf(pg.off / max(1.f, pg.maxOff), 0, 1));
+  bool active = NOW - pg.lastMove < 1200 || (T.dragging && T.scroll == PAGE);
+  overlay(SCR_W - 10, 0, 10, SCR_H);
+  rrect(SCR_W - 7, barY + 3, 4, barH - 6, 2, P.ink, active ? 120 : 45);
+  if (NOW - pg.lastMove < 1500) mark(SCR_W - 10, 0, 10, SCR_H);
+  // "more below" tab on the bottom edge
+  if (py < 60) {
+    uint8_t a = (uint8_t)(255 * clampf(1 - py / 60.f, 0, 1));
+    const char *lab = s.chart.has ? "Odds graph" : "More";
+    int tw = textW(F_B3, lab) + 46, tx = (SCR_W - tw) / 2, ty = 460;
+    overlay(tx - 4, ty - 6, tw + 8, SCR_H - ty + 6);
+    rrect(tx, ty, tw, 40, 14, P.ink, a);
+    text(F_B3, tx + 16, ty + 16, lab, P.white, a);
+    float bob = 1.5f * sinf(NOW / 260.f);
+    iconArrow(tx + tw - 18, ty + 10 + bob, 0.55f, false, P.white, a);
+    markAmbient(tx + tw - 30, ty, 26, 20);
+    hit(tx - 16, ty, tw + 32, SCR_H - ty, "ui:more");
+  }
+  // sticky header
+  float hp = clampf((py - 150) / 40.f, 0, 1);
+  if (hp <= 0) return;
+  overlay(0, 0, SCR_W, 68);
+  layer(0, (int)((hp - 1) * 24), (uint8_t)(255 * hp));
+  fill(0, 0, SCR_W, 58, P.canvas);
+  fill(0, 58, SCR_W, 1, P.rule);
+  for (int i = 0; i < 6; i++) fill(0, 59 + i, SCR_W, 1, P.ink, 12 - i * 2);
+  int x = 16;
+  char b[40];
+  if (s.scr == S_MARKET) {
+    shortBadge(s, b, sizeof(b));
+    int w = textW(F_B1, b) + 46;
+    rrectGrad(x, 12, w, 34, 17, P.deep, P.accent, P.lime);
+    iconBolt(x + 20, 29, 0.8f, P.white);
+    text(F_B1, x + 34, 36, b, P.white);
+    x += w + 12;
+  } else if (s.scr == S_LOCKED) {
+    int w = textW(F_B1, "Closed") + 48;
+    rrect(x, 12, w, 34, 17, P.ink);
+    iconLock(x + 20, 28, 0.75f, P.white);
+    text(F_B1, x + 36, 36, "Closed", P.white);
+    x += w + 12;
+  } else {
+    const char *r = s.result == 'Y' ? "YES" : s.result == 'N' ? "NO" : "Void";
+    int w = pill(x, 12, 34, r, F_B1, s.result == 'Y' ? P.yes : s.result == 'N' ? P.no : P.well, s.result == 'Y' ? P.white : P.ink, 255, 16);
+    x += w + 12;
+  }
+  int rx = SCR_W - 18;
+  // Top: an up arrow and the word
+  rx -= textW(F_B3, "Top");
+  text(F_B3, rx, 35, "Top", P.ink2);
+  iconArrow(rx - 12, 28, 0.6f, true, P.ink2);
+  rx -= 34;
+  if (s.scr != S_RESULT) {
+    char v[16];
+    snprintf(v, sizeof(v), "Yes %d\xC2\xA2", s.yes);
+    int w = textW(F_B1, v) + 26;
+    rx -= w;
+    rrect(rx, 12, w, 34, 17, P.yes);
+    text(F_B1, rx + 13, 36, v, P.white);
+    rx -= 12;
+  }
+  if (s.scr == S_MARKET && s.hasLock && lockTotalMs > 0) {
+    int32_t rem = remainingMs();
+    int secs = (rem + 999) / 1000;
+    char t[12];
+    if (secs >= 60) snprintf(t, sizeof(t), "%d:%02d", secs / 60, secs % 60);
+    else snprintf(t, sizeof(t), "%ds", secs);
+    int w = textW(F_N4, t);
+    watch(wHdr, (uint32_t)secs, rx - w - 40, 0, w + 44, 58);
+    textRight(F_N4, rx, 37, t, secs <= 5 ? P.hot : P.ink);
+    iconLock(rx - w - 16, 27, 0.6f, secs <= 5 ? P.hot : P.ink2);
+    rx -= w + 34;
+  }
+  textFit(F_B1, x, 36, rx - x - 8, s.question, P.ink);
+  if (isPressed("ui:top")) fill(0, 0, SCR_W, 58, P.ink, 18);
+  layerReset();
+  hit(0, 0, SCR_W, 58, "ui:top");
+}
+
+static void drawPage(const Screen &s, const NetStatus &st) {
+  PageLayout L = pageLayout(s);
+  Scroller &pg = scrolls[PAGE];
+  pg.nSnaps = 0;
+  pg.snaps[pg.nSnaps++] = 0;
+  if (L.chartH) pg.snaps[pg.nSnaps++] = L.chartY - 66;
+  pg.snaps[pg.nSnaps++] = L.oddsY - 66;
+  pg.snaps[pg.nSnaps++] = L.listY - 66;
+  float off = scrollArea(PAGE, 0, 0, SCR_W, SCR_H, L.contentH);
+  pageY = (int)floorf(off);
+  origin(0, -pageY);
+  if (pageY < SCR_H) {
+    if (s.scr == S_RESULT) drawResult(s, st);
+    else drawMarket(s, st, s.scr == S_LOCKED);
+  }
+  layerReset();
+  chartSection(s, L.chartY, L.chartH);
+  oddsSection(s, L.oddsY, L.oddsH);
+  listsSection(s, L.listY, L.listH);
+  if (onPage(L.endY - 10, 90)) {
+    Btn b = {};
+    strlcpy(b.id, "ui:top", sizeof(b.id));
+    strlcpy(b.label, "Back to top", sizeof(b.label));
+    b.style = B_PLAIN;
+    b.enabled = true;
+    button(250, L.endY, 300, 62, b, F_B1, 22);
+    iconArrow(250 + 40, L.endY + 31, 0.7f, true, P.ink2);
+  }
+  int py = pageY;
+  if (!measuring) {
+    pageDrawnValid = true;
+    pageDrawnY = pageY;
+  }
+  pageY = 0;
+  origin(0, 0);
+  pageChrome(s, L.contentH, py);
+}
+
+// ---------------------------------------------------------------- Solana Pay card (on top of any screen)
+
+static int32_t payLeft() {
+  int32_t r = payBase - (int32_t)(NOW - payAt);
+  return r < 0 ? 0 : r;
+}
+static bool payVisible() { return cur && cur->hasPay && !(payHiddenAt && millis() - payHiddenAt < 2500); }
+
+static void payCard(const Screen &s) {
+  float fp = prog(tPay, 0, 260);
+  overlay(0, 0, SCR_W, SCR_H);
+  if (fp < 1) mark(0, 0, SCR_W, SCR_H);
+  fill(0, 0, SCR_W, SCR_H, P.ink, (uint8_t)(150 * eOut(fp)));
+  hit(0, 0, SCR_W, SCR_H, "ui:none");  // nothing under the card reacts while it is up
+  const int X = 60, Y = 40, W = 680, H = 400;
+  if (enter(tPay, 60, 0, {X, Y, W, H})) {
+    card(X, Y, W, H, 30);
+    const int qx = 84, qy = 64, qb = 352, qcx = qx + qb / 2, qcy = qy + qb / 2;
+    char amt[16];
+    fmtMoney(s.payCents, amt, sizeof(amt));
+    bool expired = !s.payPaid && payLeft() <= 0;
+    if (!s.payPaid) {
+      rrect(qx, qy, qb, qb, 22, P.white);
+      rrectStroke(qx, qy, qb, qb, 22, 2, P.rule);
+      if (s.payQrSize) {
+        int scale = max(1, (qb - 28) / s.payQrSize);
+        int ox = qx + (qb - scale * s.payQrSize) / 2, oy = qy + (qb - scale * s.payQrSize) / 2;
+        for (int r = 0; r < s.payQrSize; r++)
+          for (int c = 0; c < s.payQrSize; c++)
+            if (s.payQr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.ink);
+      } else {
+        textCenter(F_B1, qcx, qcy - 6, "Pay from your phone", P.ink2);
+        textCenter(F_B3, qcx, qcy + 20, "This request does not fit a QR", P.muted);
+      }
+      if (expired) {
+        rrect(qx, qy, qb, qb, 22, P.white, 190);
+        textCenter(F_H2, qcx, qcy + 10, "Expired", P.ink);
+      }
+    } else {
+      float a = prog(tPaid, 0, 620), b = prog(tPaid, 260, 520);
+      rrect(qx, qy, qb, qb, 22, P.accentTint);
+      if (a < 1) ring(qcx, qcy, 104 + 56 * eOut(a), 5 * (1 - a) + 1, P.accent, (uint8_t)(170 * (1 - a)));
+      circle(qcx, qcy, 104 * clampf(eBack(a, 1.8f), 0, 1.2f), P.accent);
+      // the check draws on: short stroke, then the long one
+      const float k = 7.f;
+      float ax = qcx - 8 * k, ay = qcy, bx2 = qcx - 2.5f * k, by2 = qcy + 6 * k, cx2 = qcx + 9 * k, cy2 = qcy - 7 * k;
+      float e = eOut(b);
+      if (e > 0) {
+        float s1 = clampf(e / 0.35f, 0, 1);
+        line(ax, ay, ax + (bx2 - ax) * s1, ay + (by2 - ay) * s1, 3.4f * k * 0.6f, P.white);
+        if (e > 0.35f) {
+          float s2 = (e - 0.35f) / 0.65f;
+          line(bx2, by2, bx2 + (cx2 - bx2) * s2, by2 + (cy2 - by2) * s2, 3.4f * k * 0.6f, P.white);
+        }
+      }
+      if (a < 1 || b < 1) mark(qx - 70, qy - 70, qb + 140, qb + 140);
+    }
+    const int rx = 460, rw = 256;
+    // "Solana Pay" chip: the token's two colours as a small mark
+    int cw = textW(F_B3, "Solana Pay") + 40;
+    rrect(rx, 66, cw, 28, 14, P.ink);
+    rrectGrad(rx + 10, 75, 18, 10, 3, rgb(0x9945FF), rgb(0x5A8CE6), rgb(0x14F195));
+    text(F_B3, rx + 34, 85, "Solana Pay", P.white);
+    if (!s.payPaid) {
+      int starts[2], lens[2];
+      bool cut;
+      static const char SCAN[] = "Scan with any Solana wallet";
+      int n = wrap(F_H3, SCAN, rw, 2, starts, lens, &cut);
+      for (int i = 0; i < n; i++) textN(F_H3, rx, 136 + i * 30, &SCAN[starts[i]], lens[i], P.ink);
+      text(F_B3, rx, 210, "Paying in", P.muted);
+      textFit(F_B1, rx, 236, rw, s.payName[0] ? s.payName : "Player", P.ink);
+      text(F_N2, rx, 304, amt, P.ink);
+      int secs = (payLeft() + 999) / 1000;
+      char t[32];
+      if (expired) strlcpy(t, "This request expired", sizeof(t));
+      else snprintf(t, sizeof(t), "Expires in %d:%02d", secs / 60, secs % 60);
+      watch(wPay, (uint32_t)secs, rx - 4, 318, rw + 8, 30);
+      circle(rx + 6, 334, 5, expired ? P.hot : P.accent);
+      text(F_B2, rx + 18, 340, t, P.ink2);
+      Btn b = {};
+      strlcpy(b.id, "pay:close", sizeof(b.id));
+      strlcpy(b.label, "Close", sizeof(b.label));
+      b.style = B_PLAIN;
+      b.enabled = true;
+      button(rx, 360, rw, 58, b, F_B1, 20);
+    } else {
+      float tp = prog(tPaid, 360, 420);
+      uint8_t a = (uint8_t)(255 * tp);
+      if (tp < 1) mark(rx - 10, 100, rw + 20, 220);
+      text(F_H1, rx, 160, "Paid!", P.deep, a);
+      text(F_N2, rx, 236, amt, P.ink, a);
+      char line2[48];
+      snprintf(line2, sizeof(line2), "added for %s", s.payName[0] ? s.payName : "the player");
+      textFit(F_B1, rx, 274, rw, line2, P.ink2, a);
+      text(F_B3, rx, 302, "It shows on their phone now.", P.muted, a);
+      Btn b = {};
+      strlcpy(b.id, "pay:close", sizeof(b.id));
+      strlcpy(b.label, "Done", sizeof(b.label));
+      b.style = B_BRAND;
+      b.enabled = true;
+      button(rx, 360, rw, 58, b, F_B1, 20);
+    }
+  }
+  layerReset();
+}
+
 // ---------------------------------------------------------------- unknown screens + connection
 
 static void drawMessage(const Screen &s, const NetStatus &st) {
@@ -2101,6 +2860,7 @@ static void drawToast() {
   char buf[96];
   fit(F_B1, toast, 600, buf, sizeof(buf));
   int w = textW(F_B1, buf) + 70, x = (SCR_W - w) / 2, y = 404 + dy;
+  overlay(x - 12, 396, w + 24, 84);
   layer(0, 0, a);
   shadow(x, y, w, 52, 26);
   rrect(x, y, w, 52, 26, P.ink);
@@ -2122,19 +2882,29 @@ static void scene(const NetStatus &st) {
   const Screen &s = *cur;
   bool fullConn = !haveScreen || (staleNow && NOW - staleSince > 15000);
   if (fullConn) {
+    if (!measuring) pageDrawnValid = false;
     drawConnection(st, haveScreen);
     return;
   }
   fill(0, 0, SCR_W, SCR_H, P.canvas);
-  switch (s.scr) {
-    case S_SELECT: drawSelect(s, st); break;
-    case S_LOBBY: drawLobby(s, st); break;
-    case S_MARKET: drawMarket(s, st, false); break;
-    case S_LOCKED: drawMarket(s, st, true); break;
-    case S_RESULT: drawResult(s, st); break;
-    case S_ENDED: drawEnded(s, st); break;
-    default: drawMessage(s, st); break;
+  if (hasPage(s)) {
+    drawPage(s, st);
+  } else {
+    if (!measuring) pageDrawnValid = false;
+    switch (s.scr) {
+      case S_SELECT: drawSelect(s, st); break;
+      case S_LOBBY: drawLobby(s, st); break;
+      case S_MARKET: drawMarket(s, st, false); break;
+      case S_LOCKED: drawMarket(s, st, true); break;
+      case S_RESULT: drawResult(s, st); break;
+      case S_ENDED: drawEnded(s, st); break;
+      default: drawMessage(s, st); break;
+    }
   }
+  pageY = 0;
+  origin(0, 0);
+  layerReset();
+  if (payVisible()) payCard(s);
   if (toast[0] && NOW - tToast < 3040) drawToast();
   else if (toast[0] && measuring) {  // gone: erase it
     toast[0] = 0;
@@ -2143,6 +2913,7 @@ static void scene(const NetStatus &st) {
   if (staleNow) {  // keep the last screen, say we are reconnecting
     const char *msg = "Reconnecting to the site...";
     int w = textW(F_B1, msg) + 64, x = (SCR_W - w) / 2;
+    overlay(x - 4, 4, w + 8, 52);
     rrect(x, 8, w, 44, 22, P.ink);
     markLogo(x + 24, 30, 9, 0, true);
     text(F_B1, x + 44, 37, msg, P.white);
@@ -2180,6 +2951,11 @@ bool uiFrame(const NetStatus &st) {
     tapped[0] = 0;
     fullDirty = true;
   }
+  static bool lastPayVis = false;  // the pay card hid itself after Close, or came back
+  if (payVisible() != lastPayVis) {
+    lastPayVis = payVisible();
+    fullDirty = true;
+  }
   ambientTick = NOW - lastAmbient >= 100;
   if (ambientTick) lastAmbient = NOW;
 
@@ -2190,6 +2966,17 @@ bool uiFrame(const NetStatus &st) {
     Scroller &s = scrolls[i];
     if (!s.used || (T.down && T.dragging && T.scroll == i)) continue;
     bool moving = false;
+    if (i == PAGE && s.snapping) {  // gliding to a snap point (or home)
+      s.off += (s.snapTo - s.off) * clampf(0.2f * dt, 0, 1);
+      s.vel = 0;
+      if (fabsf(s.snapTo - s.off) < 0.6f) {
+        s.off = s.snapTo;
+        s.snapping = false;
+      }
+      s.lastMove = NOW;
+      continue;
+    }
+    bool coasting = fabsf(s.vel) > 0.01f;
     if (fabsf(s.vel) > 0.01f) {
       s.off += s.vel * 16 * dt;
       s.vel *= powf(0.94f, dt);
@@ -2203,31 +2990,62 @@ bool uiFrame(const NetStatus &st) {
       moving = true;
     }
     if (fabsf(s.vel) < 0.02f) s.vel = 0;
+    // The page coming to rest near a section's top settles on it.
+    if (i == PAGE && coasting && fabsf(s.vel) < 0.15f && !T.down && pageSnap()) moving = true;
     if (moving) s.lastMove = NOW;
+  }
+  {  // a page left scrolled down glides home after a minute without a touch (the box is shared)
+    Scroller &pg = scrolls[PAGE];
+    if (pg.used && pg.off > 1 && !pg.snapping && !T.down && NOW - lastTouchAt > 60000 && NOW - pg.lastMove > 60000) pageGlide(0);
+  }
+
+  // The page scrolled since the panel was drawn: shift the pixels instead of redrawing them (below).
+  bool pageNow = haveScreen && !conn && hasPage(*cur);
+  int want = (int)floorf(scrolls[PAGE].off);
+  blitD = pageNow && pageDrawnValid && !fullDirty ? want - pageDrawnY : 0;
+  if (abs(blitD) >= SCR_H - 40) {
+    blitD = 0;
+    fullDirty = true;
   }
 
   // measure: hits + dirty rects
   measuring = true;
   nHits = 0;
   nDirty = 0;
-  for (auto &sc : scrolls) {
-    if (NOW - sc.lastMove < 1300 && sc.used) markR(sc.view);
+  pageY = 0;
+  for (int i = 0; i < 4; i++) {
+    Scroller &sc = scrolls[i];
+    if (i != PAGE && NOW - sc.lastMove < 1300 && sc.used) markR(sc.view);
     sc.used = false;
   }
+  if (blitD)
+    for (int i = 0; i < nOvPrev; i++) mark(ovPrev[i].x, ovPrev[i].y - abs(blitD), ovPrev[i].w, ovPrev[i].h + 2 * abs(blitD));
+  nOvNow = 0;
   clip({0, 0, 0, 0});
   clipDepth = 0;
   scene(st);
   layerReset();
+  memcpy(ovPrev, ovNow, sizeof(ovNow));
+  nOvPrev = nOvNow;
   measuring = false;
 
   int area = 0;
   for (int i = 0; i < nDirty; i++) area += dirty[i].w * dirty[i].h;
   if (area > SCR_W * SCR_H * 6 / 10) fullDirty = true;
-  if (!fullDirty && nDirty == 0) return false;
+  if (!fullDirty && nDirty == 0 && blitD == 0) return false;
   // ~40 fps cap while animating so Wi-Fi + touch keep their share of the CPU
   if (NOW - lastFrame < 22 && !fullDirty) return true;
   lastFrame = NOW;
 
+  bool shifted = false;
+  if (!fullDirty && blitD) {
+    scrollRows(0, SCR_H, blitD);
+    shifted = true;
+    Rect strip = blitD > 0 ? Rect{0, (int16_t)(SCR_H - blitD), SCR_W, (int16_t)blitD} : Rect{0, 0, SCR_W, (int16_t)(-blitD)};
+    measuring = true;
+    markR(strip);
+    measuring = false;
+  }
   if (fullDirty) {
     nDirty = 1;
     dirty[0] = {0, 0, SCR_W, SCR_H};
@@ -2238,11 +3056,14 @@ bool uiFrame(const NetStatus &st) {
     clipDepth = 0;
     scene(st);
     layerReset();
-    present(dirty[i]);
+    if (!shifted) present(dirty[i]);
   }
+  if (shifted) present({0, 0, SCR_W, SCR_H});  // every row moved
   clip({0, 0, SCR_W, SCR_H});
   return true;
 }
+
+void uiInvalidate() { fullDirty = true; }
 
 // ================================================================ input
 
@@ -2264,14 +3085,22 @@ const char *uiTouch(bool down, int16_t x, int16_t y) {
     T.t0 = T.lastT = now;
     T.lastY = y;
     T.scroll = -1;
+    lastTouchAt = now;
     int h = hitAt(x, y);
     if (h >= 0) strlcpy(T.id, hits[h].id, sizeof(T.id));
-    for (int i = 0; i < 4; i++)
-      if (scrolls[i].maxOff > 0 && scrolls[i].view.contains(x, y)) {
+    // The innermost list under the finger scrolls (a list inside the page before the page). Not under the pay card.
+    int32_t bestArea = INT32_MAX;
+    for (int i = 0; i < 4 && !payVisible(); i++)
+      if (scrolls[i].maxOff > 0 && scrolls[i].view.contains(x, y) && (int32_t)scrolls[i].view.w * scrolls[i].view.h < bestArea) {
+        bestArea = (int32_t)scrolls[i].view.w * scrolls[i].view.h;
         T.scroll = i;
-        scrolls[i].vel = 0;  // a touch catches a moving list
-        scrolls[i].dragFrom = scrolls[i].off;
       }
+    if (T.scroll >= 0) {
+      Scroller &s = scrolls[T.scroll];
+      s.vel = 0;  // a touch catches a moving list
+      s.snapping = false;
+      s.dragFrom = s.off;
+    }
     if (T.id[0] && h >= 0) mark(hits[h].r.x - 6, hits[h].r.y - 6, hits[h].r.w + 12, hits[h].r.h + 12);
     fullDirty = fullDirty || T.id[0];  // pressed state shows right away
     return nullptr;
@@ -2312,9 +3141,23 @@ const char *uiTouch(bool down, int16_t x, int16_t y) {
       s.vel = (now - T.lastT < 80) ? clampf(T.vel, -4, 4) : 0;
       s.lastMove = now;
       T.dragging = false;
+      if (T.scroll == PAGE && fabsf(s.vel) < 0.15f) {
+        s.vel = 0;
+        pageSnap();
+      }
+      return nullptr;
+    }
+    if (T.id[0] && !strncmp(T.id, "ui:", 3)) {  // handled on the box: never sent to the site
+      if (!strcmp(T.id, "ui:top")) pageGlide(0);
+      else if (!strcmp(T.id, "ui:more")) pageGlide(scrolls[PAGE].nSnaps > 1 ? scrolls[PAGE].snaps[1] : SCR_H - 66);
+      strlcpy(released, T.id, sizeof(released));
+      releasedAt = now;
+      T.id[0] = 0;
+      fullDirty = true;
       return nullptr;
     }
     if (T.id[0]) {
+      if (!strcmp(T.id, "pay:close")) payHiddenAt = now ? now : 1;  // hide at once; the site clears it
       strlcpy(out, T.id, sizeof(out));
       strlcpy(released, T.id, sizeof(released));
       releasedAt = now;
@@ -2415,10 +3258,28 @@ void uiSetJson(const String &body) {
     if (n.nHist > histPrevN) tHist = NOW;
     histPrevN = n.nHist;
   }
+  // Pay card timing (the box has no wall clock: ms left when the JSON was built, then counted here).
+  if (n.hasPay) {
+    int32_t curLeft = payBase - (int32_t)(NOW - payAt);
+    if (!c.hasPay || abs(n.payLeftMs - curLeft) > 1500) {
+      payBase = n.payLeftMs;
+      payAt = NOW;
+    }
+    if (!c.hasPay) tPay = NOW;
+    if (n.payPaid && !(c.hasPay && c.payPaid)) tPaid = NOW;
+  } else {
+    payHiddenAt = 0;
+  }
   strlcpy(lastQuestion, n.question, sizeof(lastQuestion));
+  // Locking keeps the page where it is (same question, same graph); anything else starts at the top.
+  bool keepPage = !first && c.scr == S_MARKET && n.scr == S_LOCKED && !questionChange;
+  if (questionChange || (screenChange && !keepPage)) {
+    scrolls[PAGE] = {};
+    tChartIn = tOddsIn = tListIn = 0;
+  }
   if (screenChange) {
     tScreen = NOW;
-    resetScrolls();
+    resetScrolls(true);
     seenRoster.n = 0;
     if (n.scr == S_LOBBY) {
       rollReset(rCount, "0");
@@ -2427,7 +3288,8 @@ void uiSetJson(const String &body) {
   }
   // The countdown alone changes every second: the ring redraws itself, so that is not a full redraw.
   // So does the scorebug's game clock: it redraws its own pill (watch()).
-  int keepIn = n.lockIn, keepMs = n.lockInMs, keepH = n.homeScore, keepA = n.awayScore;
+  int keepIn = n.lockIn, keepMs = n.lockInMs, keepH = n.homeScore, keepA = n.awayScore, keepPay = n.payLeftMs;
+  n.payLeftMs = c.payLeftMs;
   char keepClock[12], keepPeriod[12], keepStatus[8];
   memcpy(keepClock, n.clock, sizeof(keepClock));
   memcpy(keepPeriod, n.period, sizeof(keepPeriod));
@@ -2439,8 +3301,12 @@ void uiSetJson(const String &body) {
   memcpy(n.clock, c.clock, sizeof(keepClock));
   memcpy(n.period, c.period, sizeof(keepPeriod));
   memcpy(n.scoreStatus, c.scoreStatus, sizeof(keepStatus));
-  bool changed = layoutChange || memcmp(&n, &c, sizeof(Screen)) != 0;
+  // Page sections (chart, odds, standings) are not part of this: they redraw their own area (watch()).
+  bool changed = layoutChange || memcmp(&n, &c, SCREEN_CORE) != 0;
   if (changed) fullDirty = true;
+  // ...unless the page's layout moved (a section grew or appeared): then everything below it moved too.
+  if (n.chart.has != c.chart.has || n.nOdds != c.nOdds || min(8, n.nStand) != min(8, c.nStand)) fullDirty = true;
+  n.payLeftMs = keepPay;
   n.lockIn = keepIn;
   n.lockInMs = keepMs;
   n.homeScore = keepH;

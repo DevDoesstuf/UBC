@@ -39,7 +39,12 @@ Rect getClip();
 bool visible(int x, int y, int w, int h);  // does this box touch the clip?
 // A layer: every primitive after this is moved by (dx, dy) and multiplied by alpha (entrances, fades).
 void layer(int dx, int dy, uint8_t alpha);
-void layerReset();
+void layerReset();  // back to the origin, full alpha
+// Origin: a scrolled page moves everything by (dx, dy) underneath the layer (layers stay relative to it).
+void origin(int dx, int dy);
+// Moves rows [y0, y1) of the frame buffer up by d pixels (down when d < 0): a scrolled page reuses what it
+// already drew and only draws the strip that scrolled into view.
+void scrollRows(int y0, int y1, int d);
 
 void fill(int x, int y, int w, int h, uint16_t c, uint8_t a = 255);
 void rrect(int x, int y, int w, int h, int r, uint16_t c, uint8_t a = 255);

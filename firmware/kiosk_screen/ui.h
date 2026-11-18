@@ -14,3 +14,5 @@ const char *uiTouch(bool down, int16_t x, int16_t y);
 // Draws what changed and copies only those rectangles to the panel. Returns true while something moves
 // (then call again soon, about 30 fps); false when the screen is still (idle: no drawing at all).
 bool uiFrame(const NetStatus &st);
+// Redraw everything on the next frame (the simulator uses it to check that scrolled frames match a full redraw).
+void uiInvalidate();

@@ -9,14 +9,34 @@ namespace dr {
 
 static uint16_t *fb = nullptr;
 static int cx0 = 0, cy0 = 0, cx1 = SCR_W, cy1 = SCR_H;
-static int ox = 0, oy = 0, ga = 255;  // layer offset + alpha
+static int ox = 0, oy = 0, ga = 255;  // effective offset (origin + layer) + layer alpha
+static int bx = 0, by = 0;             // origin (a scrolled page)
+static int lx = 0, ly = 0;             // layer offset
 
+void origin(int dx, int dy) {
+  bx = dx;
+  by = dy;
+  ox = bx + lx;
+  oy = by + ly;
+}
 void layer(int dx, int dy, uint8_t alpha) {
-  ox = dx;
-  oy = dy;
+  lx = dx;
+  ly = dy;
+  ox = bx + dx;
+  oy = by + dy;
   ga = alpha;
 }
 void layerReset() { layer(0, 0, 255); }
+
+void scrollRows(int y0, int y1, int d) {
+  if (!fb || d == 0) return;
+  y0 = max(0, y0);
+  y1 = min(SCR_H, y1);
+  int h = y1 - y0;
+  if (h <= 0 || abs(d) >= h) return;
+  if (d > 0) memmove(fb + y0 * SCR_W, fb + (y0 + d) * SCR_W, (size_t)(h - d) * SCR_W * 2);
+  else memmove(fb + (y0 - d) * SCR_W, fb + y0 * SCR_W, (size_t)(h + d) * SCR_W * 2);
+}
 #define LAYER_I(x, y, a) \
   x += ox;               \
   y += oy;               \

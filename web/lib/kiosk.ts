@@ -23,6 +23,19 @@
 //   winners [{name,cents,profit}], losers [{name,cents}], lockYes (cents)      result
 //   leaderboard [{name,cents,pnl,rank,lead}], scorecard {room,model,gemini,n,verdict}     ended
 //     (rank shared on a tie, lead only for a sole leader; the firmware reads name, cents, pnl)
+//
+// v2 "pages" (optional, additive): market, locked and result scroll down to more sections on the box.
+//   chart {room[], gemini[]?, model, span, lock, outcome, x0, x1}     market/locked/result: the odds graph.
+//     room / gemini = YES price 0-100 sampled evenly in time from the open (<= 60 points, gemini null where
+//     Gemini had no price), drawn from x 0 to x `span` (0-100) of the time axis; lock = x of the lock (0-100)
+//     or null; model = the model's YES price (cents) or null; outcome "YES" | "NO" | null; x0/x1 axis labels.
+//   odds [{label, p, hist[]?, source}]   "Odds right now": the room's open question (source "room") and the
+//     game's Gemini markets (source "gemini": moneyline, total, period winners; p 0-100, hist <= 30 points)
+//   oddsNote   one sentence on where the Gemini prices come from
+//   standings [{name,cents,pnl,rank,lead}]   who is ahead right now (worth = balance + cashed out + open)
+//   trades     also on result now (newest first)
+//   pay {name, cents, qr {size, rows}, until (ms epoch), leftMs, paid}   any screen, only while lobby.boxPay is
+//     live: the box draws a Solana Pay card on top (QR at ECC L) with a Close button (touch id "pay:close").
 import QRCode from "qrcode";
 import { allGames, getGame } from "./games";
 import { getTimeline } from "./replay/timeline";
@@ -35,6 +48,7 @@ import {
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
 import { boxName, boxSafe } from "./boxText";
+import { friendlyLabel, type LabelTeam } from "./gemini";
 import { awayFirst } from "./matchup";
 import { losersOf, openValues, standings } from "./standings";
 import type { Game, Lobby } from "./types";
@@ -127,6 +141,48 @@ export interface KioskScreen {
   /** Best first (lib/standings.ts). rank is shared on a tie; lead is true only for a sole leader. */
   leaderboard?: { name: string; cents: number; pnl: number; rank?: number; lead?: boolean }[];
   scorecard?: { room: number | null; model: number | null; gemini: number | null; n: number; verdict: string };
+  /** Pages (market, locked, result): the odds graph, the odds board, standings. See the contract at the top. */
+  chart?: KioskChart;
+  odds?: KioskOdds[];
+  oddsNote?: string;
+  standings?: { name: string; cents: number; pnl: number; rank: number; lead: boolean }[];
+  /** A Solana Pay request drawn on top of any screen (lobby.boxPay). */
+  pay?: KioskPay;
+}
+
+export interface KioskChart {
+  /** Room YES price (0-100) sampled evenly in time from the open, <= 60 points. */
+  room: number[];
+  /** Gemini's YES price at the same instants (null = no price then). Missing when Gemini never priced it. */
+  gemini?: (number | null)[];
+  model: number | null;
+  /** x (0-100) of the time axis where the samples end ("now", or the result). */
+  span: number;
+  /** x (0-100) of the lock, or null. */
+  lock: number | null;
+  outcome: "YES" | "NO" | null;
+  x0: string;
+  x1: string;
+}
+
+export interface KioskOdds {
+  label: string;
+  /** Probability 0-100. */
+  p: number;
+  /** Earlier values (0-100), oldest first, <= 30 points. */
+  hist?: number[];
+  source: "room" | "gemini";
+}
+
+export interface KioskPay {
+  name: string;
+  cents: number;
+  /** Missing when the URL does not fit a QR the box can draw. */
+  qr?: { size: number; rows: string[] };
+  until: number;
+  /** ms to `until` when this JSON was built (the box has no wall clock). */
+  leftMs: number;
+  paid: boolean;
 }
 
 export interface KioskTeam {
@@ -185,8 +241,8 @@ const k = boxSafe;
 /** A player's name on the box: Latin-1 and never blank. */
 const kn = boxName;
 
-function qrRows(text: string): { size: number; rows: string[] } {
-  const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
+function qrRows(text: string, level: "L" | "M" = "M"): { size: number; rows: string[] } {
+  const qr = QRCode.create(text, { errorCorrectionLevel: level });
   const size = qr.modules.size;
   const rows: string[] = [];
   for (let r = 0; r < size; r++) {
@@ -317,8 +373,195 @@ function callsOf(l: Lobby): { id: string; label: string; enabled: boolean }[] {
   }
 }
 
+// ---------------------------------------------------------------- pages: odds graph, odds board, standings
+
+/** At most this many chart samples (the firmware keeps 64). */
+export const CHART_POINTS = 60;
+/** At most this many points in an odds row's mini line. */
+export const ODDS_POINTS = 30;
+/** At most this many rows on the odds board (the room's question + the game's Gemini markets). */
+export const MAX_ODDS = 8;
+const pct = (p: number) => Math.min(100, Math.max(0, Math.round(p * 100)));
+
+/** Evenly spaced picks of `xs`, first and last kept, at most `max`. */
+export function downsample<T>(xs: readonly T[], max: number): T[] {
+  if (xs.length <= max) return [...xs];
+  if (max <= 1) return xs.length ? [xs[xs.length - 1]] : [];
+  return Array.from({ length: max }, (_, i) => xs[Math.round((i * (xs.length - 1)) / (max - 1))]);
+}
+
+/** The value of a step series [{at, v}] at time t (the first value before it starts). */
+function stepAt<T>(pts: readonly { at: number; v: T }[], t: number): T {
+  let lo = 0;
+  let hi = pts.length - 1;
+  if (t <= pts[0].at) return pts[0].v;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (pts[mid].at <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return pts[lo].v;
+}
+
+/**
+ * The odds graph: the room's YES price (and Gemini's, when it priced the question) over the question's life, as
+ * integers 0-100 sampled evenly in time. Open: the axis runs from the open to the lock and the line grows toward
+ * it. Locked: open to now. Result: open to the result, plus the outcome.
+ */
+export function chartOf(l: Lobby, now: number = Date.now()): KioskChart | undefined {
+  const m = l.market;
+  if (!m || (l.phase !== "open" && l.phase !== "locked" && l.phase !== "result")) return undefined;
+  const t0 = m.openedAt;
+  const settledAt = l.phase === "result" ? m.resolvedAt ?? now : null;
+  const tEnd = Math.max(t0 + 1000, settledAt ?? now);
+  // Open: the whole trading window is the axis (if it is a sane length); after that the axis ends at the last sample.
+  const window = m.lockAt - t0;
+  const axisEnd = l.phase === "open" && window > 0 && window <= 30 * 60_000 ? Math.max(m.lockAt, tEnd) : tEnd;
+  const xOf = (t: number) => Math.min(100, Math.max(0, Math.round(((t - t0) / Math.max(1, axisEnd - t0)) * 100)));
+  const span = xOf(tEnd);
+  const model = typeof m.model === "number" ? lmsr.toCents(m.model) : null;
+  const outcome = l.phase === "result" && m.outcome && !m.voided ? (m.outcome === "yes" ? "YES" : "NO") : null;
+  const lock = l.phase === "open" ? (axisEnd === m.lockAt ? 100 : null) : xOf(Math.min(m.lockAt, tEnd));
+  const labels = { x0: "Open", x1: l.phase === "open" ? (lock === 100 ? "Lock" : "Now") : l.phase === "locked" ? "Now" : "Result" };
+  const trail = (m.trail ?? []).filter((p) => Number.isFinite(p.at) && Number.isFinite(p.room)).sort((a, b) => a.at - b.at);
+  if (!trail.length) {
+    // Older lobbies: the per-trade history, evenly spaced.
+    const room = downsample(m.history.length ? m.history : [yesNow(m)], CHART_POINTS).map(lmsr.toCents);
+    return { room: room.length > 1 ? room : [room[0], room[0]], model, span: 100, lock: l.phase === "open" ? null : 100, outcome, ...labels };
+  }
+  // Points every few seconds of the question so far (more as it runs), never more than CHART_POINTS.
+  const n = Math.min(CHART_POINTS, Math.max(2, Math.round(((tEnd - t0) / 1000) * 2) + 1));
+  const roomPts = trail.map((p) => ({ at: p.at, v: p.room }));
+  // The live price can be ahead of the trail's last point (a trade lands between two polls): end on it.
+  const live = l.phase === "open" ? yesNow(m) : null;
+  const room: number[] = [];
+  const gem: (number | null)[] = [];
+  const gemPts = trail.map((p) => ({ at: p.at, v: p.gemini }));
+  for (let i = 0; i < n; i++) {
+    const t = t0 + ((tEnd - t0) * i) / (n - 1);
+    room.push(lmsr.toCents(i === n - 1 && live !== null ? live : stepAt(roomPts, t)));
+    const g = stepAt(gemPts, t);
+    gem.push(typeof g === "number" && Number.isFinite(g) ? pct(g) : null);
+  }
+  return { room, ...(gem.some((g) => g !== null) ? { gemini: gem } : {}), model, span, lock, outcome, ...labels };
+}
+
+const yesNow = (m: NonNullable<Lobby["market"]>) => lmsr.priceYes(m.yes, m.no, m.b);
+
+/** Our names for the game's teams keyed by Gemini contract code (lib/lobby.ts labelTeams, kept in step). */
+function labelTeamsOf(l: Lobby): LabelTeam[] {
+  const st = l.replay?.state;
+  if (!st) return [];
+  const cfg = getGame(l.gameId)?.gemini;
+  const say = (name: string) => (st.sport === "soccer" ? name : name.trim().split(/\s+/).pop() ?? name);
+  return [{ code: cfg?.home ?? st.home.short, name: say(st.home.name) }, { code: cfg?.away ?? st.away.short, name: say(st.away.name) }];
+}
+
+const PERIOD_ORDER = ["1Q", "2Q", "1H", "3Q", "4Q", "2H"];
+const periodRank = (p?: string) => {
+  const i = PERIOD_ORDER.indexOf((p ?? "").toUpperCase());
+  return i < 0 ? 99 : i;
+};
+
+/**
+ * "Odds right now": the room's open question first, then the game's Gemini markets as our screens name them
+ * (moneyline per team, the total line nearest 50%, the favourite in each period winner market), each with
+ * Gemini's real price history so far on replayed real games.
+ */
+export function oddsOf(l: Lobby, chart: KioskChart | undefined, now: number = Date.now()): { odds: KioskOdds[]; note: string } {
+  const out: KioskOdds[] = [];
+  const m = l.market;
+  if (m && (l.phase === "open" || l.phase === "locked")) {
+    out.push({ label: k(m.text || m.short).slice(0, 80), p: lmsr.toCents(yesNow(m)), ...(chart ? { hist: downsample(chart.room, ODDS_POINTS) } : {}), source: "room" });
+  }
+  const s = l.gemini;
+  const game = getGame(l.gameId);
+  const tl = game?.replay ? getTimeline(game.replay) : undefined;
+  const track = tl?.gemini?.track;
+  const atMs = l.replay && l.replay.startedAt !== null ? replayMs(l.replay, now) : null;
+  const histOf = (event: string, contract: string): number[] | undefined => {
+    if (!track || atMs === null) return undefined;
+    const pts = track[event]?.[contract]?.filter(([t, p]) => t <= atMs && Number.isFinite(p));
+    if (!pts || pts.length < 2) return undefined;
+    return downsample(pts, ODDS_POINTS).map(([, p]) => pct(p));
+  };
+  const teams = labelTeamsOf(l);
+  const rows: { order: number; row: KioskOdds }[] = [];
+  for (const ev of s?.events ?? []) {
+    const priced = ev.contracts.filter((c) => typeof c.prob === "number");
+    if (!priced.length) continue;
+    const row = (c: (typeof priced)[number], label: string, order: number) =>
+      rows.push({ order, row: { label: k(label).slice(0, 60), p: pct(c.prob as number), ...(histOf(ev.ticker, c.ticker) ? { hist: histOf(ev.ticker, c.ticker) } : {}), source: "gemini" } });
+    if (ev.kind === "moneyline" && !ev.period) {
+      priced.forEach((c, i) => {
+        const name = friendlyLabel(ev, c, teams);
+        row(c, /^(tie|draw)$/i.test(name) ? name : `${name} to win`, i);
+      });
+    } else if (ev.kind === "total") {
+      const c = [...priced].sort((a, b) => Math.abs((a.prob as number) - 0.5) - Math.abs((b.prob as number) - 0.5))[0];
+      const per = ev.period ? ` (${ev.period.toUpperCase()})` : "";
+      row(c, `${friendlyLabel(ev, c, teams)}${per}`, ev.period ? 40 + periodRank(ev.period) : 10);
+    } else if (ev.kind === "period_winner") {
+      const c = [...priced].sort((a, b) => (b.prob as number) - (a.prob as number))[0];
+      row(c, friendlyLabel(ev, c, teams), 20 + periodRank(ev.period));
+    }
+  }
+  rows.sort((a, b) => a.order - b.order);
+  for (const r of rows) if (out.length < MAX_ODDS) out.push(r.row);
+  const note = s ? k(s.note ?? (s.live ? "Live from Gemini Prediction Markets." : "Last prices seen on Gemini.")).slice(0, 140) : "Gemini has no market for this game.";
+  return { odds: out, note };
+}
+
+/** Who is ahead right now (lib/standings.ts), best first. */
+function standingsOf(l: Lobby): NonNullable<KioskScreen["standings"]> {
+  const players = l.order.map((id) => l.players[id]).filter(Boolean);
+  const open = openValues(l);
+  return standings(players.map((p) => ({ ...p, open: open[p.id] ?? 0 })))
+    .slice(0, 10)
+    .map((p) => ({ name: kn(p.name), cents: p.worth, pnl: p.worth - p.deposited, rank: p.rank, lead: p.lead }));
+}
+
+/** The page sections under the market / locked / result view. */
+function pageOf(l: Lobby, now: number): Partial<KioskScreen> {
+  const chart = chartOf(l, now);
+  const { odds, note } = oddsOf(l, chart, now);
+  return { ...(chart ? { chart } : {}), odds, oddsNote: note, standings: standingsOf(l) };
+}
+
+// ---------------------------------------------------------------- Solana Pay on the box
+
+/** How long the box keeps the "Paid" card up after the payment landed. */
+export const PAY_PAID_MS = 12_000;
+/** The firmware's pay QR buffer holds up to 96 modules (version 19). */
+export const PAY_QR_MAX = 96;
+
+/** The pay card while lobby.boxPay is live (open and not expired, or paid in the last PAY_PAID_MS). */
+export function payOf(l: Lobby, now: number = Date.now()): KioskPay | undefined {
+  const bp = l.boxPay;
+  if (!bp || typeof bp.url !== "string" || !bp.url || bp.url.length > 1200) return undefined;
+  const until = Number(bp.until);
+  const paidAt = typeof bp.paidAt === "number" && Number.isFinite(bp.paidAt) ? bp.paidAt : null;
+  if (paidAt === null && !(until > now)) return undefined;
+  if (paidAt !== null && now - paidAt > PAY_PAID_MS) return undefined;
+  let qr: KioskPay["qr"];
+  try {
+    const q = qrRows(bp.url, "L");
+    if (q.size <= PAY_QR_MAX) qr = q;
+  } catch {
+    qr = undefined;
+  }
+  const cents = Math.max(0, Math.min(10_000_000, Math.round(Number(bp.cents) || 0)));
+  return { name: kn(String(bp.name ?? "")).slice(0, 23), cents, ...(qr ? { qr } : {}), until: Number.isFinite(until) ? until : now, leftMs: Math.max(0, Math.min(86_400_000, Math.round(until - now) || 0)), paid: paidAt !== null };
+}
+
 /** v2 additions per screen. */
 function extras(l: Lobby | null): Partial<KioskScreen> {
+  const base = extrasCore(l);
+  const pay = l ? payOf(l) : undefined;
+  return pay ? { ...base, pay } : base;
+}
+
+function extrasCore(l: Lobby | null): Partial<KioskScreen> {
   const base = common(l);
   if (!l) return { ...base, cards: allGames().map(gameCard) };
   const players = l.order.map((id) => l.players[id]).filter(Boolean);
@@ -343,6 +586,7 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       trades: m.trades.slice(-8).reverse().map((t) => ({ name: kn(t.name), side: t.side, cents: t.cents, price: lmsr.toCents(t.priceAfter) })),
       moment: m.source?.kind === "moment" ? m.source.moment : null,
       mode: m.mode ?? "market",
+      ...pageOf(l, Date.now()),
     };
   }
   if (l.phase === "result" && m) {
@@ -356,6 +600,8 @@ function extras(l: Lobby | null): Partial<KioskScreen> {
       winners, losers, volume: m.volume,
       lockYes: typeof m.priceAtLock === "number" ? lmsr.toCents(m.priceAtLock) : null,
       calls: callsOf(l),
+      trades: m.trades.slice(-8).reverse().map((t) => ({ name: kn(t.name), side: t.side, cents: t.cents, price: lmsr.toCents(t.priceAfter) })),
+      ...pageOf(l, Date.now()),
     };
   }
   const open = openValues(l);
@@ -520,6 +766,13 @@ export async function kioskTouch(kioskId: string, id: string, baseUrl: string): 
     case "cancel":
     case "new":
       await releaseKiosk(kioskId, code);
+      break;
+    case "pay":
+      // The box's Solana Pay card: Close (also after "Paid") clears the request.
+      if (arg !== "close") throw new ApiError(400, "Unknown button");
+      await mutate(code, (l) => {
+        l.boxPay = null;
+      });
       break;
     case "moment": {
       // "Call it!": the room slammed a moment button. The backend opens a quick market on it.
