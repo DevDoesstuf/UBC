@@ -422,7 +422,7 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
   return (
     <>
       <div className="hk-abs hk-slide-l hk-join" style={{ left: 12, top: 12, width: 292, height: 456, borderRadius: 30, background: GRAD }}>
-        <div className="hk-abs hk-float" style={{ left: 40, top: 22, width: 212, height: 212, borderRadius: 18, background: P.white, display: "grid", placeItems: "center" }}>
+        <div className="hk-abs" style={{ left: 40, top: 22, width: 212, height: 212, borderRadius: 18, background: P.white, display: "grid", placeItems: "center" }}>
           {qr && (
             <svg width={scale * qr.size} height={scale * qr.size} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="Join QR code">
               {qr.rows.flatMap((row, r) => [...row].map((c, col) => (c === "1" ? <rect key={`${r}-${col}`} x={col} y={r} width="1" height="1" fill={P.ink} /> : null)))}

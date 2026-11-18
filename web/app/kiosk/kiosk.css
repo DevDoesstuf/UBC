@@ -109,6 +109,8 @@
   transition: transform 480ms var(--bounce), box-shadow 160ms var(--ease-out), filter 160ms var(--ease-out);
 }
 .hk-btn .hk-label { overflow: hidden; text-overflow: ellipsis; }
+/* Touch: every button takes at least a 64 px tall finger, even when it draws smaller (like the firmware). */
+.hk-btn::before { content: ""; position: absolute; left: 0; right: 0; top: min(0px, calc(50% - 32px)); bottom: min(0px, calc(50% - 32px)); }
 .hk-btn:active:not(:disabled) { transform: scale(0.96); box-shadow: none; filter: brightness(0.94); transition-duration: 90ms; transition-timing-function: var(--ease-out); }
 .hk-btn:focus-visible, .hk-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .hk-btn.hk-plain { box-shadow: inset 0 0 0 1px var(--rule), 0 1px 2px rgba(16, 38, 28, 0.06), 0 4px 10px -2px rgba(16, 38, 28, 0.12); }
@@ -263,7 +265,6 @@
 .hk-zoom { animation: hk-zoom 480ms var(--spring) both; animation-delay: var(--d, 0ms); }
 .hk-slide-r { animation: hk-slide-r 520ms var(--spring) both; animation-delay: var(--d, 0ms); }
 .hk-slide-l { animation: hk-slide-l 480ms var(--spring) both; animation-delay: var(--d, 0ms); }
-.hk-float { animation: hk-float 5.6s ease-in-out infinite; }
 .hk-breathe { animation: hk-breathe 1.6s ease-in-out infinite; }
 .hk-spin { animation: hk-spin 1.1s steps(12) infinite; }
 
@@ -296,7 +297,6 @@
   100% { transform: translate(var(--dx), calc(var(--dy) + 520px)) rotate(var(--rot)); opacity: 0; }
 }
 @keyframes hk-toast { from { transform: translate(-50%, 30px); opacity: 0; } }
-@keyframes hk-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 @keyframes hk-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes hk-spin { to { transform: rotate(360deg); } }
 
