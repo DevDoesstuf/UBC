@@ -40,7 +40,7 @@ This README is the single source of context for people and agents working on the
 | Coinbase Onramp deposits + on-chain payouts | **Written against Coinbase's current docs, not yet run** (needs your CDP keys). See [Money](#money). |
 | Upstash Redis storage (needed on Vercel) | **Written, not yet run** against a real Upstash instance. Local dev uses memory. |
 | Kiosk firmware (ESP32-S3 touchscreen) | **Compiled, flashed and working on the real board** (Nov 17). First flash failed only because PSRAM was off in the IDE settings. See [Kiosk firmware](#kiosk-firmware-esp32-s3-touch-lcd-43). |
-| Speaker + second ESP32 | Not built. The site already serves `/api/kiosk/audio` for it, and the watch page plays the sounds meanwhile. |
+| Speaker + second ESP32 | **Wiring confirmed** with a beep test (BCLK 26, LRC 25, DIN 27). `firmware/speaker` polls `/api/kiosk/audio` and streams each WAV (event sounds, plus the announcer's voice when ElevenLabs is on), using the same I2S driver as the test. The full sketch has not been run on the board yet. See [Speaker](#speaker-second-esp32--i2s-amp). |
 | NFC | No firmware needed: a passive NFC sticker holding `https://<site>/k/1`. |
 | YouTube clip | **Placeholder.** Put a real clip id and timestamps in `web/config/games.json`. |
 
@@ -74,6 +74,9 @@ firmware/kiosk_screen/     <- Arduino sketch for the Waveshare ESP32-S3-Touch-LC
   board.cpp/.h             <- panel, CH422G expander (backlight/resets), GT911 touch
   net.cpp/.h               <- Wi-Fi + HTTP on its own task
   ui.cpp/.h                <- draws the screen JSON
+firmware/speaker/          <- Arduino sketch for the speaker ESP32 (I2S amp): plays /api/kiosk/audio
+  speaker.ino              <- pins, volume, Wi-Fi, WAV streaming to I2S
+  secrets.example.h        <- copy to secrets.h: same values as the screen's
 .claude/launch.json        <- dev server config for Claude Code's preview
 ```
 
@@ -206,7 +209,7 @@ All JSON. Phones identify themselves with the `x-player-token` header they get f
 
 `POST /api/kiosk/touch` with body `{"kiosk":"1","id":"<tile or button id>"}` returns the new screen. A refused tap returns HTTP 400 with the current screen plus `"error"`, which the kiosk shows as a toast. Ids: `game:<gameId>`, `start`, `next`, `lock`, `resolve:yes`, `resolve:no`, `end`, `cancel`, `new`. If `KIOSK_KEY` is set on the site, touches need the header `x-kiosk-key`.
 
-`GET /api/kiosk/audio?kiosk=1&after=<last id>` is for the future speaker ESP32. `after=-1` at boot returns the latest id without a sound. Otherwise it returns the next `{id, url, text}` to play (22 kHz mono WAV) or `url: null`. Ids are increasing timestamps, so they never reset between games.
+`GET /api/kiosk/audio?kiosk=1&after=<last id>` is what the speaker ESP32 (`firmware/speaker`) polls. `after=-1` at boot returns the latest id without a sound. Otherwise it returns the next `{id, url, text}` to play (22 kHz mono WAV) or `url: null`. Ids are increasing timestamps, so they never reset between games.
 
 Strings sent to the kiosk are limited to Latin-1, because the firmware fonts are Latin-1.
 
@@ -323,7 +326,7 @@ Just the board and one USB-C cable. No other wiring for the screen. The touch pa
    - `KIOSK_KEY`: same as the site's `KIOSK_KEY`, or `""`
 5. Open `firmware/kiosk_screen/kiosk_screen.ino`, then Upload. Serial monitor runs at 115200.
 
-`secrets.h` is git-ignored. Without it the sketch still builds and shows a "Wi-Fi is not set up yet" screen. The Wi-Fi details really are just those 2 lines, so you can add the hotspot later. If Wi-Fi or the site drops, the screen switches to a connection page (SSID, IP, last error) and recovers by itself.
+`secrets.h` is committed to the repo on purpose (the hotspot details are not sensitive for this demo), so a fresh clone flashes and connects as is. Without it the sketch still builds and shows a "Wi-Fi is not set up yet" screen. The Wi-Fi details really are just those 2 lines, so you can add the hotspot later. If Wi-Fi or the site drops, the screen switches to a connection page (SSID, IP, last error) and recovers by itself.
 
 With arduino-cli instead:
 
@@ -362,11 +365,33 @@ No hardware code needed. The tap is a **passive NFC sticker** (NTAG213/215) that
 - Plastic is fine: stick it on the inside of a thin (1-2 mm) printed wall, or on the outside.
 - iPhones read from the top edge of the back; most Androids from the middle of the back (NFC must be on in settings). Test with both before the demo.
 
-**About the PN532:** it isn't needed for the demo, and it should not go on the screen board. The PN532's I2C address is 0x24, which is one of the addresses the screen board's CH422G IO expander uses on the same I2C bus (SDA 8 / SCL 9). Wiring it there would break the backlight and touch. A PN532 also can't reliably read a phone (iPhones don't act as a readable tag). If you want a "tap detected" effect later, it could go on the second ESP32 (the speaker one).
+**About the PN532:** it isn't needed for the demo, and it should not go on the screen board. The PN532's I2C address is 0x24, which is one of the addresses the screen board's CH422G IO expander uses on the same I2C bus (SDA 8 / SCL 9). Wiring it there would break the backlight and touch. A PN532 also can't reliably read a phone (iPhones don't act as a readable tag). If you want a "tap detected" effect later, it could go on the second ESP32 (the speaker one, see [Speaker](#speaker-second-esp32--i2s-amp)).
 
-### Speaker and second ESP32 (later)
+### Speaker (second ESP32 + I2S amp)
 
-Planned: a second ESP32 with an I2S amp (e.g. MAX98357A) that polls `GET /api/kiosk/audio?kiosk=1&after=<id>` once a second and plays the WAV URL it gets (see the API reference). The server side already exists. Until then the **watch page** plays the same sounds and reads the result aloud.
+**Parts:** a second, classic **ESP32 dev board** (board setting "ESP32 Dev Module"), a **NULLLAB I2S Audio Amplifier Module** (MAX98357A-style, Amazon B0FSZQRWSF), and a small speaker on the amp's **SPK+ / SPK−**. The wiring below was confirmed with a beep test sketch on Nov 18; `speaker.ino` uses the same I2S driver and settings.
+
+**Why not on the screen board:** I2S needs three free GPIOs (bit clock, word select, data). The screen uses nearly all of the ESP32-S3's pins. The 4-pin **VCC / GND / SDA / SCL** port is the I2C bus (GPIO 8 and 9) that the **touch controller and the backlight/reset expander** share: putting I2S on it would break touch and the backlight, and it's still one pin short. So the speaker gets its own ESP32, which also keeps the screen firmware untouched.
+
+**How it works:** the speaker ESP32 polls `GET /api/kiosk/audio?kiosk=1&after=<id>` about every 0.7 s and streams each WAV straight to the amp: the event sounds in `web/public/sounds` (join, start, lock, win, tap), and with `ELEVENLABS_API_KEY` on the site, the announcer's voice from `/api/tts` after each sound. It never needs to know about games: **to change what plays and when, change the website** (`lib/lobby.ts` events, `public/sounds`, `/api/kiosk/audio`), never the speaker firmware.
+
+**Wiring (fixed, don't change):**
+
+| Amp pin | ESP32 |
+|---|---|
+| VIN | 5V (VIN) |
+| GND | GND |
+| BCLK | GPIO26 |
+| LRC | GPIO25 |
+| DIN | GPIO27 |
+| SD, GAIN | leave unconnected (GAIN open = 9 dB) |
+| SPK+ / SPK− | speaker |
+
+- **Power:** the amp and the ESP32 share one **5 V** supply and a **common GND**. The amp can pull big current spikes at high volume: `VOLUME_PERCENT` (top of `speaker.ino`) starts at 60.
+- **Setup:** `firmware/speaker/secrets.h` holds the **same** values as the screen's `secrets.h` (hotspot, `SERVER_URL`, `KIOSK_ID`). Copy `secrets.example.h` if it's missing. Library: **ArduinoJson** 7.x (Wi-Fi, HTTP and the I2S driver come with the esp32 board package 3.x). The I2S driver used is the classic `driver/i2s.h`, the same as the beep test, so the compiler prints a "legacy driver" warning, which is expected.
+- **Board settings:** "ESP32 Dev Module", defaults. No PSRAM needed.
+- **Check it by ear:** two quick beeps at power-up = amp and wiring OK. One high beep a few seconds later = Wi-Fi up and the website answered. After that it plays whatever the site sends (pick a game on the kiosk and you hear `tap.wav`). Serial (115200) logs each step.
+- **No sound but the serial log says "played":** check BCLK/LRC/DIN aren't swapped, the amp has 5 V and GND, and the speaker is on SPK+/SPK−. **Distorted or the board resets:** lower `VOLUME_PERCENT` or use a stronger 5 V supply.
 
 ---
 
@@ -397,7 +422,7 @@ Planned: a second ESP32 with an I2S amp (e.g. MAX98357A) that polls `GET /api/ki
 - Money is integer **cents** everywhere except inside `lmsr.ts` (dollars and shares).
 - Every lobby write goes through `mutate()` in `lib/lobby.ts` (lock + timers + version bump). Don't write lobby JSON anywhere else.
 - `lib/lmsr.ts` must stay dependency-free: the phone page imports it for trade previews.
-- Secrets live only in env vars (`web/.env.local`, Vercel) and `firmware/kiosk_screen/secrets.h`. All are git-ignored.
+- Secrets live in env vars (`web/.env.local`, git-ignored; Vercel project settings). The firmware `secrets.h` files (hotspot name and password, site URL) ARE committed on purpose so a fresh clone can flash the boards; never put real keys in them.
 
 ## Sources
 
