@@ -1125,7 +1125,7 @@ export class HuddleQuestionEngine {
         const kind = String(params.event);
         const hit =
           kind === 'corner' ? event.type === 'corner' && typeof event.data.shotOnTarget !== 'boolean'
-            : kind === 'shot' ? (event.type === 'score_update' && event.data.shotOnTarget === true) || event.type === 'goal'
+            : kind === 'shot' ? ((event.type === 'score_update' || event.type === 'corner') && event.data.shotOnTarget === true) || event.type === 'goal'
               : kind === 'card' ? event.type === 'card'
                 : false;
         if (hit && minute <= until) return pick('yes');

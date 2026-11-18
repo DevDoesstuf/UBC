@@ -263,6 +263,8 @@ test("soccer resolvers: corner, shot on target and card windows in match minutes
   assert.equal(e.evaluate(shot, ev("soccer", 2, "score_update", { minute: 51, woodwork: true }), st), null);
   assert.deepEqual(e.evaluate(shot, ev("soccer", 2, "score_update", { minute: 52, shotOnTarget: true }), st), { outcome: "yes" });
   assert.deepEqual(e.evaluate(shot, ev("soccer", 2, "goal", { minute: 55 }), st), { outcome: "yes" });
+  assert.deepEqual(e.evaluate(shot, ev("soccer", 2, "corner", { minute: 53, shotOnTarget: true }), st), { outcome: "yes" }, "a corner that ends in a shot on target");
+  assert.equal(e.evaluate(shot, ev("soccer", 2, "corner", { minute: 53, shotOnTarget: false }), st), null);
   const card = mk("event_window", { event: "card", fromMinute: 60, untilMinute: 70 });
   assert.deepEqual(e.evaluate(card, ev("soccer", 2, "card", { minute: 69, color: "yellow" }), st), { outcome: "yes" });
   assert.deepEqual(e.evaluate(card, ev("soccer", 2, "period_end", { minute: 90 }), st), { outcome: "no" });
