@@ -6,8 +6,10 @@ import { baseUrl, clientIp, handle, json, playerToken, readBody } from "@/lib/ht
 import { ApiError, creditDeposit, getLobby, mutate, requirePlayer } from "@/lib/lobby";
 import { DEPOSIT_OPTIONS, MONEY_MODE, createOnrampUrl, moneyProblems } from "@/lib/money";
 import { newReference, transferRequestUrl, treasuryInfo } from "@/lib/solana";
+import { addSolanaRef } from "@/lib/solana-lobby";
 //   solana mode   -> {"ok":true,"url":"solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle...",
-//                    "solanaPay":true,"reference"}; show it as a QR / "Open in wallet" link, then call /deposit/sync.
+//                    "solanaPay":true,"reference","recipient","mint","amount"}; show it as a QR / "Open in wallet"
+//                    link, then call /deposit/sync (optionally with {"reference"}) every 3 s.
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
   return handle(async () => {
@@ -33,9 +35,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
       await mutate(code, (l, now) => {
         const p = requirePlayer(l, token);
         code4 = l.code;
-        const refs = (l.solanaRefs ??= {});
-        for (const [k, v] of Object.entries(refs)) if (now - v.at > 60 * 60 * 1000) delete refs[k];
-        refs[reference] = { playerId: p.id, cents, at: now };
+        addSolanaRef(l, p.id, reference, cents, now);
       });
       const url = transferRequestUrl({ recipient: address, cents, mint, reference, label: "Huddle", message: `Huddle lobby ${code4}`, memo: `huddle-${code4}` });
       return json({ ok: true, url, solanaPay: true, reference, recipient: address, mint, amount: (cents / 100).toFixed(2) });
