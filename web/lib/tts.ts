@@ -14,7 +14,8 @@ import { createHash } from "crypto";
 import { kvGet, kvSet } from "./store";
 import type { Persona } from "./announcer";
 
-export const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io";
+/** ELEVENLABS_BASE_URL overrides (a regional host such as https://api.us.elevenlabs.io, or a local mock). */
+export const ELEVENLABS_BASE_URL = ((process.env.ELEVENLABS_BASE_URL || "").trim() || "https://api.elevenlabs.io").replace(/\/+$/, "");
 export const DEFAULT_TTS_MODEL = "eleven_flash_v2_5";
 export const TTS_OUTPUT_FORMAT = "mp3_44100_128";
 /** For the speaker ESP32 (README: 22 kHz mono WAV): raw 16-bit PCM from ElevenLabs, wrapped in a WAV header here. */
