@@ -8,6 +8,7 @@
 //   down <x> <y> | move <x> <y> | up     finger input (a completed tap is POSTed like on the board)
 //   shot <name>            save <out>/<name>.png
 //   stale <ms>             pretend the last good reply was <ms> ago (Wi-Fi loss)
+//   frames                 print and reset the count of frames that drew something
 //   sh <command...>        run a shell command (e.g. phones joining and trading through the lobby API)
 #include <zlib.h>
 #include <string>
@@ -134,6 +135,10 @@ int main(int argc, char **argv) {
       feed(body);
     } else if (!strcmp(cmd, "wait")) step(atoi(a));
     else if (!strcmp(cmd, "shot")) shot(a);
+    else if (!strcmp(cmd, "frames")) {
+      printf("frames: %d\n", frames);
+      frames = 0;
+    }
     else if (!strcmp(cmd, "sh")) {
       std::string out = sh(std::string(line + 3));
       if (!out.empty()) printf("%s", out.c_str());

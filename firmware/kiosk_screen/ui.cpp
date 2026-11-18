@@ -177,6 +177,12 @@ static void markR(Rect r) {
   else fullDirty = true;
 }
 static void mark(int x, int y, int w, int h) { markR({(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h}); }
+// Ambient motion (live dot, ping on the price line, breathing dots) only redraws at 10 fps, so a still screen
+// stays almost idle while it keeps a little life.
+static bool ambientTick = false;
+static void markAmbient(int x, int y, int w, int h) {
+  if (ambientTick) mark(x, y, w, h);
+}
 
 // Clip stack (intersecting).
 static Rect clipStack[8];
@@ -615,7 +621,7 @@ static void liveDot(int cx, int cy, bool fresh) {
   if (fresh) {  // a soft ping every 1.6 s
     float p = (NOW % 1600) / 1600.f;
     if (p < 0.8f) circle(cx, cy, 5 + 9 * eOut(p / 0.8f), c, (uint8_t)(90 * (1 - p / 0.8f)));
-    mark(cx - 16, cy - 16, 32, 32);
+    markAmbient(cx - 16, cy - 16, 32, 32);
   }
   circle(cx, cy, 5, c);
 }
@@ -800,7 +806,7 @@ static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int
       float s = 0.5f + 0.5f * sinf(ph * 6.2831853f);
       circle(bx + bw - 26 + i * 8, by + bh - 12, 2.2f, fg, (uint8_t)(90 + 150 * s));
     }
-    mark(bx + bw - 34, by + bh - 20, 30, 16);
+    markAmbient(bx + bw - 34, by + bh - 20, 30, 16);
   }
   hit(x, y - max(0, (64 - h) / 2), w, max(h, 64), b.id);
 }
@@ -877,7 +883,8 @@ static void sparkline(int x, int y, int w, int h, const int16_t *hist, int n, ui
   float p = (NOW % 1600) / 1600.f;
   if (p < 0.8f) circle(ex, ey, 4 + 10 * eOut(p / 0.8f), c, (uint8_t)(110 * (1 - p / 0.8f)));
   circle(ex, ey, 4.5f, c);
-  mark(x - 4, y - 16, w + 24, h + 32);
+  if (reveal < 1) mark(x - 4, y - 16, w + 24, h + 32);
+  else markAmbient((int)ex - 18, (int)ey - 18, 36, 36);
 }
 
 // The lock countdown as the box's LED ring: 24 pixels go dark one by one; hot + throbbing in the last 5 s.
@@ -1178,7 +1185,7 @@ static void drawSelect(const Screen &s, const NetStatus &st) {
     int barY = viewY + (int)((viewH - barH) * clampf(sc.off / max(1.f, sc.maxOff), 0, 1));
     bool active = NOW - sc.lastMove < 1200 || T.dragging;
     rrect(SCR_W - 7, barY + 4, 4, barH - 8, 2, P.ink, active ? 110 : 40);
-    if (active) mark(SCR_W - 10, viewY, 10, viewH);
+    if (active || NOW - sc.lastMove < 1500) mark(SCR_W - 10, viewY, 10, viewH);
   }
 }
 
@@ -1222,10 +1229,7 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
   const int px = 12, py = 12, pw = 292, ph = 456;
   if (enter(tScreen, 0, 4, {px, py, pw, ph})) {
     rrectGrad(px, py, pw, ph, 30, P.deep, P.accent, P.lime);
-    // soft float on the QR (2 px)
-    int fy = (int)(2 * sinf(NOW / 900.f));
-    drawQR(s, px + 40, py + 22 + fy, 212);
-    mark(px + 36, py + 16, 220, 224);
+    drawQR(s, px + 40, py + 22, 212);  // still: phones scan it
     textCenter(F_H3, px + pw / 2, 276, "Tap your phone here", P.white);
     textCenter(F_B2, px + pw / 2, 300, "or scan the code to join", P.white, 230);
     textCenter(F_B3, px + pw / 2, 328, "Party code", P.white, 220);
@@ -1302,7 +1306,7 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
       rrectStroke(x0, listY + 2, w, 64, 16, 2, P.ruleStrong);
       float b = 0.5f + 0.5f * sinf(NOW / 400.f);
       circle(x0 + 22, listY + 34, 5, P.accent, (uint8_t)(120 + 135 * b));
-      mark(x0 + 10, listY + 22, 24, 24);
+      markAmbient(x0 + 10, listY + 22, 24, 24);
       text(F_B1, x0 + 40, listY + 31, "Waiting for the first player", P.ink);
       text(F_B3, x0 + 40, listY + 52, "Tap a phone on the box or scan the code", P.ink2);
     }
@@ -1311,8 +1315,9 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
   for (int i = 0; i < s.nRoster; i++) {
     int rxp = x0 + (i % 2) * (colW + 10);
     int ry = listY + (i / 2) * (rowH + gap) - (int)off;
-    if (ry + rowH < listY - 4 || ry > listBottom + 4) continue;
+    // Register every name (visible or not) so only real arrivals slide in, not rows scrolled into view.
     uint32_t born = seenAt(seenRoster, strHash(s.roster[i].name), NOW - tScreen < 400);
+    if (ry + rowH < listY - 4 || ry > listBottom + 4) continue;
     personRow(s.roster[i], rxp, ry, colW, rowH, born, true);
   }
   popClip();
@@ -1320,7 +1325,7 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
     int vh = listBottom - listY, barH = max(30, vh * vh / max(1, contentH));
     int barY = listY + (int)((vh - barH) * clampf(scrolls[0].off / max(1.f, scrolls[0].maxOff), 0, 1));
     rrect(x1 + 6, barY, 4, barH, 2, P.ink, NOW - scrolls[0].lastMove < 1200 ? 110 : 40);
-    mark(x1 + 2, listY, 12, vh);
+    if (NOW - scrolls[0].lastMove < 1500) mark(x1 + 2, listY, 12, vh);
   }
 
   if (calls) {
@@ -1673,7 +1678,7 @@ static void peopleCard(int x, int y, int w, int h, const char *title, bool win, 
     int barH = max(20, listH * listH / max(1, n * rowH));
     int barY = listY + (int)((listH - barH) * clampf(sc.off / max(1.f, sc.maxOff), 0, 1));
     rrect(x + w - 8, barY, 4, barH, 2, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
-    mark(x + w - 10, listY, 10, listH);
+    if (NOW - sc.lastMove < 1500) mark(x + w - 10, listY, 10, listH);
   }
   layerReset();
 }
@@ -1934,7 +1939,7 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
     int barH = max(30, listH * listH / max(1, nb * (rowH + gap)));
     int barY = listY + (int)((listH - barH) * clampf(sc.off / max(1.f, sc.maxOff), 0, 1));
     rrect(SCR_W - 9, barY, 4, barH, 2, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
-    mark(SCR_W - 12, listY, 12, listH);
+    if (NOW - sc.lastMove < 1500) mark(SCR_W - 12, listY, 12, listH);
   }
   const Btn *nw = findBtn(s, "new");
   if (nw && enter(tScreen, 700, 0, {(int16_t)LX, 400, (int16_t)LW, 66})) {
@@ -1981,7 +1986,7 @@ static void drawConnection(const NetStatus &st, bool hadScreen) {
   fill(0, 0, SCR_W, SCR_H, P.canvas);
   markLogo(612, 240, 110, 0, true);
   textCenter(F_H3, 612, 248, "huddle", P.ink);
-  mark(470, 100, 290, 290);
+  markAmbient(470, 100, 290, 290);
   wordmark(32, 60);
   char t[48];
   snprintf(t, sizeof(t), "Box %s", KIOSK_ID);
@@ -2063,11 +2068,11 @@ static void scene(const NetStatus &st) {
     rrect(x, 8, w, 44, 22, P.ink);
     markLogo(x + 24, 30, 9, 0, true);
     text(F_B1, x + 44, 37, msg, P.white);
-    mark(x, 8, w, 44);
+    markAmbient(x, 8, w, 44);
   }
 }
 
-static uint32_t lastFrame = 0;
+static uint32_t lastFrame = 0, lastAmbient = 0;
 
 bool uiFrame(const NetStatus &st) {
   NOW = millis();
@@ -2079,8 +2084,19 @@ bool uiFrame(const NetStatus &st) {
     lastStale = stale;
   }
   staleNow = haveScreen && stale;
-  if (!haveScreen && stale && NOW - lastFrame < 250) return false;  // connection page: 4 fps is plenty
-  if (staleNow && NOW - staleSince > 15000 && NOW - staleSince < 15100) fullDirty = true;
+  static bool lastConn = true;
+  bool conn = !haveScreen || (staleNow && NOW - staleSince > 15000);
+  if (conn != lastConn) {
+    fullDirty = true;
+    lastConn = conn;
+  }
+  // The connection page shows Wi-Fi / site status: redraw when any of it changes.
+  static uint32_t lastStatus = 0;
+  uint32_t status = strHash(st.error, (st.configured ? 1 : 0) | (st.wifi ? 2 : 0) | (st.lastOkMs ? 4 : 0)) ^ strHash(st.ip);
+  if (conn && status != lastStatus) fullDirty = true;
+  lastStatus = status;
+  ambientTick = NOW - lastAmbient >= 100;
+  if (ambientTick) lastAmbient = NOW;
 
   // momentum scrolling
   float dt = clampf((NOW - lastScrollStep) / 16.f, 0, 4);
@@ -2118,7 +2134,6 @@ bool uiFrame(const NetStatus &st) {
   scene(st);
   layerReset();
   measuring = false;
-  if (!haveScreen || (staleNow && NOW - staleSince > 15000)) fullDirty = fullDirty || nDirty > 0;
 
   int area = 0;
   for (int i = 0; i < nDirty; i++) area += dirty[i].w * dirty[i].h;
