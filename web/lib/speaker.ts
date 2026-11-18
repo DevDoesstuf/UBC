@@ -9,13 +9,17 @@
 // The speaker blocks while it plays (a voice line is 2-5 s), so it can fall behind a busy game. Rule, applied on
 // every poll, deterministic: the next item is the oldest one newer than `after` that is still fresh; anything
 // older than its time-to-live is skipped (and the speaker's `after` moves past it). Time-to-live: 8 s for voice
-// lines and sound effects, 1.2 s for the last-call tick (it must end at the lock, so late = pointless). The
-// backlog is therefore never more than about 8 s, and nothing old is ever replayed.
+// lines and sound effects, 1.2 s for the last-call tick (it must end at the lock, so late = pointless). And a
+// voice line more than 2.5 s late is skipped when a newer voice line is already waiting ("Nine seconds!" for a
+// market that has locked since is wrong, and the newer line says what matters now). Sound effects are short
+// (under 1.3 s) and always play while fresh. The backlog is therefore never more than about 8 s, the announcer
+// stays close to live, and nothing old is ever replayed.
 import type { Lobby, SoundName } from "./types";
 
 export const VOICE_TTL_MS = 8000;
 export const SOUND_TTL_MS = 8000;
 export const LASTCALL_TTL_MS = 1200;
+export const CATCHUP_MS = 2500;
 
 export interface SpeakerItem {
   id: number;
@@ -52,7 +56,13 @@ export function nextForSpeaker(items: SpeakerItem[], after: number, now: number)
   const latest = items.length ? items[items.length - 1].id : 0;
   if (!Number.isFinite(after) || after < 0) return { reply: { id: latest, url: null }, item: null };
   const newer = items.filter((i) => i.id > after);
-  const next = newer.find((i) => now - i.id <= i.ttl);
+  const next = newer.find((i, k) => {
+    const age = now - i.id;
+    if (age > i.ttl) return false;
+    // Catching up: a voice line that is already late is dropped when a newer one is waiting behind it.
+    if (i.kind === "voice" && age > CATCHUP_MS && newer.slice(k + 1).some((j) => j.kind === "voice")) return false;
+    return true;
+  });
   if (!next) return { reply: { id: newer.length ? Math.max(after, newer[newer.length - 1].id) : after, url: null }, item: null };
   return { reply: { id: next.id, url: next.url, text: next.text, kind: next.kind }, item: next };
 }

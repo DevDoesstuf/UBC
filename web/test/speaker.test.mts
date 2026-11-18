@@ -250,6 +250,15 @@ test("speaker queue: boot gives the latest id; then oldest fresh item first; sta
   assert.deepEqual(speaker.nextForSpeaker([], 123, now).reply, { id: 123, url: null });
   // Pre-warm: while a sound plays, the voice line right after it.
   assert.equal(speaker.voiceToPrewarm(items, items[2], now)?.id, now - 2999);
+  // Catching up: a voice line 3 s late with a newer voice line waiting is dropped; its sound effect still plays.
+  const busy = [item(now - 3100, "sound"), item(now - 3000, "voice"), item(now - 500, "sound"), item(now - 499, "voice")];
+  const c1 = speaker.nextForSpeaker(busy, now - 4000, now).reply;
+  assert.equal(c1.id, now - 3100);
+  const c2 = speaker.nextForSpeaker(busy, c1.id, now).reply;
+  assert.equal(c2.id, now - 500, "the late line is skipped for the newer one");
+  assert.equal(speaker.nextForSpeaker(busy, c2.id, now).reply.id, now - 499);
+  // Late but nothing newer to say: it still plays.
+  assert.equal(speaker.nextForSpeaker(busy.slice(0, 2), now - 3100, now).reply.id, now - 3000);
 });
 
 test("a game on the speaker: sound effect then the announcer, in id order; last call; win vs lose; coin on deposits", async () => {
