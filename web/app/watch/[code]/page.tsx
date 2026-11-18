@@ -1,12 +1,15 @@
 "use client";
 // Laptop / TV page: /watch/ABCD. Plays the game's YouTube clip in sync with the market (the video jumps to the
-// question's startAt when trading opens) with the live price on top. Also plays the announcement sounds and
-// reads the result out loud, so the demo has audio before the kiosk speaker exists.
+// question's startAt when trading opens) next to the live price, the countdown and the leaderboard. With
+// "Sound on" it plays the announcement sounds and reads the announcer (or the result) out loud.
+// Dark, readable from across a room; one thing moves at a time and only when the game state changes.
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Qr } from "@/components/Qr";
 import { Spark } from "@/components/Spark";
 import { HttpError, api, fmtClock, useNow, usePoll, usd, type LobbyData } from "@/components/client";
+import { gameScore, latestCaption, marketGemini, marketMode, marketModel, marketPool, probCents, scorecard } from "@/components/extras";
+import { Avatar, CountUp, Icon, Roll, Wordmark, useNewIds } from "@/components/ui";
 
 type YTPlayer = {
   playVideo(): void;
@@ -15,6 +18,7 @@ type YTPlayer = {
   getCurrentTime(): number;
   getPlayerState(): number;
   unMute(): void;
+  mute(): void;
   setVolume(v: number): void;
   destroy(): void;
 };
@@ -44,17 +48,21 @@ function loadYouTube(): Promise<YTNamespace> {
   return ytPromise;
 }
 
+const SIDE = { yes: "Yes", no: "No" } as const;
+
 export default function WatchPage() {
   const params = useParams<{ code: string }>();
   const code = String(params.code || "").toUpperCase();
   const { data: l, error, lastOk } = usePoll(() => api<LobbyData>(`/api/lobby/${code}`), 1000);
   const now = useNow(250);
-  const [started, setStarted] = useState(false);
+  const [sound, setSound] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const holder = useRef<HTMLDivElement>(null);
   const player = useRef<YTPlayer | null>(null);
   const lastEvent = useRef<number | null>(null);
+  const lastCaption = useRef<number | null>(null);
   const videoId = l?.game?.youtubeId ?? null;
+  const freshPlayers = useNewIds(l?.players.map((p) => p.id) ?? []);
 
   // Create the YouTube player once we know the clip.
   useEffect(() => {
@@ -96,45 +104,60 @@ export default function WatchPage() {
     }
   }, [l, playerReady, lastOk]);
 
-  // Sounds and spoken results for new events.
+  // Sounds, spoken results and spoken announcer lines for new events (only with sound on).
   useEffect(() => {
     if (!l) return;
     const newest = l.events.length ? l.events[l.events.length - 1].id : 0;
+    const cap = latestCaption(l);
     if (lastEvent.current === null) {
       lastEvent.current = newest; // do not replay old events when the page opens
+      lastCaption.current = cap?.id ?? 0;
       return;
     }
     const fresh = l.events.filter((e) => e.id > (lastEvent.current as number));
     lastEvent.current = Math.max(lastEvent.current, newest);
-    if (!started) return;
+    const newCaption = cap && cap.id > (lastCaption.current ?? 0) ? cap : null;
+    if (cap) lastCaption.current = Math.max(lastCaption.current ?? 0, cap.id);
+    if (!sound) return;
+    const speak = (text: string, delay: number) => {
+      if (!("speechSynthesis" in window)) return;
+      const u = new SpeechSynthesisUtterance(text.replace(/\$(\d+)\.(\d\d)/g, "$1 dollars $2"));
+      setTimeout(() => window.speechSynthesis.speak(u), delay);
+    };
     for (const e of fresh) {
       if (e.sound) new Audio(`/sounds/${e.sound}.wav`).play().catch(() => {});
-      if (e.kind === "result" && "speechSynthesis" in window) {
-        const u = new SpeechSynthesisUtterance(e.text.replace(/\$(\d+)\.(\d\d)/g, "$1 dollars $2"));
-        setTimeout(() => window.speechSynthesis.speak(u), 900);
-      }
+      // The announcer speaks when there is one; otherwise read the result out.
+      if (e.kind === "result" && !cap) speak(e.text, 900);
     }
-  }, [l, started]);
+    if (newCaption) speak(newCaption.text, fresh.length ? 700 : 0);
+  }, [l, sound]);
 
-  function start() {
-    setStarted(true);
+  function toggleSound() {
+    const on = !sound;
+    setSound(on);
     try {
-      player.current?.unMute();
-      player.current?.setVolume(100);
+      if (on) {
+        player.current?.unMute();
+        player.current?.setVolume(100);
+        new Audio("/sounds/tap.wav").play().catch(() => {});
+      } else {
+        player.current?.mute();
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      }
     } catch {
       /* player not ready yet */
     }
-    new Audio("/sounds/tap.wav").play().catch(() => {});
   }
 
   if (!l) {
     const notFound = error instanceof HttpError && error.status === 404;
     return (
-      <div className="watch">
-        <div className="novideo">
+      <div className="tv">
+        <div className="tv-top"><Wordmark size={28} /></div>
+        <div className="tv-center" role="status">
           <div>
-            <h1>{error ? (notFound ? `No lobby ${code}` : "Can't reach the server") : "Loading…"}</h1>
-            {error && <p>{notFound ? "Pick a game on the kiosk first." : error.message}</p>}
+            <h1 style={{ color: "var(--ink)", fontSize: "2em" }}>{error ? (notFound ? `No lobby called ${code}` : "Can’t reach Huddle") : "Loading…"}</h1>
+            {error && <p style={{ marginTop: "0.4em" }}>{notFound ? "Pick a game on the box first, then open this page again." : `${error.message}. Retrying…`}</p>}
           </div>
         </div>
       </div>
@@ -144,126 +167,236 @@ export default function WatchPage() {
   const m = l.market;
   const serverNow = now + (l.now - lastOk);
   const lockIn = m ? Math.max(0, Math.ceil((m.lockAt - serverNow) / 1000)) : 0;
-  const lastResult = [...l.events].reverse().find((e) => e.kind === "result");
-  const showResultSplash = l.phase === "result" && m?.outcome && lastResult && serverNow - lastResult.at < 7000;
+  const window_ = m ? Math.max(1, Math.round((m.lockAt - m.openedAt) / 1000)) : 1;
+  const live = !!m && (l.phase === "open" || l.phase === "locked" || l.phase === "result");
+  const caption = latestCaption(l);
+  const lastEventText = l.events.length ? l.events[l.events.length - 1] : null;
+  const score = gameScore(l);
+  const mode = marketMode(l);
+  const pool = marketPool(l);
+  const model = marketModel(l);
+  const gemini = marketGemini(l);
+  const card = scorecard(l);
+  const board = [...l.players].sort((a, b) => b.balance - a.balance);
 
   return (
-    <div className="watch">
-      <div className="player" ref={holder} />
-      {!videoId && (
-        <div className="novideo">
-          <div>
-            <h2>{l.game?.title}</h2>
-            <p>No clip set for this game yet. Put an 11-character YouTube id in config/games.json.</p>
-          </div>
-        </div>
-      )}
+    <div className="tv">
+      <header className="tv-top">
+        <Wordmark size={28} />
+        {l.game && <span className="game">{l.game.title}</span>}
+        <span className="chip code" translate="no">{l.code}</span>
+        {score && (
+          <span className="scorebug" aria-label={`${score.home} ${score.homeScore}, ${score.away} ${score.awayScore}`}>
+            <span>{score.home}</span><span className="sc">{score.homeScore} – {score.awayScore}</span><span>{score.away}</span>
+            {score.clock && <span className="clk tnum">{score.clock}</span>}
+          </span>
+        )}
+        <span className="spacer" />
+        <button className="tv-sound" aria-pressed={sound} onClick={toggleSound}>
+          <Icon name={sound ? "sound" : "mute"} size={18} /> {sound ? "Sound on" : "Sound off"}
+        </button>
+      </header>
 
-      {/* live price bar */}
-      {m && (l.phase === "open" || l.phase === "locked" || l.phase === "result") && (
-        <div className="top">
-          <div className="grow">
-            <div className="dim">Question {m.qIndex + 1} of {l.questionCount} · Lobby {l.code}</div>
-            <div className="q">{m.text}</div>
-            <div className="countdown" style={{ marginTop: 6 }}>
-              {l.phase === "open" && <span style={{ color: lockIn <= 10 ? "#f4a3a3" : undefined }}>Locks in {fmtClock(lockIn)}</span>}
-              {l.phase === "locked" && <span style={{ color: "#e0675b" }}>Trading closed · watch the play</span>}
-              {l.phase === "result" && m.outcome && <span style={{ color: m.outcome === "yes" ? "#7fe0bd" : "#f4a3a3" }}>{m.outcome.toUpperCase()} won</span>}
+      {/* ---------------- stage: the clip (or the game card), with the join panel / final board over it */}
+      <main className="stage" id="main">
+        <div className="screen">
+          <div className="player" ref={holder} />
+          {!videoId && (
+            <div className="card-fill">
+              <div>
+                <h2>{l.game?.title ?? "Huddle"}</h2>
+                <p>{l.game?.subtitle || "Watch along on the big screen."}</p>
+              </div>
             </div>
-          </div>
-          <div className="tprice">
-            <div className="price yes">
-              <div className="lbl">YES {m.lastMove === 1 && <span className="arrow-up">▲</span>}</div>
-              <div className="num">{m.yesCents}¢</div>
+          )}
+          {l.phase === "lobby" && (
+            <div className="over">
+              <div className="joinpanel">
+                <div className="qr"><Qr text={l.joinUrl} size={260} /></div>
+                <div>
+                  <h1>Join the huddle</h1>
+                  <p className="lead">Scan the code or tap your phone on the box.</p>
+                  <div className="code"><span className="mute">Code</span><b translate="no">{l.code}</b></div>
+                  <div className="url">{l.joinUrl.replace(/^https?:\/\//, "")}</div>
+                  <div className="people" aria-live="polite">
+                    {l.players.length ? (
+                      l.players.map((p) => (
+                        <span key={p.id} className={`person ${freshPlayers.has(p.id) ? "new" : ""}`}>
+                          <Avatar name={p.name} size={24} />{p.name}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="mute">Waiting for the first player…</span>
+                    )}
+                  </div>
+                  {l.nextQuestion && <p className="first"><b>First up:</b> {l.nextQuestion}</p>}
+                </div>
+              </div>
             </div>
-            <div className="price no">
-              <div className="lbl">NO {m.lastMove === -1 && <span className="arrow-up">▲</span>}</div>
-              <div className="num">{m.noCents}¢</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* side panel: join QR, players, trades */}
-      {l.phase !== "lobby" && l.phase !== "ended" && (
-        <div className="side stack">
-          <div className="row">
-            <Qr text={l.joinUrl} size={84} />
-            <div className="grow">
-              <div className="dim small">Join</div>
-              <div style={{ fontWeight: 800, fontSize: 22 }}>{l.code}</div>
-            </div>
-          </div>
-          {m && <Spark points={m.history} height={56} />}
-          {m && <div className="dim small">{usd(m.volume)} traded</div>}
-          <ul className="list small">
-            {l.players.map((p) => (
-              <li key={p.id}><span>{p.name}</span><span className="mono">{usd(p.balance)}</span></li>
-            ))}
-          </ul>
-          {m && m.trades.length > 0 && (
-            <div className="small dim">
-              {m.trades.slice(0, 4).map((t) => (
-                <div key={t.at + t.name}>{t.name} bought {t.side.toUpperCase()} · {usd(t.cents)}</div>
-              ))}
+          )}
+          {l.phase === "ended" && (
+            <div className="over">
+              <div className="final">
+                <h1>Final standings</h1>
+                <p className="lead">Thanks for playing. Cash out on your phone.</p>
+                <ol className="rows">
+                  {[...l.players].sort((a, b) => b.balance - a.balance).map((p, i) => (
+                    <li key={p.id}>
+                      <span className="rank">{i + 1}</span>
+                      {i === 0 && <Icon name="trophy" size={20} className="ink2" />}
+                      <span className="grow">{p.name}</span>
+                      <span className="amt">{usd(p.balance)}</span>
+                    </li>
+                  ))}
+                </ol>
+                {card && (
+                  <div className="scorecard">
+                    <div className="compare">
+                      <div className="me"><div className="k">Room</div><div className="v tnum">{card.room === null ? "–" : card.room.toFixed(3)}</div></div>
+                      <div><div className="k">Model</div><div className="v tnum">{card.model === null ? "–" : card.model.toFixed(3)}</div></div>
+                      <div><div className="k">Gemini</div><div className="v tnum">{card.gemini === null ? "–" : card.gemini.toFixed(3)}</div></div>
+                    </div>
+                    <p className="verdict">{card.verdict ? `${card.verdict} ` : ""}Brier score over {card.n} questions, lower is better.</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
-      )}
+      </main>
 
-      {/* lobby: big join card */}
-      {l.phase === "lobby" && (
-        <div className="center-card">
-          <div className="stack">
-            <h1 style={{ fontSize: 34 }}>{l.game?.title}</h1>
-            <div className="dim">Scan to join, or tap your phone on the kiosk</div>
-            <div style={{ display: "grid", placeItems: "center", margin: "12px 0" }}>
-              <Qr text={l.joinUrl} size={260} />
+      {/* ---------------- rail: market, leaderboard, join */}
+      <aside className="rail" aria-label="Market">
+        {live && m ? (
+          <section className="rcard" aria-labelledby="tvq">
+            <div className="meta">
+              <span>Question {m.qIndex + 1} of {l.questionCount}</span>
+              {l.phase === "open" && <span className={`status ${lockIn <= 10 ? "soon" : "open"}`}><Icon name="clock" size={14} /> Live</span>}
+              {l.phase === "locked" && <span className="status closed snap"><Icon name="lock" size={14} /> Closed</span>}
+              {l.phase === "result" && m.outcome && <span className="status closed"><Icon name="check" size={14} /> {SIDE[m.outcome]} won</span>}
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800 }}>Code {l.code}</div>
-            <div className="dim small">{l.joinUrl}</div>
-            <div className="row" style={{ justifyContent: "center", marginTop: 8 }}>
-              {l.players.length ? l.players.map((p) => <span key={p.id} className="pill">{p.name}</span>) : <span className="dim">Nobody yet</span>}
+            <h1 className="q" id="tvq">{m.text}</h1>
+
+            {l.phase === "result" && m.outcome ? (
+              <>
+                <div className="outcome">
+                  {(["yes", "no"] as const).map((side) => {
+                    const win = side === m.outcome;
+                    return (
+                      <div key={side} className={`orow ${side} ${win ? "win" : "lose"}`}>
+                        {win && <span className="fill" aria-hidden="true" />}
+                        <span className="lbl">{win ? <Icon name="check" size={18} /> : <Icon name="x" size={18} />} {SIDE[side]}</span>
+                        <span className="tag">{win ? "Pays $1" : "$0"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <ul className="rows" style={{ marginTop: "0.8em" }} aria-live="polite">
+                  {m.winners.length ? (
+                    m.winners.slice(0, 4).map((w) => (
+                      <li key={w.name}>
+                        <span className="grow">{w.name}</span>
+                        <span className="amt" style={{ color: "var(--green-ink)" }}>+<CountUp cents={w.cents} format={usd} /></span>
+                      </li>
+                    ))
+                  ) : (
+                    <li><span className="grow mute">Nobody called it this time.</span></li>
+                  )}
+                </ul>
+              </>
+            ) : (
+              <>
+                <div className="prices" aria-live="polite">
+                  <div className="tprice yes">
+                    <div className="k"><span className="sw" aria-hidden="true" />Yes</div>
+                    <div className="v"><Roll text={String(m.yesCents)} value={m.yesCents} arrow label={`Yes ${m.yesCents} cents`} /><span className="c">¢</span></div>
+                    <div className="p">{m.yesCents}% chance</div>
+                  </div>
+                  <div className="tprice no">
+                    <div className="k"><span className="sw" aria-hidden="true" />No</div>
+                    <div className="v"><Roll text={String(m.noCents)} value={m.noCents} label={`No ${m.noCents} cents`} /><span className="c">¢</span></div>
+                    <div className="p">{mode === "pool" ? "Winners split the pot" : "A winning share pays $1"}</div>
+                  </div>
+                </div>
+                <div className="chart"><Spark points={m.history} height={72} /></div>
+                {l.phase === "open" ? (
+                  <>
+                    <div className={`countdown ${lockIn <= 10 ? "urgent" : ""}`}>
+                      <span className="k">Trading locks in</span>
+                      <span className="v">{fmtClock(lockIn)}</span>
+                    </div>
+                    <div className="track" aria-hidden="true"><span style={{ transform: `scaleX(${Math.min(1, lockIn / window_)})` }} /></div>
+                  </>
+                ) : (
+                  <div className="countdown"><span className="k">Trading closed. Watch the play.</span><Icon name="lock" size={22} /></div>
+                )}
+              </>
+            )}
+
+            {mode === "pool" && pool && (
+              <div className="pool">
+                <div className="bar" aria-hidden="true">
+                  <span className="y" style={{ width: `${(pool.yesCents / Math.max(1, pool.yesCents + pool.noCents)) * 100}%` }} />
+                  <span className="n" style={{ flex: 1 }} />
+                </div>
+                <div className="legend"><span className="tnum">Yes {usd(pool.yesCents)}</span><span className="tnum">No {usd(pool.noCents)}</span></div>
+              </div>
+            )}
+            {(model !== null || gemini) && (
+              <div className="compare" aria-label="Room, model and Gemini prices for Yes">
+                <div className="me"><div className="k">Room</div><div className="v tnum">{m.yesCents}¢</div></div>
+                <div><div className="k">Model</div><div className="v tnum">{model !== null ? `${probCents(model)}¢` : "–"}</div></div>
+                <div><div className="k">Gemini</div><div className="v tnum">{gemini ? `${probCents(gemini.prob)}¢` : "–"}</div></div>
+              </div>
+            )}
+            <div className="stats"><span><b className="tnum">{usd(m.volume)}</b> traded</span><span>{m.trades.length} trades</span></div>
+          </section>
+        ) : (
+          <section className="rcard">
+            <h2>{l.phase === "ended" ? "Session over" : "Up next"}</h2>
+            <p className="q" style={{ fontSize: "1.25em" }}>
+              {l.phase === "ended" ? "Thanks for playing." : l.nextQuestion ?? "The host starts the next question from the box."}
+            </p>
+          </section>
+        )}
+
+        {l.phase !== "ended" && <section className="rcard board" aria-labelledby="tvboard">
+          <h2 id="tvboard">Leaderboard</h2>
+          <ol className="rows" style={{ marginTop: "0.4em" }}>
+            {board.slice(0, 8).map((p, i) => (
+              <li key={p.id} className={freshPlayers.has(p.id) ? "new" : ""}>
+                <span className="rank">{i + 1}</span>
+                <span className="grow">{p.name}</span>
+                <span className="amt">{usd(p.balance)}</span>
+              </li>
+            ))}
+            {board.length === 0 && <li><span className="grow mute">Nobody yet</span></li>}
+          </ol>
+        </section>}
+
+        {l.phase !== "lobby" && l.phase !== "ended" && (
+          <section className="rcard mini-join">
+            <span className="qr"><Qr text={l.joinUrl} size={72} /></span>
+            <div>
+              <h2>Join on your phone</h2>
+              <b translate="no">{l.code}</b>
             </div>
-            <div className="dim" style={{ marginTop: 8 }}>{l.nextQuestion ? `First up: ${l.nextQuestion}` : ""}</div>
-          </div>
-        </div>
-      )}
+          </section>
+        )}
+      </aside>
 
-      {/* result splash */}
-      {showResultSplash && m && (
-        <div className="center-card" style={{ background: "rgba(0,0,0,.55)" }}>
-          <div>
-            <div className="result-big" style={{ color: m.outcome === "yes" ? "#2bd49b" : "#ff7a4d" }}>{m.outcome?.toUpperCase()}</div>
-            <div style={{ fontSize: 22, marginTop: 10 }}>
-              {m.winners.length ? m.winners.map((w) => `${w.name} +${usd(w.cents)}`).join(" · ") : "No winners this time"}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ended: leaderboard */}
-      {l.phase === "ended" && (
-        <div className="center-card">
-          <div className="stack" style={{ minWidth: 320 }}>
-            <h1>Session over</h1>
-            <ul className="list" style={{ textAlign: "left" }}>
-              {[...l.players].sort((a, b) => b.balance - a.balance).map((p) => (
-                <li key={p.id}><span>{p.name}</span><span className="mono">{usd(p.balance)}</span></li>
-              ))}
-            </ul>
-            <div className="dim small">Cash out on your phone.</div>
-          </div>
-        </div>
-      )}
-
-      {!started && (
-        <div className="start-overlay">
-          <button className="btn-primary" style={{ fontSize: 22, padding: "18px 28px" }} onClick={start}>
-            Start the watch party (turns on sound)
-          </button>
-        </div>
-      )}
+      {/* ---------------- one caption line: the announcer, or the latest thing that happened */}
+      <footer className="tv-caption" aria-live="polite">
+        <Icon name={caption ? "sound" : "arrow-right"} size={20} className="mute" />
+        {caption ? (
+          <span key={`c${caption.id}`} className="txt fresh">{caption.text}</span>
+        ) : lastEventText ? (
+          <span key={`e${lastEventText.id}`} className="txt fresh">{lastEventText.text}</span>
+        ) : (
+          <span className="txt mute">Waiting for the host…</span>
+        )}
+        {caption && <span className="src">Announcer</span>}
+      </footer>
     </div>
   );
 }
