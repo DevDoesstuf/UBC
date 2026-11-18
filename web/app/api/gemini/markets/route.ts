@@ -2,7 +2,7 @@
 //     ?league=NFL,NBA,NHL                     other leagues: NFL NBA EPL NHL NCAAF NCAAM MLB MLS UCL
 //     ?team=DAL                               only games with that team code
 // Each of our games also lists the Gemini markets its teams play next ("ours"), so the host can see what is on.
-// Cached 60 s; when Gemini is unreachable it serves the last good list (live=false, real asOf). Never 5xx for Gemini.
+// Cached 2 min; when Gemini is unreachable it serves the last good list (live=false, real asOf). Never 5xx for Gemini.
 import { json, handle } from "@/lib/http";
 import { allGames } from "@/lib/games";
 import { discoverMarkets, isSettled } from "@/lib/gemini";

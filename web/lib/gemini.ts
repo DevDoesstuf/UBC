@@ -413,7 +413,7 @@ export interface Discovery {
 
 export const DISCOVERY_LEAGUES = ["NFL", "NBA", "EPL", "NHL", "NCAAF", "NCAAM", "MLB", "MLS", "UCL"] as const;
 export const DISCOVERY_DEFAULT = ["NFL", "NBA", "EPL"];
-export const DISCOVERY_CACHE_MS = 60_000;
+export const DISCOVERY_CACHE_MS = 120_000;
 const DISCOVERY_PAGE = 200;
 const DISCOVERY_PAGES = 3;
 
@@ -448,16 +448,23 @@ export function toDiscovered(raw: RawListEvent[], league: string): DiscoveredGam
   return out;
 }
 
+// The events list cannot be filtered to moneylines and player-prop events carry long rule texts, so a page of
+// 200 NFL events is ~13 MB and takes ~3 s: discovery gets its own, longer timeout and fetches the remaining
+// pages in parallel once the first one says how many there are.
+export const DISCOVERY_TIMEOUT_MS = 10_000;
+
 async function discoverLeague(league: string, f: FetchLike, timeoutMs: number, api: string): Promise<DiscoveredGame[]> {
-  const games: DiscoveredGame[] = [];
-  for (let page = 0; page < DISCOVERY_PAGES; page++) {
-    const q = new URLSearchParams({ status: "active", category: "sports", search: `${league}-`, limit: String(DISCOVERY_PAGE), offset: String(page * DISCOVERY_PAGE) });
-    const payload = (await getJson(`${api}/v1/prediction-markets/events?${q}`, f, timeoutMs)) as { data?: unknown; pagination?: { total?: number } };
-    games.push(...toDiscovered(unwrapEvents(payload) as RawListEvent[], league));
-    const total = Number(payload?.pagination?.total ?? 0);
-    if ((page + 1) * DISCOVERY_PAGE >= total) break;
-  }
-  return games;
+  const page = async (n: number) => {
+    const q = new URLSearchParams({ status: "active", category: "sports", search: `${league}-`, limit: String(DISCOVERY_PAGE), offset: String(n * DISCOVERY_PAGE) });
+    return (await getJson(`${api}/v1/prediction-markets/events?${q}`, f, timeoutMs)) as { data?: unknown; pagination?: { total?: number } };
+  };
+  const first = await page(0);
+  const total = Number(first?.pagination?.total ?? 0);
+  const more = Math.min(DISCOVERY_PAGES, Math.ceil(total / DISCOVERY_PAGE)) - 1;
+  const rest = await Promise.allSettled(Array.from({ length: Math.max(0, more) }, (_, i) => page(i + 1)));
+  const payloads = [first, ...rest.filter((r) => r.status === "fulfilled").map((r) => (r as PromiseFulfilledResult<typeof first>).value)];
+  const seen = new Set<string>();
+  return payloads.flatMap((p) => toDiscovered(unwrapEvents(p) as RawListEvent[], league)).filter((g) => !seen.has(g.base) && !!seen.add(g.base));
 }
 
 /**
@@ -481,7 +488,7 @@ export async function discoverMarkets(opts: { leagues?: string[]; fetch?: FetchL
   }
   const f = opts.fetch ?? ((u, i) => fetch(u, i));
   const api = opts.apiBase ?? GEMINI_API_BASE;
-  const got = await Promise.allSettled(leagues.map((l) => discoverLeague(l, f, GEMINI_TIMEOUT_MS, api)));
+  const got = await Promise.allSettled(leagues.map((l) => discoverLeague(l, f, DISCOVERY_TIMEOUT_MS, api)));
   const ok = got.filter((g): g is PromiseFulfilledResult<DiscoveredGame[]> => g.status === "fulfilled");
   if (!ok.length) {
     const err = got.find((g) => g.status === "rejected") as PromiseRejectedResult | undefined;

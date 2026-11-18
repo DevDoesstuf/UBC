@@ -104,7 +104,7 @@ function teamColor(t) {
 // Each raw event gets a `cost` (demo ms before the next event) and an optional `dwell` (extra ms after it, so a
 // question opened by it can trade). Filler costs are scaled so the whole game fits the target length.
 
-function schedule(raw, targetMs, opts = {}) {
+export function schedule(raw, targetMs, opts = {}) {
   const minFill = opts.minFill ?? 450;
   const maxFill = opts.maxFill ?? 2200;
   const fixed = raw.reduce((a, e) => a + (e.dwell ?? 0) + (e.fixed ?? 0), 0);
@@ -247,7 +247,7 @@ function nflEvents(sum, teams) {
   return raw;
 }
 
-function classify(type, text = "") {
+export function classify(type, text = "") {
   const t = type.toLowerCase();
   if (/rush/.test(t)) return { playType: "run" };
   if (/pass|sack|interception/.test(t)) return { playType: "pass" };
@@ -516,7 +516,7 @@ function geminiKind(ev) {
   return null;
 }
 
-function priceAt(candles, t) {
+export function priceAt(candles, t) {
   // candles: [[startMs, open, high, low, close], ...] ascending, 5 minute buckets. Interpolate open -> close.
   if (!candles.length || t < candles[0][0]) return null;
   let lo = 0;
