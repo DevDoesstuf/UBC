@@ -144,7 +144,9 @@ export default function PhonePage() {
         <PlainBar code={l.code} />
         <main className="phone join" id="main">
           <div className="hero">
-            <span className="chip green"><span className="dot green" /> {l.players.length} in this huddle</span>
+            <span className="chip green">
+              <span className="dot green" /> {l.players.length ? `${l.players.length} in this huddle` : "Be the first to join"}
+            </span>
             <h1>{l.game?.title ?? "Huddle"}</h1>
             <p>{l.game?.subtitle ? `${l.game.subtitle}. ` : ""}Call each play with your friends. A winning call pays $1 a share.</p>
           </div>
@@ -260,7 +262,7 @@ export default function PhonePage() {
                   <Icon name="clock" size={14} /> <span className="tnum">Locks in {fmtClock(lockIn)}</span>
                 </span>
               )}
-              {l.phase === "locked" && <span className="status closed snap"><Icon name="lock" size={14} /> Closed</span>}
+              {l.phase === "locked" && <span className="status closed"><Icon name="lock" size={14} /> Closed</span>}
               {l.phase === "result" && m.outcome && (
                 <span className="status closed"><Icon name="check" size={14} /> {SIDE[m.outcome]} won</span>
               )}
@@ -277,6 +279,9 @@ export default function PhonePage() {
               <Outcome outcome={m.outcome} />
             ) : (
               <div className="quotes">
+                {l.phase === "locked" && (
+                  <p className="locked-note"><Icon name="lock" size={16} /> Trading closed. Watch the play.</p>
+                )}
                 <Quote side="yes" cents={m.yesCents} />
                 <Quote side="no" cents={m.noCents} />
               </div>
@@ -392,7 +397,7 @@ export default function PhonePage() {
               </p>
             </>
           )}
-          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          {(me.balance > 0 || l.phase === "ended") && <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
             {l.money.payouts === "onchain" && (
               <label className="field" htmlFor="payout">
                 Payout address
@@ -412,7 +417,7 @@ export default function PhonePage() {
             >
               Cash out {usd(me.balance)}
             </button>
-          </div>
+          </div>}
         </section>
 
         {/* ---------------- leaderboard */}
@@ -585,7 +590,7 @@ function ScorecardBlock({ s }: { s: { room: number | null; model: number | null;
   const f = (v: number | null) => (v === null ? "–" : v.toFixed(3));
   return (
     <section className="section" aria-labelledby="scorecard">
-      <div className="section-h"><h2 id="scorecard">Who called it best</h2><span className="mute">{s.n} questions · lower is better</span></div>
+      <div className="section-h"><h2 id="scorecard">Who called it best</h2><span className="mute">{s.n} {s.n === 1 ? "question" : "questions"} · lower is better</span></div>
       <div className="compare" style={{ marginTop: 0 }}>
         <div className="me"><div className="k">Room</div><div className="v tnum">{f(s.room)}</div></div>
         <div><div className="k">Model</div><div className="v tnum">{f(s.model)}</div></div>

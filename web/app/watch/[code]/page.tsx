@@ -256,7 +256,7 @@ export default function WatchPage() {
                       <div><div className="k">Model</div><div className="v tnum">{card.model === null ? "–" : card.model.toFixed(3)}</div></div>
                       <div><div className="k">Gemini</div><div className="v tnum">{card.gemini === null ? "–" : card.gemini.toFixed(3)}</div></div>
                     </div>
-                    <p className="verdict">{card.verdict ? `${card.verdict} ` : ""}Brier score over {card.n} questions, lower is better.</p>
+                    <p className="verdict">{card.verdict ? `${card.verdict} ` : ""}Brier score over {card.n} {card.n === 1 ? "question" : "questions"}, lower is better.</p>
                   </div>
                 )}
               </div>
@@ -351,12 +351,23 @@ export default function WatchPage() {
             )}
             <div className="stats"><span><b className="tnum">{usd(m.volume)}</b> traded</span><span>{m.trades.length} trades</span></div>
           </section>
+        ) : l.phase === "ended" ? (
+          <section className="rcard" aria-labelledby="tvresults">
+            <h2 id="tvresults">Results</h2>
+            <ul className="rows" style={{ marginTop: "0.4em" }}>
+              {l.results.map((r, i) => (
+                <li key={i}>
+                  <span className="grow" style={{ whiteSpace: "normal" }}>{r.text}</span>
+                  <span className={`side-tag ${r.outcome}`}><Icon name="check" size={12} />&nbsp;{SIDE[r.outcome]}</span>
+                </li>
+              ))}
+              {l.results.length === 0 && <li><span className="grow mute">No questions were played.</span></li>}
+            </ul>
+          </section>
         ) : (
           <section className="rcard">
-            <h2>{l.phase === "ended" ? "Session over" : "Up next"}</h2>
-            <p className="q" style={{ fontSize: "1.25em" }}>
-              {l.phase === "ended" ? "Thanks for playing." : l.nextQuestion ?? "The host starts the next question from the box."}
-            </p>
+            <h2>Up next</h2>
+            <p className="q" style={{ fontSize: "1.25em" }}>{l.nextQuestion ?? "The host starts the next question from the box."}</p>
           </section>
         )}
 

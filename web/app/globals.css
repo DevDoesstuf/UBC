@@ -225,6 +225,7 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 
 /* quote rows: Yes / No with price as cents and as payout */
 .quotes { margin-top: 14px; display: grid; gap: 8px; }
+.locked-note { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius); background: var(--ink); color: var(--bg); font-weight: 600; font-size: 15px; animation: snap 260ms var(--ease-snap); }
 .quote {
   display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
   padding: 12px 14px; border-radius: var(--radius); background: var(--surface);
@@ -333,7 +334,7 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 .home-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; }
 .home-hero { display: grid; grid-template-columns: 1.15fr 1fr; gap: 32px; align-items: center; padding: 40px 0 32px; }
 .home-hero h1 { font-size: clamp(34px, 5vw, 52px); font-weight: 700; letter-spacing: -0.035em; line-height: 1.04; }
-.home-hero p { margin-top: 14px; color: var(--ink-2); font-size: 17px; max-width: 46ch; }
+.home-hero > div > p { margin-top: 14px; color: var(--ink-2); font-size: 17px; max-width: 46ch; }
 .home-join { display: grid; gap: 12px; padding: 20px; border-radius: var(--radius-l); background: var(--surface); }
 .home-join .code-in { font-size: 28px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; text-align: center; min-height: 60px; }
 .home-links { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
@@ -379,7 +380,7 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 .screen .card-fill h2 { font-size: 2.2em; font-weight: 700; letter-spacing: -0.03em; }
 .screen .card-fill p { color: var(--mute); margin-top: 0.4em; }
 .screen .bug { position: absolute; left: 1em; top: 1em; }
-.screen .over { position: absolute; inset: 0; background: var(--bg); display: grid; place-items: center; padding: 2em; }
+.screen .over { position: absolute; inset: 0; background: var(--surface); display: grid; place-items: center; padding: 2em; }
 
 .joinpanel { display: grid; grid-template-columns: auto 1fr; gap: 2.2em; align-items: center; max-width: 52em; width: 100%; }
 .joinpanel .qr { background: #fff; padding: 0.6em; border-radius: var(--radius); line-height: 0; }
@@ -420,7 +421,14 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color:
 .tv .compare > div { background: var(--surface); }
 .tv .rows li { border-color: var(--line); font-size: 1em; min-height: 2.4em; }
 .board { flex: 0 1 auto; min-height: 0; overflow: hidden; }
-@media (max-height: 820px) { .tv .mini-join { display: none; } }
+@media (max-height: 820px) {
+  .tv .mini-join { display: none; }
+  .tv .rail { gap: 0.75em; }
+  .tv .rcard { padding: 0.9em 1em; }
+  .tv .tprice .v { font-size: 2.5em; }
+  .tv .chart .spark { height: 52px !important; }
+  .tv .countdown { margin-top: 0.6em; }
+}
 .mini-join { display: flex; align-items: center; gap: 0.9em; }
 .mini-join .qr { background: #fff; padding: 0.3em; border-radius: 0.5em; line-height: 0; }
 .mini-join b { font-size: 1.5em; letter-spacing: 0.12em; }
