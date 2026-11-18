@@ -185,21 +185,18 @@ export function Aurora({ blobs = AURORA_DEFAULT, className = "", fixed = false }
 
 /* ------------------------------------------------------------------ people */
 
-/** Avatar fills: vivid, each with a text colour that passes 4.5:1 at its size. Never the YES/NO hues. */
+/**
+ * Avatar fills, white initial on each (all pass 4.5:1). Never the YES/NO hues. The same eight colours and the
+ * same hash (FNV-1a of the name) as the box (firmware/kiosk_screen/ui.cpp avatarColor, KioskView), so a player
+ * has one colour on the box, the phones and the TV.
+ */
 const AVATAR: { bg: string; fg: string }[] = [
-  { bg: "#0B7A3E", fg: "#FFFFFF" },
-  { bg: "#7CCB4E", fg: "#10261C" },
-  { bg: "#E8A33D", fg: "#10261C" },
-  { bg: "#10261C", fg: "#FFFFFF" },
-  { bg: "#7A3E9D", fg: "#FFFFFF" },
-  { bg: "#F2C94C", fg: "#10261C" },
-  { bg: "#2BB3A3", fg: "#10261C" },
-  { bg: "#C2557A", fg: "#FFFFFF" },
-];
+  "#0B7A3E", "#127C71", "#6D4AD6", "#B4235A", "#5B6B2F", "#8C5A1B", "#2F4858", "#9A3412",
+].map((bg) => ({ bg, fg: "#FFFFFF" }));
 
 export function avatarColour(name: string): { bg: string; fg: string } {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619) >>> 0;
   return AVATAR[h % AVATAR.length];
 }
 

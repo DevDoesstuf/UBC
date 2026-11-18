@@ -18,7 +18,7 @@ export {
   Kinetic, Burst, Aurora, Avatar, avatarColour, Sparkline, useSeries, useCoins, withAlpha,
   AURORA_DEFAULT, BURST_COLOURS, GOLD_BURST, type AuroraBlob, type SeriesPoint,
 } from "./Fx";
-export { DUR, EASE, prefersReducedMotion, useReducedMotion, useReplayClass, useDirection, useNewIds, useFlip } from "./motion";
+export { DUR, EASE, prefersReducedMotion, useReducedMotion, useReplayClass, useDirection, useNewIds, useFlip, delay, vars } from "./motion";
 export {
   clampProb, pctText, pctValue, pctLabel, multiplierText, payoutText, normalise, usd, usdShort, signedUsd, ordinal,
 } from "./format";

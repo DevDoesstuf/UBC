@@ -99,7 +99,7 @@ export function LockRing({
             >
               <Roll text={label} flash={false} duration={320} />
             </span>
-            {caption && !compact && <span style={{ fontSize: `calc(${size} * 0.1)` }}>{caption}</span>}
+            {caption && !compact && <span className="hd-ring-cap" style={{ fontSize: `calc(${size} * 0.1)` }}>{caption}</span>}
           </>
         ) : (
           <span style={{ fontSize: `calc(${size} * ${compact ? 0.16 : 0.1})`, fontWeight: 800, textAlign: "center", maxWidth: "62%" }}>

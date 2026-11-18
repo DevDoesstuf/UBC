@@ -328,9 +328,10 @@
 /* ------------------------------------------------------------ lock ring */
 
 .hd-ring { position: relative; flex: none; }
-.hd-ring-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hd-ring-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .hd-ring-in { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .hd-ring-locked { display: flex; flex-direction: column; align-items: center; }
+.hd-ring-cap { margin-top: 0.15em; font-weight: 600; color: var(--k-ink-2); }
 .hd-ring-dot {
   transform-box: fill-box;
   transform-origin: center;
@@ -483,6 +484,10 @@
 }
 @keyframes hd-shine { from { transform: translateX(-120%); } }
 
+/* The losing side of a resolved split fades back (it rests faded). */
+@keyframes hd-drain { from { opacity: 1; } }
+.hd-drain { opacity: 0.22; animation: hd-drain 900ms var(--ease-in) both; }
+
 /* money-flow: a gold coin arcs from (0,0) to (--dx, --dy) and lands in the target. */
 .hd-coin-layer { position: fixed; inset: 0; z-index: 90; pointer-events: none; }
 .hd-coin {
@@ -537,6 +542,11 @@
 .hd-spin { animation: hd-spin 1.6s linear infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes hd-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-0.35rem); } }
 .hd-float { animation: hd-float 4.5s ease-in-out infinite; }
+/* Pops in, then floats: the pop finishes first, then the float starts. */
+.hd-pop.hd-float {
+  animation: hd-pop var(--t-bounce) var(--ease-bounce) both, hd-float 4.5s ease-in-out infinite;
+  animation-delay: var(--d, 0ms), calc(var(--d, 0ms) + var(--t-bounce));
+}
 
 /* Ambient colour field behind the ivory canvas: three soft blobs drifting (transform only). */
 .hd-aurora {
@@ -587,7 +597,7 @@
   .hd-btn:active:not(:disabled) { transform: scale(0.97); }
   .hd-arrow, .hd-ring[data-state="urgent"] .hd-ring-dots, .hd-ring-glow, .hd-beat-a, .hd-beat-b,
   .hd-snap, .hd-rise, .hd-fade, .hd-drop, .hd-pop, .hd-stamp, .hd-stamp-a, .hd-stamp-b, .hd-slide-r, .hd-slide-l,
-  .hd-zoom, .hd-w, .hd-flood, .hd-breathe, .hd-spin, .hd-float, .hd-ping,
+  .hd-zoom, .hd-w, .hd-flood, .hd-drain, .hd-breathe, .hd-spin, .hd-float, .hd-pop.hd-float, .hd-ping,
   .hd-spark-draw-a, .hd-spark-draw-b, .hd-spark-draw-a > *, .hd-spark-draw-b > *,
   .hd-aurora > i {
     animation: none !important;

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 /**
  * Motion tokens (mirrored as CSS variables in huddle.css). Durations in ms.
@@ -97,24 +97,29 @@ const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayout
 /**
  * board-reorder without a motion library (FLIP): give every row `data-flip="<id>"` inside the
  * returned ref. When the order changes, rows glide from where they were to where they are on the
- * spring (transform only). Instant under reduced motion. `key` should change when the order does.
+ * spring (transform only), vertically for a list and sideways for a row of chips. Layout offsets
+ * (not bounding boxes) are compared, so a glide still running never skews the next one. Instant
+ * under reduced motion. `key` should change when the order does.
  */
 export function useFlip<T extends HTMLElement>(key: string) {
   const ref = useRef<T>(null);
-  const last = useRef<Map<string, number>>(new Map());
+  const last = useRef<Map<string, { x: number; y: number }>>(new Map());
   useIsoLayoutEffect(() => {
     const root = ref.current;
     if (!root) return;
     const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-flip]"));
-    const next = new Map<string, number>();
+    const next = new Map<string, { x: number; y: number }>();
     const reduce = prefersReducedMotion();
     for (const el of rows) {
       const id = el.dataset.flip!;
-      const top = el.offsetTop;
-      next.set(id, top);
+      const at = { x: el.offsetLeft, y: el.offsetTop };
+      next.set(id, at);
       const before = last.current.get(id);
-      if (before === undefined || before === top || reduce || typeof el.animate !== "function") continue;
-      el.animate([{ transform: `translateY(${before - top}px)` }, { transform: "translateY(0)" }], {
+      if (!before || reduce || typeof el.animate !== "function") continue;
+      const dx = before.x - at.x;
+      const dy = before.y - at.y;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }], {
         duration: 560,
         easing: "cubic-bezier(0.34, 1.3, 0.64, 1)",
       });
@@ -123,3 +128,9 @@ export function useFlip<T extends HTMLElement>(key: string) {
   }, [key]);
   return ref;
 }
+
+/** `--d` (the kit's animation delay) as a style object: `style={delay(240)}`. */
+export const delay = (ms: number) => ({ ["--d" as string]: `${ms}ms` }) as CSSProperties;
+
+/** CSS custom properties as a style object: `style={vars({ "--from": 0.4 })}`. */
+export const vars = (v: Record<string, string | number>) => v as unknown as CSSProperties;
