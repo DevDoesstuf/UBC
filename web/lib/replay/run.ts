@@ -97,7 +97,7 @@ export interface ReplayHost {
 // ---------------------------------------------------------------- candidates -> YES/NO questions
 
 function nick(team: TeamRef, sport: GameState["sport"]): string {
-  if (sport !== "nfl") return team.name;
+  if (sport === "soccer") return team.name;
   const words = team.name.trim().split(/\s+/);
   return words.length > 1 ? words[words.length - 1] : team.name;
 }
@@ -126,8 +126,9 @@ export function toYesNo(c: MarketCandidate, state: GameState, ev: GameEvent): Om
   switch (c.templateId) {
     case "soccer.winner":
     case "nfl.winner":
+    case "nba.winner":
       yesId = "home";
-      text = sport === "nfl" ? `Will the ${home} beat the ${away}?` : `Will ${home} beat ${away}?`;
+      text = sport !== "soccer" ? `Will the ${home} beat the ${away}?` : `Will ${home} beat ${away}?`;
       short = `${home} win?`;
       break;
     case "soccer.next_goal":
@@ -138,10 +139,45 @@ export function toYesNo(c: MarketCandidate, state: GameState, ev: GameEvent): Om
     case "any.period_winner": {
       yesId = "home";
       const label = String(c.resolver.params.label ?? "period");
-      text = sport === "nfl" ? `Will the ${home} win the ${label}?` : `Will ${home} win the ${label}?`;
+      text = sport !== "soccer" ? `Will the ${home} win the ${label}?` : `Will ${home} win the ${label}?`;
       short = `${home} win ${label}?`;
       break;
     }
+    case "nba.quarter_winner": {
+      yesId = "home";
+      const label = String(c.resolver.params.label ?? "quarter");
+      text = `Will the ${home} win the ${label}?`;
+      short = `${home} win ${label}?`;
+      break;
+    }
+    case "nba.clutch": {
+      const leader = c.resolver.params.leader === "away" ? "away" : "home";
+      yesId = leader;
+      const ln = leader === "home" ? home : away;
+      text = c.question.startsWith("All square") ? `All square late: will the ${home} win it?` : `Crunch time: will the ${ln} hold on to win?`;
+      short = `${ln} hold on?`;
+      break;
+    }
+    case "nba.total_points":
+    case "nba.late_total": {
+      yesId = "over";
+      const line = c.resolver.params.line;
+      text = c.templateId === "nba.late_total" ? `Over ${line} total points by the final buzzer?` : `Over ${line} total points in the game?`;
+      short = `Over ${line} points?`;
+      break;
+    }
+    case "nba.ft_trip":
+      short = `${ev.player ?? "Shooter"} makes all FTs?`;
+      break;
+    case "nba.next_score": {
+      const ball = String(c.resolver.params.team ?? "").toUpperCase() === state.away.short.toUpperCase() ? away : home;
+      text = `Out of the timeout: will the ${ball} score next?`;
+      short = `${ball} score next?`;
+      break;
+    }
+    case "nba.three_window":
+      short = "A three in 2 minutes?";
+      break;
     case "nfl.total_points": {
       yesId = "over";
       const line = c.resolver.params.line;
@@ -253,12 +289,15 @@ function lockFor(engine: HuddleQuestionEngine, t: Timeline, run: ReplayRun, q: P
   return planLock(engine, t, q, run.folded, run.state, nowMs);
 }
 
-/** Replay ms of the next event (not yet folded) that will set up a moment question, or Infinity. */
-function nextMomentAt(run: ReplayRun, t: Timeline): number {
+/** Moment questions at or above this priority (3rd/4th downs, red zone, penalties, free throws...) are the headline ones. */
+export const BIG_MOMENT_PRIORITY = 70;
+
+/** Replay ms of the next event (not yet folded) that will set up a moment question (of at least `minPriority`), or Infinity. */
+function nextMomentAt(run: ReplayRun, t: Timeline, minPriority = 0): number {
   const scout = new HuddleQuestionEngine().restore(run.timelineId, structuredClone(run.model), structuredClone(run.memo));
   let at = Infinity;
   walk(t, run.folded, run.state, (ev, atMs, s) => {
-    if (scout.propose(ev, s, []).some((c) => c.kind === "moment")) {
+    if (scout.propose(ev, s, []).some((c) => c.kind === "moment" && c.priority >= minPriority)) {
       at = atMs;
       return true;
     }
@@ -273,6 +312,7 @@ export function bestCandidate(run: ReplayRun, nowMs: number, engine = engineFor(
   if (!t) return null;
   let best: { q: PendingQ; lockAtMs: number } | null = null;
   let momentAt: number | undefined;
+  let bigAt: number | undefined;
   for (const q of run.pending) {
     if (q.resolveAtMs === null || q.resolveAtMs - nowMs < MIN_TRADE_MS) continue;
     const lockAtMs = Math.min(lockFor(engine, t, run, q, nowMs), q.resolveAtMs);
@@ -282,6 +322,12 @@ export function bestCandidate(run: ReplayRun, nowMs: number, engine = engineFor(
     if (q.kind === "game") {
       momentAt ??= nextMomentAt(run, t);
       if (momentAt <= q.resolveAtMs) continue;
+    }
+    // Small moments (a drive result, a corner) wait when a headline moment (a 3rd down, a penalty, free throws)
+    // would arrive while they are still running.
+    if (q.kind === "moment" && q.priority < BIG_MOMENT_PRIORITY) {
+      bigAt ??= nextMomentAt(run, t, BIG_MOMENT_PRIORITY);
+      if (bigAt <= q.resolveAtMs) continue;
     }
     if (!best || q.priority > best.q.priority || (q.priority === best.q.priority && q.proposedAtMs < best.q.proposedAtMs)) best = { q, lockAtMs };
   }
@@ -422,7 +468,7 @@ export function pregameQuestion(run: ReplayRun): PendingQ | null {
   if (kickoff < 0) return null;
   while (run.folded <= kickoff) foldOne(run, t, engine, null);
   saveEngine(run, engine);
-  const q = run.pending.find((p) => p.templateId === "nfl.winner" || p.templateId === "soccer.winner");
+  const q = run.pending.find((p) => p.templateId === "nfl.winner" || p.templateId === "soccer.winner" || p.templateId === "nba.winner");
   if (!q || q.resolveAtMs === null) return null;
   run.pending = run.pending.filter((p) => p.key !== q.key);
   return { ...q, lockAtMs: null };

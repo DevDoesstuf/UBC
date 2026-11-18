@@ -6,9 +6,10 @@
 // uses (nflverse / StatsBomb tables in config/models). Pure module apart from the model tables.
 import { conversionProb, driveResultProbs, NFL_TABLE, redZoneProbs } from "./replay/nfl";
 import { cornerShotOnTargetProb, defaultGoalRates, penaltyProb, SOCCER_TABLE } from "./replay/soccer";
+import { ftAllProb, NBA, nextScoreProb, threeInWindowProb } from "./replay/nba";
 import type { GameState, TeamRef } from "./replay/types";
 
-export type MomentSport = "nfl" | "soccer";
+export type MomentSport = "nfl" | "soccer" | "nba";
 
 export interface MomentKind {
   kind: string;
@@ -130,6 +131,38 @@ export const MOMENT_KINDS: Record<MomentSport, MomentKind[]> = {
           text: "Goal in the next 5 minutes?", short: "Goal in 5 min?", prior: p,
           rationale: `Matches average ${(r.home + r.away).toFixed(1)} goals, so a goal in any 5 minutes is about ${pct(p)} (Poisson).`,
         };
+      },
+    },
+  ],
+  nba: [
+    {
+      kind: "free_throws", label: "Free throws", call: "To the line!", lockSecs: 15, templates: ["nba.ft_trip"],
+      write: ({ state }) => {
+        const ev = state?.lastEvent;
+        const player = ev?.type === "free_throw" ? ev.player : undefined;
+        const p = ftAllProb(2);
+        return {
+          text: player ? `Will ${player} make both free throws?` : "Both free throws made?", short: "Both FTs?", prior: p,
+          rationale: `NBA players make about ${pct(NBA.ftPct)} of free throws, so two in a row is ${pct(p)}.`,
+        };
+      },
+    },
+    {
+      kind: "timeout", label: "Timeout", call: "Timeout!", lockSecs: 15, templates: ["nba.next_score"],
+      write: ({ state }) => {
+        const team = state?.possession ? nick(state[state.possession], "nfl") : null;
+        const p = nextScoreProb();
+        return {
+          text: team ? `Out of the timeout: will the ${team} score next?` : "Does the team with the ball score next?", short: "Ball team scores next?", prior: p,
+          rationale: `Possessions score about ${pct(NBA.possessionScore)} of the time, so the team with the ball scores next ${pct(p)} of the time.`,
+        };
+      },
+    },
+    {
+      kind: "three", label: "From deep", call: "Three-point watch!", lockSecs: 15, templates: ["nba.three_window"],
+      write: () => {
+        const p = threeInWindowProb(60);
+        return { text: "A made three in the next minute?", short: "Three in a minute?", prior: p, rationale: `About ${Math.round(NBA.threesPerMinute * 48)} threes go in per game, so one in any minute is ${pct(p)} (Poisson).` };
       },
     },
   ],

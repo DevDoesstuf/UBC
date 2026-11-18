@@ -11,7 +11,7 @@ import type {
   ResolverResult,
   TeamRef,
 } from './types';
-import { clamp, normalizePrior, pct } from './math';
+import { clamp, normalInv, normalizePrior, pct } from './math';
 import {
   conversionProb,
   defaultNflStrength,
@@ -41,6 +41,19 @@ import {
   SOCCER_TABLE,
   type GoalRates,
 } from './soccer';
+import {
+  defaultNbaStrength,
+  expectedRemainingPoints,
+  ftAllProb,
+  NBA,
+  nbaQuarterProbs,
+  nbaTotalOverProb,
+  nbaWinProb,
+  nearestHalfPoint,
+  nextScoreProb,
+  threeInWindowProb,
+  type NbaStrength,
+} from './nba';
 
 /** Template ids (PRD section 6 catalog). */
 export const TEMPLATES = {
@@ -58,6 +71,14 @@ export const TEMPLATES = {
   nflRedZone: 'nfl.red_zone_td',
   nflWinner: 'nfl.winner',
   periodWinner: 'any.period_winner',
+  nbaWinner: 'nba.winner',
+  nbaTotal: 'nba.total_points',
+  nbaFreeThrows: 'nba.ft_trip',
+  nbaNextScore: 'nba.next_score',
+  nbaThree: 'nba.three_window',
+  nbaQuarter: 'nba.quarter_winner',
+  nbaClutch: 'nba.clutch',
+  nbaLateTotal: 'nba.late_total',
 } as const;
 
 const YES_NO: Outcome[] = [
@@ -75,15 +96,19 @@ function sideOf(teams: { home: TeamRef; away: TeamRef }, team: string | undefine
   return undefined;
 }
 
-/** "Dallas Cowboys" -> "Cowboys" for NFL; soccer names are used as they are. */
+/** "Dallas Cowboys" -> "Cowboys" for NFL and NBA; soccer names are used as they are. */
 function nick(team: TeamRef, sport: GameState['sport']): string {
-  if (sport !== 'nfl') return team.name;
+  if (sport === 'soccer') return team.name;
   const words = team.name.trim().split(/\s+/);
   return words.length > 1 ? words[words.length - 1]! : team.name;
 }
 
 function ordinal(n: number): string {
   return n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
+}
+
+function normalInvSafe(p: number): number {
+  return normalInv(clamp(p, 0.02, 0.98));
 }
 
 function num(v: unknown): number | undefined {
@@ -97,6 +122,8 @@ function isLive(m: Market): boolean {
 export interface GameModel {
   soccer: GoalRates;
   nfl: NflStrength;
+  /** Optional: lobbies saved before NBA support have no `nba` (filled with defaults on read). */
+  nba?: NbaStrength;
 }
 
 export interface GameMemo {
@@ -127,9 +154,10 @@ export class HuddleQuestionEngine {
   model(gameId: string): GameModel {
     let m = this.models.get(gameId);
     if (!m) {
-      m = { soccer: defaultGoalRates(), nfl: defaultNflStrength() };
+      m = { soccer: defaultGoalRates(), nfl: defaultNflStrength(), nba: defaultNbaStrength() };
       this.models.set(gameId, m);
     }
+    m.nba ??= defaultNbaStrength();
     return m;
   }
 
@@ -149,7 +177,8 @@ export class HuddleQuestionEngine {
 
     const memo = this.touch(event);
     const blocked = new Set(open.filter(isLive).map((m) => m.templateId));
-    const all = state.sport === 'soccer' ? this.proposeSoccer(event, state, memo) : this.proposeNfl(event, state);
+    const all =
+      state.sport === 'soccer' ? this.proposeSoccer(event, state, memo) : state.sport === 'nba' ? this.proposeNba(event, state, memo) : this.proposeNfl(event, state);
     return all.filter((c) => !blocked.has(c.templateId)).sort((a, b) => b.priority - a.priority);
   }
 
@@ -524,6 +553,132 @@ export class HuddleQuestionEngine {
     return out;
   }
 
+  private proposeNba(event: GameEvent, state: GameState, memo: GameMemo): MarketCandidate[] {
+    const out: MarketCandidate[] = [];
+    const { home, away } = state;
+    const s = this.model(event.gameId).nba!;
+    const score = event.score ?? state.score;
+    const secs = num(event.data.secondsRemaining) ?? state.secondsRemaining ?? NBA.gameSeconds;
+    const period = event.clock?.period ?? state.clock.period;
+    const inPeriod = period > 4 ? secs : secs - (4 - period) * 720;
+    const hn = nick(home, 'nba');
+    const an = nick(away, 'nba');
+    const src = s.source === 'gemini' ? 'calibrated to Gemini' : NBA.source;
+    const fire = (key: string): boolean => {
+      if (memo.fired.includes(key)) return false;
+      memo.fired.push(key);
+      return true;
+    };
+
+    if (event.type === 'kickoff') {
+      const pHome = nbaWinProb(s, 0, NBA.gameSeconds);
+      const rationale = s.source === 'gemini' ? `Opening price calibrated to Gemini's moneyline: ${hn} ${pct(pHome)}.` : `No market to calibrate to, so this is the NBA home-win rate: ${hn} ${pct(pHome)}.`;
+      out.push({
+        templateId: TEMPLATES.nbaWinner, kind: 'game', question: `Who wins: ${an} or ${hn}?`, hook: `${an} at ${hn}. Pick your winner.`,
+        outcomes: [{ id: 'home', label: hn }, { id: 'away', label: an }], prior: normalizePrior({ home: pHome, away: 1 - pHome }),
+        lockOnEvent: 'period_end:3', resolver: { type: 'match_winner', params: { rationale } }, geminiHint: { kind: 'moneyline' }, priority: 30, rationale,
+      });
+      const line = s.totalLine;
+      const pOver = nbaTotalOverProb(s, line, 0, NBA.gameSeconds);
+      const tr = `NBA games average about ${NBA.meanTotal} points (sd ${NBA.totalSd}); expected total here is ${s.totalMean.toFixed(1)} (${src}), so over ${line} is ${pct(pOver)}.`;
+      out.push({
+        templateId: TEMPLATES.nbaTotal, kind: 'game', question: `Total points: over or under ${line}?`, hook: `The line is ${line}.`,
+        outcomes: [{ id: 'over', label: `Over ${line}` }, { id: 'under', label: `Under ${line}` }], prior: normalizePrior({ over: pOver, under: 1 - pOver }),
+        lockOnEvent: 'period_end:3', resolver: { type: 'total_points', params: { line, rationale: tr } }, geminiHint: { kind: 'total', line }, priority: 25, rationale: tr,
+      });
+    }
+
+    // Free throws: does the shooter make them all?
+    if (event.type === 'free_throw' && event.data.trip === true) {
+      const n = clamp(num(event.data.attempts) ?? 2, 1, 3);
+      const p = ftAllProb(n);
+      const who = event.player ?? `the ${nick(sideOf(state, event.team) === 'away' ? away : home, 'nba')} shooter`;
+      const rationale = `NBA players make about ${pct(NBA.ftPct)} of free throws, so ${n === 3 ? 'three' : 'two'} in a row is ${pct(p)} (league rate; no per-player data in this replay).`;
+      out.push({
+        templateId: TEMPLATES.nbaFreeThrows, kind: 'moment', question: `Will ${who} make ${n === 3 ? 'all three' : 'both'} free throws?`,
+        hook: `${who} at the line. The model says ${pct(p)}.`, outcomes: YES_NO, prior: normalizePrior({ yes: p, no: 1 - p }),
+        lockAfterSecs: 15, lockOnEvent: 'free_throw', resolver: { type: 'ft_trip', params: { player: event.player, team: event.team, attempts: n, rationale } },
+        priority: 90, rationale,
+      });
+    }
+
+    // After a timeout: does the team with the ball score next?
+    if (event.type === 'timeout' && typeof event.data.ball === 'string') {
+      const side = sideOf(state, event.data.ball);
+      if (side) {
+        const team = nick(state[side], 'nba');
+        const p = nextScoreProb();
+        const rationale = `NBA possessions score about ${pct(NBA.possessionScore)} of the time; with the ball first, the ${team} score next ${pct(p)} of the time.`;
+        out.push({
+          templateId: TEMPLATES.nbaNextScore, kind: 'moment', question: `Out of the timeout: do the ${team} score next?`, hook: `Timeout. ${team} ball.`,
+          outcomes: YES_NO, prior: normalizePrior({ yes: p, no: 1 - p }), lockAfterSecs: 15, lockOnEvent: 'shot|free_throw|turnover',
+          resolver: { type: 'next_score', params: { team: event.data.ball, rationale } }, priority: 75, rationale,
+        });
+      }
+    }
+
+    // Start of quarters 2-4: a made three in the first two minutes?
+    if (event.type === 'period_start' && period >= 2 && period <= 4) {
+      const p = threeInWindowProb(120);
+      const rationale = `NBA teams combine for about ${Math.round(NBA.threesPerMinute * 48)} made threes a game, so at least one in any two minutes is about ${pct(p)} (Poisson).`;
+      out.push({
+        templateId: TEMPLATES.nbaThree, kind: 'moment', question: `A made three in the first 2 minutes of the ${ordinal(period)} quarter?`, hook: 'Fresh quarter. Anyone hot from deep?',
+        outcomes: YES_NO, prior: normalizePrior({ yes: p, no: 1 - p }), lockAfterSecs: 12,
+        resolver: { type: 'three_window', params: { period, untilSecs: 600, rationale } }, priority: 45, rationale,
+      });
+    }
+
+    // Late in a quarter: who wins it? (asked with about 2:30 left so it settles quickly)
+    // Only while the quarter is still in doubt (neither side above 80%): a 95% question is no fun.
+    const prev = state.periodScores.filter((x) => x.period < period).sort((a, b) => b.period - a.period)[0];
+    const startHome = prev?.home ?? 0;
+    const startAway = prev?.away ?? 0;
+    const lead = score.home - startHome - (score.away - startAway);
+    const q = nbaQuarterProbs(s, lead, Math.max(1, inPeriod));
+    if (period >= 1 && period <= 4 && inPeriod <= 150 && inPeriod > 30 && Math.max(q.home, q.away) <= 0.8 && fire(`nba.q${period}`)) {
+      const prior = normalizePrior({ home: q.home, tie: q.tie, away: q.away });
+      const label = `${ordinal(period)} quarter`;
+      const rationale = `${hn} ${lead >= 0 ? 'lead' : 'trail'} the ${label} ${Math.abs(lead)} with ${Math.floor(inPeriod / 60)}:${String(Math.round(inPeriod % 60)).padStart(2, '0')} left; a normal model of scoring margin (sd ${NBA.marginSd} over a game) gives ${hn} ${pct(prior.home!)}, tie ${pct(prior.tie!)}, ${an} ${pct(prior.away!)}.`;
+      out.push({
+        templateId: TEMPLATES.nbaQuarter, kind: 'moment', question: `Who wins the ${label}?`, hook: `Under three minutes left in the ${label}.`,
+        outcomes: [{ id: 'home', label: hn }, { id: 'tie', label: 'Tie' }, { id: 'away', label: an }], prior,
+        lockAfterSecs: 15, lockOnEvent: `period_end:${period}`,
+        resolver: { type: 'period_winner', params: { periods: [period], label, startHome, startAway, rationale } },
+        geminiHint: { kind: 'period_winner', period: `${period}Q` }, priority: 72, rationale,
+      });
+    }
+
+    // Crunch time: can the leader hold on? Proposed on every play of the last 75 seconds of a close game (the
+    // freshest one replaces the last), so whichever fits the room is asked.
+    const margin = score.home - score.away;
+    const play = event.type === 'shot' || event.type === 'turnover' || event.type === 'timeout' || (event.type === 'free_throw' && event.data.trip !== true);
+    if (period >= 4 && secs <= 75 && secs > 8 && Math.abs(margin) <= 5 && play) {
+      const pHome = nbaWinProb(s, margin, secs);
+      const leader: 'home' | 'away' = margin >= 0 ? 'home' : 'away';
+      const ln = nick(state[leader], 'nba');
+      const rationale = `${margin === 0 ? 'Level' : `Up ${Math.abs(margin)}`} with ${Math.round(secs)} seconds left, a normal model of the remaining margin gives the ${ln} ${pct(leader === 'home' ? pHome : 1 - pHome)}.`;
+      out.push({
+        templateId: TEMPLATES.nbaClutch, kind: 'moment', question: margin === 0 ? `All square late: do the ${hn} win it?` : `Crunch time: do the ${ln} hold on?`,
+        hook: 'Crunch time.', outcomes: [{ id: 'home', label: hn }, { id: 'away', label: an }], prior: normalizePrior({ home: pHome, away: 1 - pHome }),
+        lockAfterSecs: 20, resolver: { type: 'match_winner', params: { leader, rationale } }, geminiHint: { kind: 'moneyline' }, priority: 85, rationale,
+      });
+    }
+
+    // Late total: the line is set at the projected total, so it is a coin flip on pace.
+    if (period >= 4 && secs <= 270 && secs > 60 && fire('nba.late_total')) {
+      const so = score.home + score.away;
+      const line = nearestHalfPoint(so + expectedRemainingPoints(s, so, secs));
+      const p = nbaTotalOverProb(s, line, so, secs);
+      const rationale = `${so} points so far; at this pace and the pregame expectation about ${(line - so).toFixed(0)} more are coming in the last ${Math.round(secs / 60)} minutes, so over ${line} is ${pct(p)}.`;
+      out.push({
+        templateId: TEMPLATES.nbaLateTotal, kind: 'moment', question: `Over ${line} total points by the final buzzer?`, hook: 'Pace check.',
+        outcomes: [{ id: 'over', label: `Over ${line}` }, { id: 'under', label: `Under ${line}` }], prior: normalizePrior({ over: p, under: 1 - p }),
+        lockAfterSecs: 20, resolver: { type: 'total_points', params: { line, rationale } }, priority: 60, rationale,
+      });
+    }
+    return out;
+  }
+
   private redZoneCandidate(team: string | undefined, offenseNick: string, yardline: number, score: { home: number; away: number }, seasons: string): MarketCandidate {
     const rz = redZoneProbs(yardline);
     const rationale = `Drives that reach the ${100 - yardline}-yard line end in a touchdown ${pct(rz.td)} of the time and a field goal ${pct(rz.fg)} (${seasons}${rz.n ? `, ${rz.n.toLocaleString('en-US')} red-zone trips` : ''}).`;
@@ -711,6 +866,40 @@ export class HuddleQuestionEngine {
         return has('tie') ? pick('tie') : pick('draw');
       }
 
+      // ---- basketball ----
+      case 'ft_trip': {
+        if (event.type === 'free_throw' && event.data.trip !== true && event.data.technical !== true) {
+          const samePlayer = typeof params.player === 'string' ? event.player === params.player : sameTeam;
+          if (!samePlayer) return null;
+          if (event.data.made !== true) return pick('no');
+          const n = num(event.data.n);
+          const of = num(event.data.of) ?? num(params.attempts);
+          if (n !== undefined && of !== undefined && n >= of) return pick('yes');
+          return null;
+        }
+        if (event.type === 'period_end' || isFinal) return { void: true, reason: 'the free throws never arrived from the feed' };
+        return null;
+      }
+
+      case 'next_score': {
+        const pts = num(event.data.points) ?? 0;
+        const scored = (event.type === 'shot' || event.type === 'free_throw') && event.data.made === true && pts > 0;
+        if (scored) return mSide && evSide ? pick(evSide === mSide ? 'yes' : 'no') : { void: true, reason: 'the basket had no team in the feed' };
+        if (event.type === 'period_end' || isFinal) return { void: true, reason: 'nobody scored before the end of the quarter' };
+        return null;
+      }
+
+      case 'three_window': {
+        const p = Number(params.period);
+        const until = num(params.untilSecs) ?? 600;
+        const evPeriod = Number(event.data?.period ?? event.clock?.period ?? state.clock.period);
+        const secs = num(event.data.secondsRemaining) ?? state.secondsRemaining;
+        const inPeriod = secs !== undefined ? secs - Math.max(0, 4 - evPeriod) * 720 : undefined;
+        if (event.type === 'shot' && event.data.made === true && event.data.three === true && evPeriod === p && (inPeriod === undefined || inPeriod >= until)) return pick('yes');
+        if (evPeriod > p || isFinal || (event.type === 'period_end' && evPeriod >= p) || (evPeriod === p && inPeriod !== undefined && inPeriod < until)) return pick('no');
+        return null;
+      }
+
       case 'match_winner': {
         if (!isFinal) return null;
         if (score.home > score.away) return pick('home');
@@ -759,6 +948,25 @@ export class HuddleQuestionEngine {
           if (state.clock.period > 1) return null;
           const p = cardBeforeHalfProb(state.minute ?? 0);
           return this.fit(market, { yes: p, no: 1 - p });
+        }
+        default:
+          return null;
+      }
+    }
+
+    if (state.sport === 'nba') {
+      const nba = model.nba!;
+      const secs = state.secondsRemaining ?? NBA.gameSeconds;
+      switch (market.resolver?.type) {
+        case 'match_winner': {
+          const p = nbaWinProb(nba, score.home - score.away, secs);
+          return this.fit(market, { home: p, away: 1 - p });
+        }
+        case 'total_points': {
+          const line = Number(params.line);
+          if (!Number.isFinite(line)) return null;
+          const p = nbaTotalOverProb(nba, line, score.home + score.away, secs);
+          return this.fit(market, { over: p, under: 1 - p });
         }
         default:
           return null;
@@ -827,11 +1035,12 @@ export class HuddleQuestionEngine {
         const s = sideOfContract(c.label, c.contractTicker);
         if (s) probs[s] = c.prob;
       }
-      if (game.sport === 'nfl') {
+      if (game.sport === 'nfl' || game.sport === 'nba') {
         const h = probs.home ?? (probs.away !== undefined ? 1 - probs.away : undefined);
         const a = probs.away ?? (probs.home !== undefined ? 1 - probs.home : undefined);
         if (h !== undefined && a !== undefined && h + a > 0) {
-          model.nfl = { ...model.nfl, pHome: clamp(h / (h + a), 0.03, 0.97), source: 'gemini' };
+          if (game.sport === 'nfl') model.nfl = { ...model.nfl, pHome: clamp(h / (h + a), 0.03, 0.97), source: 'gemini' };
+          else model.nba = { ...model.nba!, pHome: clamp(h / (h + a), 0.03, 0.97), source: 'gemini' };
         }
       } else if (probs.home !== undefined && probs.away !== undefined) {
         const draw = probs.draw ?? Math.max(0.05, 1 - probs.home - probs.away);
@@ -851,6 +1060,23 @@ export class HuddleQuestionEngine {
       }
       if (best && best.prob > 0.1 && best.prob < 0.9) {
         model.nfl = { ...model.nfl, totalMean: totalMeanFromLine(best.line, best.prob), totalLine: Number.isInteger(best.line) ? nearestHalf(best.line) : best.line, source: 'gemini' };
+      }
+    }
+
+    if (game.sport === 'nba') {
+      const total = quotes.find((q) => q.kind === 'total' && !q.period);
+      let best: { line: number; prob: number } | undefined;
+      for (const c of total?.contracts ?? []) {
+        if (c.prob === null) continue;
+        const m = /more than\s+(\d+(?:\.\d+)?)\s+points/i.exec(c.label);
+        if (!m) continue;
+        const line = Number(m[1]);
+        if (!best || Math.abs(c.prob - 0.5) < Math.abs(best.prob - 0.5)) best = { line, prob: c.prob };
+      }
+      if (best && best.prob > 0.1 && best.prob < 0.9) {
+        // Mean that puts P(over line) at Gemini's price under the normal total model.
+        const mean = best.line + NBA.totalSd * normalInvSafe(best.prob);
+        model.nba = { ...model.nba!, totalMean: mean, totalLine: Number.isInteger(best.line) ? best.line + 0.5 : best.line, source: 'gemini' };
       }
     }
   }

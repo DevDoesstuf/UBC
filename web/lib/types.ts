@@ -52,7 +52,7 @@ export interface Game {
   /** Gemini Prediction Markets mapping for the game. */
   gemini?: GeminiGameConfig;
   /** Sport, for "Call it" moments (default: the replay's sport, else from the persona). */
-  sport?: "nfl" | "soccer";
+  sport?: "nfl" | "soccer" | "nba";
   /** "Call it" moment kinds the kiosk offers for this game (see MOMENT_KINDS in lib/moments.ts). */
   moments?: string[];
 }
