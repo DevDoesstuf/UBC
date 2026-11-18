@@ -10,6 +10,10 @@
 //   stale <ms>             pretend the last good reply was <ms> ago (Wi-Fi loss)
 //   frames                 print and reset the count of frames that drew something
 //   sh <command...>        run a shell command (e.g. phones joining and trading through the lobby API)
+//   drag <x> <y0> <y1> <ms> [hold]   a finger drag from y0 to y1 over ms (a flick when short), held <hold> ms
+//                          before lifting (0 = lift while moving: momentum)
+//   redraw                 force a full redraw at the same instant (compare with the frame before it: scrolled
+//                          pages shift the frame buffer, so both shots must match)
 #include <zlib.h>
 #include <string>
 #include "Arduino.h"
@@ -143,6 +147,30 @@ int main(int argc, char **argv) {
       std::string out = sh(std::string(line + 3));
       if (!out.empty()) printf("%s", out.c_str());
     } else if (!strcmp(cmd, "stale")) lastOk = simNow > (uint32_t)atoi(a) ? simNow - atoi(a) : 0;
+    else if (!strcmp(cmd, "redraw")) {
+      uiInvalidate();
+      NetStatus st = status();
+      uiFrame(st);
+    } else if (!strcmp(cmd, "drag")) {
+      int x = 400, y0 = 400, y1 = 100, ms = 300, hold = 0;
+      sscanf(line, "%*s %d %d %d %d %d", &x, &y0, &y1, &ms, &hold);
+      int steps = ms / 16 > 0 ? ms / 16 : 1;
+      for (int i = 0; i <= steps; i++) {
+        int y = y0 + (y1 - y0) * i / steps;
+        const char *id = uiTouch(true, x, y);
+        if (id) tapSend(id);
+        step(16);
+      }
+      if (hold > 0) {
+        for (int t = 0; t < hold; t += 16) {
+          uiTouch(true, x, y1);
+          step(16);
+        }
+      }
+      const char *id = uiTouch(false, x, y1);
+      if (id) tapSend(id);
+      step(16);
+    }
     else if (!strcmp(cmd, "down") || !strcmp(cmd, "move") || !strcmp(cmd, "up")) {
       if (strcmp(cmd, "up")) {
         sscanf(line, "%*s %d %d", &fx, &fy);
