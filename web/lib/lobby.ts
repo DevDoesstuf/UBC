@@ -16,12 +16,13 @@ import { geminiForGame, isSettled, refForContract, refForHint, replayMoneylineTr
 import { buildScorecard } from "./scorecard";
 import { losersOf, openValues, standings } from "./standings";
 import { fillOffer, impliedYes, poolYesShare, refundPairs, roundOdds, settlePairs, settlePool, takerStakeFor, MAX_ODDS, MIN_ODDS } from "./modes";
-import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, type PendingQ, type ReplayHost } from "./replay/run";
+import { advanceReplay, bestCandidate, calibrateRun, clampPrior, newRun, pregameQuestion, replayDue, replayMs, startRun, takeCandidate, RESULT_HOLD_MS, type PendingQ, type ReplayHost } from "./replay/run";
 import { findMoment, kioskSafe, MOMENT_KINDS, type MomentKind, type MomentSport } from "./moments";
 import { getTimeline, wallAt } from "./replay/timeline";
 import { chainView } from "./chain";
 import type { Game, Lobby, LobbyEvent, Market, MarketMode, Offer, Player, Side, WithdrawalRecord } from "./types";
 import { MARKET_MODES } from "./types";
+import { acceptHotseat, HwError, interludeHold, onJoin, onResult, onVoid, pendingFor, placePending, takePending, tickHw } from "./hw";
 
 export class ApiError extends Error {
   status: number;
@@ -272,7 +273,8 @@ function replayHost(l: Lobby): ReplayHost {
       if (l.phase === "ended") return "locked"; // nothing new opens after the session ends
       return "idle";
     },
-    lastResultAt: () => (l.phase === "result" || l.phase === "lobby" ? l.market?.resolvedAt ?? 0 : 0),
+    // A standings break (lib/hw.ts) holds the next question until it is over.
+    lastResultAt: () => (l.phase === "result" || l.phase === "lobby" ? Math.max(l.market?.resolvedAt ?? 0, interludeHold(l) - RESULT_HOLD_MS) : 0),
     lockIfDue: (wall) => {
       if (l.phase === "open" && l.market && wall >= l.market.lockAt) lockMarket(l, l.market.lockAt);
     },
@@ -397,6 +399,10 @@ function tick(l: Lobby, now: number, dryRun = false): boolean {
       if (dryRun) return true;
       changed = true;
     }
+  }
+  if (tickHw(l, now, dryRun)) {
+    if (dryRun) return true;
+    changed = true;
   }
   const m = l.market;
   if (!m) return changed;
@@ -555,6 +561,7 @@ export function join(l: Lobby, rawName: unknown, now: number): Player {
   l.order.push(p.id);
   addEvent(l, "join", `${name} joined`, "join");
   caption(l, { type: "join", name }, now, p.id);
+  onJoin(l, p, now);
   return p;
 }
 
@@ -719,6 +726,7 @@ export function resolveMarket(l: Lobby, outcome: Side, now: number): void {
     l.replay.pregame = null;
   }
   settle(l, m, outcome, now);
+  onResult(l, m, outcome, now);
   recordScore(l, m, outcome);
   l.results.push({ qIndex: m.qIndex, text: m.text, outcome, volume: m.volume, payouts: { ...m.payouts } });
   l.phase = "result";
@@ -802,6 +810,7 @@ export function voidMarket(l: Lobby, reason: string | null, now: number): void {
   const m = l.market;
   if (l.replay?.current?.key === m.questionId) l.replay.current = null;
   settle(l, m, null, now);
+  onVoid(l, m);
   m.voided = true;
   m.voidReason = reason;
   l.qIndex = m.qIndex + 1;
@@ -1038,6 +1047,8 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
     : undefined;
   return {
     code: l.code,
+    /** Tap-to-confirm (lib/hw.ts): this phone's bet waiting for a tap on the box. */
+    tapConfirm: me ? pendingFor(l, me.id, now) : null,
     v: l.v,
     now,
     phase: l.phase,
@@ -1123,3 +1134,31 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
 }
 
 export type PublicLobby = ReturnType<typeof publicView>;
+
+// ---------------------------------------------------------------- hardware extras (lib/hw.ts)
+
+const hwErr = <T>(f: () => T): T => {
+  try {
+    return f();
+  } catch (e) {
+    if (e instanceof HwError) throw new ApiError(400, e.message);
+    throw e;
+  }
+};
+
+/** Tap-to-confirm: park a bet until the phone taps the box (or presses "Confirm here"). */
+export function pendingBuy(l: Lobby, p: Player, side: Side, cents: number, now: number) {
+  return hwErr(() => placePending(l, p, side, cents, now));
+}
+
+/** Places this player's pending bet. Throws when there is none (expired, or the question moved on). */
+export function confirmPending(l: Lobby, p: Player, now: number) {
+  const pend = takePending(l, p.id, now);
+  if (!pend) throw new ApiError(400, "Nothing to confirm");
+  return { side: pend.side, cents: pend.cents, ...buy(l, p, pend.side, pend.cents, now) };
+}
+
+/** Box touch hotseat:accept. */
+export function hotseatAccept(l: Lobby, now: number): void {
+  hwErr(() => acceptHotseat(l, now));
+}

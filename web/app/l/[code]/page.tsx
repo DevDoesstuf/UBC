@@ -10,6 +10,7 @@ import { HttpError, api, loadToken, saveToken, useNow, usePoll, type LobbyData }
 import { Empty, InlineError, Loading } from "@/components/phone/ui";
 import { Icon, Kinetic, Mark, Wordmark, useCoins, usd } from "@/components/huddle";
 import { MarketCard, ParkedCard, mkKey, type Actions } from "@/components/phone/MarketCard";
+import { TapConfirm, tapBody } from "@/components/phone/TapConfirm";
 import {
   Backdrop, BuyInScreen, CashOut, Dock, EndOfGame, Header, JoinScreen, Leaderboard, MoneySheet, PayLink, ResultsTab, type Tab,
 } from "@/components/phone/Screens";
@@ -348,7 +349,7 @@ export default function PhonePage() {
     addMoney: () => setMoneyOpen(true),
     buy: async (side: Side, cents: number) =>
       !!(await run(
-        () => api<{ shares: number }>(`/api/lobby/${code}/buy`, { body: { side, cents }, token }),
+        () => api<{ shares: number }>(`/api/lobby/${code}/buy`, { body: { side, cents, ...tapBody() }, token }),
         () => `${usd(cents)} on ${SIDE[side]}. You’re in.`,
       )),
     offer: async (side, cents, odds) =>
@@ -391,7 +392,10 @@ export default function PhonePage() {
             ) : (
               <>
                 {live && m ? (
-                  <MarketCard key={mkKey(m)} l={l} m={m} serverNow={serverNow} actions={actions} />
+                  <>
+                    {l.phase === "open" && <TapConfirm code={code} token={token} pending={l.tapConfirm} />}
+                    <MarketCard key={mkKey(m)} l={l} m={m} serverNow={serverNow} actions={actions} />
+                  </>
                 ) : (
                   <Waiting l={l} />
                 )}

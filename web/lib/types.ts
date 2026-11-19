@@ -180,7 +180,7 @@ export type SoundName = "join" | "start" | "lock" | "win" | "tap" | "lose" | "la
 export interface LobbyEvent {
   id: number;
   at: number;
-  kind: "join" | "start" | "lock" | "result" | "deposit" | "end" | "tap" | "lastcall" | "play";
+  kind: "join" | "start" | "lock" | "result" | "deposit" | "end" | "tap" | "lastcall" | "play" | "hotseat" | "bigwin" | "bigloss";
   text: string;
   sound?: SoundName;
 }
@@ -257,6 +257,8 @@ export interface Lobby {
   chain?: ChainEvent[];
   /** SETTLEMENT=vault: this party's huddle_vault accounts and settlement progress. */
   vault?: LobbyVault;
+  /** Box/speaker extras (lib/hw.ts): tap-to-confirm bets, flashes, hot seat, standings breaks. */
+  hw?: import("./hw").HwState;
 }
 
 /** One Solana transaction Huddle made or saw for a lobby. */
