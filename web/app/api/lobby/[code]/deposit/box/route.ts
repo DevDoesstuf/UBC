@@ -9,7 +9,7 @@
 // -> {"ok":true,"url","reference","recipient","mint","amount","until"}
 import { handle, json, playerToken, readBody } from "@/lib/http";
 import { ApiError, BOX_PAY_MS } from "@/lib/lobby";
-import { DEPOSIT_OPTIONS, MONEY_MODE } from "@/lib/money";
+import { depositProblem, MONEY_MODE } from "@/lib/money";
 import { newSolanaDeposit } from "@/lib/solana-lobby";
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
@@ -18,7 +18,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const body = await readBody(req);
     const cents = Number(body.cents);
     if (MONEY_MODE !== "solana") throw new ApiError(400, "Pay on the box needs Solana money (MONEY_MODE=solana)");
-    if (!DEPOSIT_OPTIONS.includes(cents)) throw new ApiError(400, "Pick one of the listed amounts");
+    const bad = depositProblem(body.cents);
+    if (bad) throw new ApiError(400, bad);
     const d = await newSolanaDeposit(code, playerToken(req), cents, { box: true });
     return json({ ok: true, url: d.url, reference: d.reference, recipient: d.recipient, mint: d.mint, amount: d.amount, until: Date.now() + BOX_PAY_MS });
   });
