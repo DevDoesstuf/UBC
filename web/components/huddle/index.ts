@@ -20,5 +20,5 @@ export {
 } from "./Fx";
 export { DUR, EASE, prefersReducedMotion, useReducedMotion, useReplayClass, useDirection, useNewIds, useFlip, delay, vars } from "./motion";
 export {
-  clampProb, pctText, pctValue, pctLabel, multiplierText, payoutText, normalise, usd, usdShort, signedUsd, ordinal,
+  clampProb, pctText, pctValue, pctLabel, multiplierText, payoutText, normalise, usd, usdShort, signedUsd, ordinal, parseDollars,
 } from "./format";

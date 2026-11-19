@@ -37,6 +37,19 @@ const TREASURY_ACCOUNT_NAME = env("CDP_TREASURY_ACCOUNT_NAME") || "live-lines-tr
 const NETWORK = "base";
 
 export const DEPOSIT_OPTIONS = MONEY_MODE === "coinbase" || MONEY_MODE === "solana" ? [500, 1000, 2000] : [500, 1000];
+/** "Other amount": any whole-cent deposit from $1 to $100, in every money mode (the presets sit inside it). */
+export const DEPOSIT_MIN_CENTS = 100;
+export const DEPOSIT_MAX_CENTS = 10_000;
+
+/** Why a deposit amount is refused, or null when it is fine (a listed preset, or whole cents within the limits). */
+export function depositProblem(cents: unknown): string | null {
+  const c = typeof cents === "string" && cents.trim() !== "" ? Number(cents) : cents;
+  if (typeof c !== "number" || !Number.isSafeInteger(c)) return "Enter an amount in whole cents";
+  if (DEPOSIT_OPTIONS.includes(c)) return null;
+  if (c < DEPOSIT_MIN_CENTS) return `The smallest deposit is $${(DEPOSIT_MIN_CENTS / 100).toFixed(2)}`;
+  if (c > DEPOSIT_MAX_CENTS) return `The largest deposit is $${(DEPOSIT_MAX_CENTS / 100).toFixed(2)}`;
+  return null;
+}
 
 export function moneyInfo() {
   const solana = MONEY_MODE === "solana";
@@ -47,6 +60,9 @@ export function moneyInfo() {
     /** "solana": cash-out sends devnet USDC to a Solana address (or the wallet the player deposited from). */
     payouts: (solana ? "solana" : MONEY_MODE === "coinbase" && !SANDBOX && PAYOUTS === "onchain" ? "onchain" : "test") as "solana" | "onchain" | "test",
     depositOptions: DEPOSIT_OPTIONS,
+    /** "Other amount" limits, in cents (inclusive). */
+    depositMin: DEPOSIT_MIN_CENTS,
+    depositMax: DEPOSIT_MAX_CENTS,
     asset: solana ? "test USDC on Solana devnet" : MONEY_MODE === "coinbase" ? "USDC on Base" : "demo money (nothing real)",
     /** Solana: deposits are Solana Pay links; a faucet gives test USDC. */
     solanaPay: solana,

@@ -4,7 +4,7 @@
 //                    /l/ABCD?deposit=1 and calls /deposit/sync until Coinbase reports the payment as done.
 import { baseUrl, clientIp, handle, json, playerToken, readBody } from "@/lib/http";
 import { ApiError, creditDeposit, getLobby, mutate, requirePlayer } from "@/lib/lobby";
-import { DEPOSIT_OPTIONS, MONEY_MODE, createOnrampUrl, moneyProblems } from "@/lib/money";
+import { depositProblem, MONEY_MODE, createOnrampUrl, moneyProblems } from "@/lib/money";
 import { newSolanaDeposit } from "@/lib/solana-lobby";
 import { isVault } from "@/lib/vault";
 //   solana mode   -> {"ok":true,"url":"solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle...",
@@ -17,7 +17,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const body = await readBody(req);
     const cents = Number(body.cents);
     const token = playerToken(req);
-    if (!DEPOSIT_OPTIONS.includes(cents)) throw new ApiError(400, "Pick one of the listed amounts");
+    const bad = depositProblem(body.cents);
+    if (bad) throw new ApiError(400, bad);
 
     if (MONEY_MODE === "demo") {
       let credited = 0;

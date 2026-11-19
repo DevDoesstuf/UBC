@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { Qr } from "@/components/Qr";
 import {
   Aurora, Avatar, Burst, GOLD_BURST, Icon, Kinetic, Mark, Roll, Wordmark, ordinal, useCoins, useFlip, useNewIds,
-  useReplayClass, usd, usdShort, signedUsd, withAlpha, Sparkline, type IconName,
+  useReplayClass, usd, usdShort, signedUsd, parseDollars, withAlpha, Sparkline, type IconName,
 } from "@/components/huddle";
 import { SIDE, SOLANA_ADDRESS, profitOf, ranked, scoreSides, type Lobby } from "./derive";
 import type { Trail, TrailEntry } from "./Trail";
@@ -824,6 +824,71 @@ export function CashOut({
   );
 }
 
+/** "Other amount": a $-prefixed decimal field (numeric keypad) checked against the server's limits. */
+function OtherAmount({ min, max, busy, onDeposit }: { min: number; max: number; busy: boolean; onDeposit: (cents: number, el: HTMLElement) => void }) {
+  const [text, setText] = useState("");
+  const [touched, setTouched] = useState(false);
+  const cents = parseDollars(text);
+  const problem =
+    text.trim() === ""
+      ? null
+      : cents == null
+        ? "Enter dollars and cents, like 12.50"
+        : cents < min
+          ? `At least ${usd(min)}`
+          : cents > max
+            ? `At most ${usd(max)}`
+            : null;
+  const ok = cents != null && !problem;
+  const showErr = touched && !!problem;
+  return (
+    <form
+      className="ph-other ph-mt8"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        setTouched(true);
+        if (!ok || busy) return;
+        const btn = e.currentTarget.querySelector("button") as HTMLElement;
+        onDeposit(cents!, btn);
+        setText("");
+        setTouched(false);
+      }}
+    >
+      <label htmlFor="ph-other-amt" className="ph-other-label">
+        Other amount <span className="ph-other-range">{usdShort(min)} to {usdShort(max)}</span>
+      </label>
+      <div className={cx("ph-other-row", showErr && "bad")}>
+        <span className="ph-other-field">
+          <span className="ph-other-dollar" aria-hidden="true">$</span>
+          <input
+            id="ph-other-amt"
+            data-testid="deposit-other"
+            className="hd-num"
+            inputMode="decimal"
+            enterKeyHint="go"
+            autoComplete="off"
+            placeholder="0.00"
+            value={text}
+            aria-invalid={showErr || undefined}
+            aria-describedby={showErr ? "ph-other-err" : undefined}
+            onChange={(e) => setText(e.target.value.replace(/[^\d.,$]/g, "").slice(0, 9))}
+            onBlur={() => setTouched(true)}
+          />
+        </span>
+        <button type="submit" className="ph-other-go hd-press" disabled={busy || !ok} data-testid="deposit-other-go">
+          Add{ok ? ` ${usd(cents!)}` : ""}
+        </button>
+      </div>
+      {showErr && (
+        <p id="ph-other-err" className="ph-other-err hd-rise" role="alert">
+          {problem}
+        </p>
+      )}
+    </form>
+  );
+}
+
 export function MoneySheet({
   l,
   open,
@@ -862,6 +927,7 @@ export function MoneySheet({
                 </button>
               ))}
             </div>
+            <OtherAmount min={l.money.depositMin} max={l.money.depositMax} busy={busy} onDeposit={onDeposit} />
             {payment}
             {checkButton}
           </>

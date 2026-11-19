@@ -75,6 +75,14 @@ export function signedUsd(cents: number): string {
   return `${cents > 0 ? "+" : "−"}${usd(Math.abs(cents))}`;
 }
 
+/** Typed dollars to cents: "$12.50" -> 1250, "7" -> 700, ".5" -> 50; null unless plain dollars with up to 2 decimals. */
+export function parseDollars(text: string): number | null {
+  const t = text.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (!/^(\d{1,6}(\.\d{0,2})?|\.\d{1,2})$/.test(t)) return null;
+  const [w, f = ""] = t.split(".");
+  return Number(w || "0") * 100 + Number((f + "00").slice(0, 2));
+}
+
 /** 1 -> "1st", 2 -> "2nd". */
 export function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
