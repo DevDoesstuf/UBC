@@ -17,7 +17,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ code: st
     if (vaultNeedsWork(l)) await kickVault(l.code).catch(() => undefined);
     return json({
       ...publicView(l, playerToken(req), baseUrl(req)),
-      money: moneyInfo(),
+      money: moneyInfo(l),
       buy: { options: BUY_OPTIONS, min: MIN_BUY, max: MAX_BUY },
     });
   });

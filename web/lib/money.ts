@@ -20,8 +20,12 @@
 //                            cash-out sends USDC from the treasury. Needs SOLANA_TREASURY_SECRET_KEY and
 //                            USDC_MINT (SOLANA_RPC_URL defaults to devnet). Missing env -> demo money, and
 //                            /api/health says why.
+//                            Solana is a per-lobby choice: MONEY_MODE=solana only OFFERS it. Each lobby runs demo
+//                            money (the default) until the host picks Solana before anyone pays in (lobby.money,
+//                            lobbyMoneyMode). Coinbase stays server-wide.
 
 import { solanaProblems } from "./solana";
+import type { Lobby } from "./types";
 
 const env = (k: string) => (process.env[k] || "").trim();
 
@@ -36,7 +40,26 @@ const ONRAMP_API: "v2" | "v1" = env("COINBASE_ONRAMP_API") === "v1" ? "v1" : "v2
 const TREASURY_ACCOUNT_NAME = env("CDP_TREASURY_ACCOUNT_NAME") || "live-lines-treasury";
 const NETWORK = "base";
 
-export const DEPOSIT_OPTIONS = MONEY_MODE === "coinbase" || MONEY_MODE === "solana" ? [500, 1000, 2000] : [500, 1000];
+/** Solana money can be picked per lobby: MONEY_MODE=solana is running (configured). */
+export const SOLANA_OFFERED = MONEY_MODE === "solana";
+/** The money choices a lobby can pick from on this server (lobby phase, before anyone has paid in). */
+export const MONEY_OFFERED: ("demo" | "solana")[] = SOLANA_OFFERED ? ["demo", "solana"] : ["demo"];
+export type LobbyMoneyMode = "demo" | "coinbase" | "solana";
+
+/**
+ * The money a lobby actually runs. MONEY_MODE is the server's capability; each lobby picks demo (the default) or
+ * solana (only when the server offers it). Coinbase stays a server-wide mode.
+ */
+export function lobbyMoneyMode(l: Pick<Lobby, "money"> | null | undefined): LobbyMoneyMode {
+  if (MONEY_MODE === "coinbase") return "coinbase";
+  return SOLANA_OFFERED && l?.money === "solana" ? "solana" : "demo";
+}
+
+/** Someone has paid in, so the lobby's money choice is fixed. */
+export const moneyLocked = (l: Pick<Lobby, "players">) => Object.values(l.players ?? {}).some((p) => p.deposited > 0);
+
+const depositOptionsFor = (mode: LobbyMoneyMode) => (mode === "coinbase" || mode === "solana" ? [500, 1000, 2000] : [500, 1000]);
+export const DEPOSIT_OPTIONS = depositOptionsFor(MONEY_MODE);
 /** "Other amount": any whole-cent deposit from $1 to $100, in every money mode (the presets sit inside it). */
 export const DEPOSIT_MIN_CENTS = 100;
 export const DEPOSIT_MAX_CENTS = 10_000;
@@ -51,19 +74,26 @@ export function depositProblem(cents: unknown): string | null {
   return null;
 }
 
-export function moneyInfo() {
-  const solana = MONEY_MODE === "solana";
+/**
+ * Money info. With a lobby: what that lobby runs (phone, TV and box switch on it). Without: the server's
+ * capability (/api/health). `offered`: what a lobby can pick; `locked`: money is in, the choice is fixed.
+ */
+export function moneyInfo(l?: Pick<Lobby, "money" | "players"> | null) {
+  const mode: LobbyMoneyMode = l === undefined ? MONEY_MODE : lobbyMoneyMode(l);
+  const solana = mode === "solana";
   return {
-    mode: MONEY_MODE,
-    sandbox: MONEY_MODE === "coinbase" ? SANDBOX : true,
-    realMoney: MONEY_MODE === "coinbase" && !SANDBOX,
+    mode,
+    offered: MONEY_OFFERED,
+    locked: l ? moneyLocked(l) : false,
+    sandbox: mode === "coinbase" ? SANDBOX : true,
+    realMoney: mode === "coinbase" && !SANDBOX,
     /** "solana": cash-out sends devnet USDC to a Solana address (or the wallet the player deposited from). */
-    payouts: (solana ? "solana" : MONEY_MODE === "coinbase" && !SANDBOX && PAYOUTS === "onchain" ? "onchain" : "test") as "solana" | "onchain" | "test",
-    depositOptions: DEPOSIT_OPTIONS,
+    payouts: (solana ? "solana" : mode === "coinbase" && !SANDBOX && PAYOUTS === "onchain" ? "onchain" : "test") as "solana" | "onchain" | "test",
+    depositOptions: depositOptionsFor(mode),
     /** "Other amount" limits, in cents (inclusive). */
     depositMin: DEPOSIT_MIN_CENTS,
     depositMax: DEPOSIT_MAX_CENTS,
-    asset: solana ? "test USDC on Solana devnet" : MONEY_MODE === "coinbase" ? "USDC on Base" : "demo money (nothing real)",
+    asset: solana ? "test USDC on Solana devnet" : mode === "coinbase" ? "USDC on Base" : "demo money (nothing real)",
     /** Solana: deposits are Solana Pay links; a faucet gives test USDC. */
     solanaPay: solana,
     faucet: solana,

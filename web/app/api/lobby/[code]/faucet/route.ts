@@ -5,14 +5,14 @@
 // -> {"ok":true,"cents":2000,"usdcSig","solSig" (same signature, or null when no SOL was needed),"explorer"}
 import { handle, json, playerToken, readBody } from "@/lib/http";
 import { pushChainEvent } from "@/lib/chain";
-import { ApiError, mutate, requirePlayer } from "@/lib/lobby";
-import { MONEY_MODE } from "@/lib/money";
+import { ApiError, getLobby, mutate, requirePlayer } from "@/lib/lobby";
+import { lobbyMoneyMode } from "@/lib/money";
 import { FAUCET_CENTS, SolanaSendError, destinationProblem, explorerTx, faucet } from "@/lib/solana";
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
   return handle(async () => {
-    if (MONEY_MODE !== "solana") throw new ApiError(400, "The faucet is only for MONEY_MODE=solana; demo money is free");
     const { code } = await params;
+    if (lobbyMoneyMode(await getLobby(code, { gemini: false })) !== "solana") throw new ApiError(400, "The faucet is only for Solana games; demo money is free");
     const body = await readBody(req);
     const token = playerToken(req);
     const address = String(body.address ?? "").trim();

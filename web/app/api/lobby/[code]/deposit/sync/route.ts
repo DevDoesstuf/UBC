@@ -8,7 +8,7 @@
 //    "pending":-1 means "asked too soon, try again in 3 s" (one check per 2.5 s per player).
 import { handle, json, playerToken, readBody } from "@/lib/http";
 import { ApiError, creditDeposit, getLobby, mutate, requirePlayer } from "@/lib/lobby";
-import { MONEY_MODE, fetchDeposits } from "@/lib/money";
+import { fetchDeposits, lobbyMoneyMode } from "@/lib/money";
 import { explorerTx } from "@/lib/solana";
 import { settlePendingCashouts, syncSolanaDeposits } from "@/lib/solana-lobby";
 
@@ -20,10 +20,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const l = await getLobby(code);
     if (!l) throw new ApiError(404, "Lobby not found");
     const p = requirePlayer(l, token);
-    if (MONEY_MODE === "demo") return json({ ok: true, credited: 0, pending: 0 });
+    const mode = lobbyMoneyMode(l);
+    if (mode === "demo") return json({ ok: true, credited: 0, pending: 0 });
     if (p.lastSyncAt && Date.now() - p.lastSyncAt < 2500) return json({ ok: true, credited: 0, pending: -1 });
 
-    if (MONEY_MODE === "solana") {
+    if (mode === "solana") {
       const onlyRef = typeof body.reference === "string" && body.reference ? body.reference : undefined;
       // Stamp the check first, so the 2.5 s throttle also holds while the RPC is failing (no RPC storm).
       await mutate(l.code, (lobby, now) => {

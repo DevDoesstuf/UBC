@@ -235,6 +235,8 @@ export interface Lobby {
   withdrawals: WithdrawalRecord[];
   /** House profit/loss in cents across resolved markets: volume in minus payouts out. */
   housePnl: number;
+  /** Money this lobby runs: "demo" (default, also when missing) or "solana" (only where MONEY_MODE=solana offers it; see lobbyMoneyMode). Picked in the lobby phase before anyone pays in. */
+  money?: "demo" | "solana";
   /** Trading mode for new questions (missing = the game's default, else market). */
   mode?: MarketMode;
   /** Announcer lines, newest last (about 10 kept). */

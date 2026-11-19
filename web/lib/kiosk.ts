@@ -36,6 +36,9 @@
 //   trades     also on result now (newest first)
 //   pay {name, cents, qr {size, rows}, until (ms epoch), leftMs, paid}   any screen, only while lobby.boxPay is
 //     live: the box draws a Solana Pay card on top (QR at ECC L) with a Close button (touch id "pay:close").
+//   money {mode: "demo"|"solana"|"coinbase", offered: ["demo","solana"?], locked}   any screen with a lobby.
+//     Lobby screen: where Solana is offered and nobody has paid in, a "Money: Demo" / "Money: Solana" button
+//     (touch id "money:toggle"; "money:demo" / "money:solana" also work) switches this game's money.
 import QRCode from "qrcode";
 import { allGames, getGame } from "./games";
 import { getTimeline } from "./replay/timeline";
@@ -43,8 +46,9 @@ import { bestCandidate, replayMs } from "./replay/run";
 import { buildScorecard } from "./scorecard";
 import {
   ApiError, createLobby, endSession, getKioskCode, getKioskLobby, getLobby, lockMarket, mutate, openMarket,
-  releaseKiosk, resolveMarket, usd, hotseatAccept,
+  releaseKiosk, resolveMarket, usd, hotseatAccept, parseMoney, setMoney,
 } from "./lobby";
+import { lobbyMoneyMode, moneyLocked, MONEY_OFFERED } from "./money";
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
 import { boxName, boxSafe } from "./boxText";
@@ -149,6 +153,8 @@ export interface KioskScreen extends HwKioskFields {
   standings?: { name: string; cents: number; pnl: number; rank: number; lead: boolean }[];
   /** A Solana Pay request drawn on top of any screen (lobby.boxPay). */
   pay?: KioskPay;
+  /** The money this game plays, what the server offers, and whether it is fixed (money is in). Any screen with a lobby. */
+  money?: { mode: string; offered: string[]; locked: boolean };
   /** Box-only extras (optional; missing = nothing drawn). */
   betsIn?: { n: number; of: number };
   hotseat?: { name: string; mult: number; leftMs: number };
@@ -562,9 +568,29 @@ export function payOf(l: Lobby, now: number = Date.now()): KioskPay | undefined 
   return { name: kn(String(bp.name ?? "")).slice(0, 23), cents, ...(qr ? { qr } : {}), until: Number.isFinite(until) ? until : now, leftMs: Math.max(0, Math.min(86_400_000, Math.round(until - now) || 0)), paid: paidAt !== null };
 }
 
+/**
+ * The box's money switch on the lobby screen: only where Solana is offered and while nobody has paid in.
+ * Labels are Latin-1 and at most 16 characters.
+ */
+export function moneyButton(l: Lobby): KioskButton | null {
+  if (l.phase !== "lobby" || !MONEY_OFFERED.includes("solana") || moneyLocked(l)) return null;
+  return { id: "money:toggle", label: lobbyMoneyMode(l) === "solana" ? "Money: Solana" : "Money: Demo", style: "plain" };
+}
+
+/** Lobby buttons within the firmware's budget of 4: Start, the money switch, "Call it!" moments, Cancel. */
+function lobbyButtons(l: Lobby, calls: KioskButton[]): KioskButton[] {
+  const money = moneyButton(l);
+  const extra = money ? [money] : [];
+  const room = 4 - 2 - extra.length;
+  const shown = calls.slice(0, room);
+  if (shown.length) return [{ id: "start", label: `Start Q${l.qIndex + 1}`, style: "plain" }, ...extra, ...shown, { id: "cancel", label: "Cancel", style: "plain" }];
+  return [{ id: "start", label: `Start question ${l.qIndex + 1}`, style: "yes" }, ...extra, { id: "cancel", label: "Cancel", style: "plain" }];
+}
+
 /** v2 additions per screen. */
 function extras(l: Lobby | null): Partial<KioskScreen> {
   const base = extrasCore(l);
+  if (l) base.money = { mode: lobbyMoneyMode(l), offered: MONEY_OFFERED, locked: moneyLocked(l) };
   const pay = l ? payOf(l) : undefined;
   // Hardware extras (lib/hw.ts): confirm, betsIn, flash, hotseat, tip, interlude. All optional, additive.
   const hwf = hwKioskFields(l);
@@ -667,12 +693,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
       qr: qrRows(joinUrl),
       players: players.map((p) => k(`${kn(p.name)}  ${p.deposited > 0 ? usd(p.balance) : "adding money..."}`)),
       question: k(game?.questions[l.qIndex]?.text ?? ""),
-      buttons: calls.length
-        ? [{ id: "start", label: `Start Q${l.qIndex + 1}`, style: "plain" }, ...calls, { id: "cancel", label: "Cancel", style: "plain" }]
-        : [
-            { id: "start", label: `Start question ${l.qIndex + 1}`, style: "yes" },
-            { id: "cancel", label: "Cancel", style: "plain" },
-          ],
+      buttons: lobbyButtons(l, calls),
     };
   }
 
@@ -791,6 +812,13 @@ export async function kioskTouch(kioskId: string, id: string, baseUrl: string): 
       if (typeof open !== "function") throw new ApiError(400, "Calls are not switched on yet");
       if (!kind) throw new ApiError(400, "Unknown call");
       await mutate(code, (l, now) => open(l, kind, now));
+      break;
+    }
+    case "money": {
+      // The lobby's money switch: money:toggle, money:demo, money:solana (lobby phase, before anyone paid in).
+      const want = parseMoney(arg);
+      if (!want) throw new ApiError(400, "Unknown button");
+      await mutate(code, (l) => setMoney(l, want));
       break;
     }
     case "hotseat":

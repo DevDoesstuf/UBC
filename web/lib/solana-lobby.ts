@@ -11,6 +11,7 @@
 import { pushChainEvent } from "./chain";
 import { ApiError, BOX_CHECK_MS, BOX_PAY_MS, creditDeposit, getLobby, mutate, requirePlayer } from "./lobby";
 import { explorerTx, findPayments, newReference, signatureOutcome, transferRequestUrl, treasuryInfo, type FoundPayment, type PaymentRpc } from "./solana";
+import { lobbyMoneyMode } from "./money";
 import { kvGet, kvSet } from "./store";
 import type { ChainEvent, Lobby } from "./types";
 import { isVault, kickVault } from "./vault";
@@ -59,10 +60,12 @@ export async function newSolanaDeposit(code: string, token: string | null, cents
   let code4 = "";
   let playerId = "";
   let url = "";
-  const vault = isVault();
+  let vault = false;
   await mutate(code, (l, now) => {
     const p = requirePlayer(l, token);
     if (l.phase === "ended") throw new ApiError(400, "This session has ended. Cash out instead");
+    if (lobbyMoneyMode(l) !== "solana") throw new ApiError(400, "This game plays demo money");
+    vault = isVault(l);
     code4 = l.code;
     playerId = p.id;
     addSolanaRef(l, p.id, reference, cents, now);

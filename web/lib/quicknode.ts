@@ -15,7 +15,8 @@
 //   - huddle_vault instructions -> the lobby that owns that party PDA records the step as streamed (TV / box).
 import { createHmac, timingSafeEqual } from "crypto";
 import { markStreamed } from "./chain";
-import { mutate } from "./lobby";
+import { getLobby, mutate } from "./lobby";
+import { lobbyMoneyMode } from "./money";
 import { paymentBySignature } from "./solana";
 import { creditPayments, lookupRef } from "./solana-lobby";
 import { kvGet } from "./store";
@@ -96,6 +97,8 @@ export async function handleStream(body: unknown, opts: Parameters<typeof paymen
     for (const key of new Set(r.accounts)) {
       const ref = await lookupRef(key);
       if (!ref) continue;
+      // Only lobbies that play Solana money take on-chain deposits; a demo lobby ignores the delivery.
+      if (lobbyMoneyMode(await getLobby(ref.code, { gemini: false })) !== "solana") continue;
       const pay = await paymentBySignature(r.signature, key, opts);
       if (!pay) continue;
       const c = await creditPayments(ref.code, ref.playerId, [{ ref: key, pays: [pay], paid: true }], "quicknode");

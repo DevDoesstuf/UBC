@@ -8,8 +8,8 @@
 // The box clears it early on touch `pay:close`.
 // -> {"ok":true,"url","reference","recipient","mint","amount","until"}
 import { handle, json, playerToken, readBody } from "@/lib/http";
-import { ApiError, BOX_PAY_MS } from "@/lib/lobby";
-import { depositProblem, MONEY_MODE } from "@/lib/money";
+import { ApiError, BOX_PAY_MS, getLobby } from "@/lib/lobby";
+import { depositProblem, lobbyMoneyMode } from "@/lib/money";
 import { newSolanaDeposit } from "@/lib/solana-lobby";
 
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
@@ -17,7 +17,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const { code } = await params;
     const body = await readBody(req);
     const cents = Number(body.cents);
-    if (MONEY_MODE !== "solana") throw new ApiError(400, "Pay on the box needs Solana money (MONEY_MODE=solana)");
+    if (lobbyMoneyMode(await getLobby(code, { gemini: false })) !== "solana") throw new ApiError(400, "Pay on the box needs a Solana game");
     const bad = depositProblem(body.cents);
     if (bad) throw new ApiError(400, bad);
     const d = await newSolanaDeposit(code, playerToken(req), cents, { box: true });

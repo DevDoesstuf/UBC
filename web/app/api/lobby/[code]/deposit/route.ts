@@ -4,7 +4,7 @@
 //                    /l/ABCD?deposit=1 and calls /deposit/sync until Coinbase reports the payment as done.
 import { baseUrl, clientIp, handle, json, playerToken, readBody } from "@/lib/http";
 import { ApiError, creditDeposit, getLobby, mutate, requirePlayer } from "@/lib/lobby";
-import { depositProblem, MONEY_MODE, createOnrampUrl, moneyProblems } from "@/lib/money";
+import { depositProblem, createOnrampUrl, lobbyMoneyMode, moneyProblems } from "@/lib/money";
 import { newSolanaDeposit } from "@/lib/solana-lobby";
 import { isVault } from "@/lib/vault";
 //   solana mode   -> {"ok":true,"url":"solana:<treasury>?amount=5&spl-token=<mint>&reference=<key>&label=Huddle...",
@@ -20,7 +20,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const bad = depositProblem(body.cents);
     if (bad) throw new ApiError(400, bad);
 
-    if (MONEY_MODE === "demo") {
+    const lobby = await getLobby(code, { gemini: false });
+    if (!lobby) throw new ApiError(404, "Lobby not found");
+    const mode = lobbyMoneyMode(lobby);
+    if (mode === "demo") {
       let credited = 0;
       await mutate(code, (l, now) => {
         const p = requirePlayer(l, token);
@@ -30,11 +33,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
       return json({ ok: true, credited });
     }
 
-    if (MONEY_MODE === "solana") {
+    if (mode === "solana") {
       // Solana Pay transfer request: a unique reference key tags the payment so /deposit/sync (or the QuickNode
       // webhook) can find it. SETTLEMENT=vault sweeps it into the party vault as soon as it is credited.
       const d = await newSolanaDeposit(code, token, cents);
-      return json({ ok: true, url: d.url, solanaPay: true, reference: d.reference, recipient: d.recipient, mint: d.mint, amount: d.amount, vault: isVault() });
+      return json({ ok: true, url: d.url, solanaPay: true, reference: d.reference, recipient: d.recipient, mint: d.mint, amount: d.amount, vault: isVault(lobby) });
     }
 
     const problems = moneyProblems();

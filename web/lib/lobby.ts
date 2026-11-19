@@ -22,6 +22,7 @@ import { getTimeline, wallAt } from "./replay/timeline";
 import { chainView } from "./chain";
 import type { Game, Lobby, LobbyEvent, Market, MarketMode, Offer, Player, Side, WithdrawalRecord } from "./types";
 import { MARKET_MODES } from "./types";
+import { lobbyMoneyMode, moneyLocked, MONEY_OFFERED } from "./money";
 import { acceptHotseat, HwError, interludeHold, onJoin, onResult, onVoid, pendingFor, placePending, takePending, tickHw } from "./hw";
 
 export class ApiError extends Error {
@@ -475,7 +476,7 @@ export async function getLobby(code: string, opts: { gemini?: boolean } = {}): P
   if (!l) return null;
   // An open "Pay on the box" QR: look for the payment on chain, at most every 3 s per lobby (checkBoxPay throttles).
   const bp = l.boxPay;
-  if (bp && !bp.paidAt && Date.now() <= bp.until) {
+  if (bp && !bp.paidAt && Date.now() <= bp.until && lobbyMoneyMode(l) === "solana") {
     const { checkBoxPay } = await import("./solana-lobby");
     if (await checkBoxPay(l).catch((e) => (console.error("[boxPay]", e instanceof Error ? e.message : e), false))) {
       l = (await read(code)) ?? l;
@@ -519,7 +520,7 @@ export async function createLobby(kioskId: string, gameId: string, mode?: Market
     const l: Lobby = {
       code, kioskId, gameId, createdAt: now, updatedAt: now, v: 1, phase: "lobby", qIndex: 0,
       players: {}, order: [], market: null, results: [], events: [], eventSeq: 0,
-      deposits: {}, withdrawals: [], housePnl: 0,
+      deposits: {}, withdrawals: [], housePnl: 0, money: "demo",
       mode: mode ?? game.mode ?? "market", captions: [], scoreEntries: [], gemini,
     };
     if (isReplay(game) && game.replay) {
@@ -581,6 +582,30 @@ export function setMode(l: Lobby, mode: MarketMode): void {
   if (l.phase === "open" || l.phase === "locked") throw new ApiError(400, "Change the mode between questions");
   if (l.phase === "ended") throw new ApiError(400, "This session has ended");
   l.mode = mode;
+}
+
+/** Money is in: the lobby's money choice can't change any more. */
+export const MONEY_LOCKED = "Money is already in: start a new game to switch";
+
+/**
+ * The host picks this lobby's money (lobby phase only, before anyone has paid in). "toggle" flips demo <-> solana.
+ * Solana only where the server offers it (MONEY_MODE=solana configured).
+ */
+export function setMoney(l: Lobby, want: "demo" | "solana" | "toggle"): void {
+  if (l.phase !== "lobby") throw new ApiError(400, "Pick the money before the game starts");
+  const next = want === "toggle" ? (lobbyMoneyMode(l) === "solana" ? "demo" : "solana") : want;
+  if (next === "solana" && !MONEY_OFFERED.includes("solana")) throw new ApiError(400, "Solana money is not set up on this server");
+  if ((l.money ?? "demo") === next) return;
+  if (moneyLocked(l)) throw new ApiError(400, MONEY_LOCKED);
+  l.money = next;
+  // Open deposit requests belong to the old money.
+  l.solanaRefs = {};
+  l.boxPay = null;
+  addEvent(l, "tap", next === "solana" ? "Playing for test USDC on Solana" : "Playing for demo money", "tap");
+}
+
+export function parseMoney(v: unknown): "demo" | "solana" | "toggle" | null {
+  return v === "demo" || v === "solana" || v === "toggle" ? v : null;
 }
 
 export function openMarket(l: Lobby, now: number): void {

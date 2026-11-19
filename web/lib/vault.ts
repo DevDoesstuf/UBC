@@ -30,7 +30,7 @@ import { createHash, createPrivateKey, randomBytes, sign as edSign } from "crypt
 import type { Connection, Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { pushChainEvent } from "./chain";
 import { getLobby, mutate, normCode } from "./lobby";
-import { MONEY_MODE } from "./money";
+import { MONEY_MODE, lobbyMoneyMode } from "./money";
 import { SolanaSendError, UNITS_PER_CENT, USDC_DECIMALS, connection, explorerAddress, explorerTx, mint, mintInfo, parseSecretKey, sendTreasuryTx, signatureOutcome, treasury, treasuryFundsIxs } from "./solana";
 import { kvDel, kvGet, kvSet } from "./store";
 import type { ChainEvent, Lobby, LobbyVault } from "./types";
@@ -40,8 +40,10 @@ const env = (k: string) => (process.env[k] || "").trim();
 export const DEFAULT_VAULT_PROGRAM_ID = "GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu";
 export const vaultRequested = () => env("SETTLEMENT") === "vault";
 export const vaultProgramId = () => env("HUDDLE_VAULT_PROGRAM_ID") || DEFAULT_VAULT_PROGRAM_ID;
-/** Vault settlement is on: MONEY_MODE=solana is running and SETTLEMENT=vault. */
-export const isVault = () => MONEY_MODE === "solana" && vaultRequested();
+/** The server can settle through the vault: MONEY_MODE=solana is running and SETTLEMENT=vault. */
+export const vaultOffered = () => MONEY_MODE === "solana" && vaultRequested();
+/** This lobby settles through the vault: it plays Solana money (lobby.money) and the server offers the vault. */
+export const isVault = (l: Pick<Lobby, "money"> | null | undefined) => vaultOffered() && lobbyMoneyMode(l) === "solana";
 
 // ---------------------------------------------------------------- wire format (pure, unit tested)
 
@@ -609,7 +611,7 @@ export interface AdvanceResult {
  */
 export async function advanceVault(code: string, opts: { waitMs?: number } = {}): Promise<AdvanceResult> {
   code = normCode(code);
-  if (!isVault()) return { ran: false, vault: null };
+  if (!vaultOffered()) return { ran: false, vault: null };
   const key = `vaultlock:${code}`;
   const tok = randomBytes(8).toString("hex");
   // `waitMs`: wait for a run already in progress to finish, then run again (it re-reads everything).
@@ -621,6 +623,7 @@ export async function advanceVault(code: string, opts: { waitMs?: number } = {})
   try {
     const l = await getLobby(code);
     if (!l) return { ran: true, vault: null };
+    if (!isVault(l)) return { ran: true, vault: l.vault ?? null };
     const due = sweepsDue(l);
     const ended = l.phase === "ended";
     if (l.vault?.status === "settled" || (!due.length && !(ended && l.vault))) return { ran: true, vault: l.vault ?? null };
@@ -655,7 +658,7 @@ export async function advanceVault(code: string, opts: { waitMs?: number } = {})
 
 /** Should a read of this lobby nudge the vault (credited deposits not swept yet, or an ended game not settled)? */
 export function vaultNeedsWork(l: Lobby): boolean {
-  if (!isVault()) return false;
+  if (!isVault(l)) return false;
   if (l.vault?.status === "settled") return false;
   return sweepsDue(l).length > 0 || (l.phase === "ended" && !!l.vault);
 }
@@ -665,7 +668,7 @@ export function vaultNeedsWork(l: Lobby): boolean {
  * per lobby. Outside a request (tests, scripts) it just runs in the background.
  */
 export async function kickVault(code: string): Promise<void> {
-  if (!isVault()) return;
+  if (!vaultOffered()) return;
   if (!(await kvSet(`vaultkick:${normCode(code)}`, "1", { nx: true, px: 5000 }))) return;
   const run = () => advanceVault(code).then(() => undefined, () => undefined);
   try {
@@ -696,7 +699,7 @@ export async function vaultReadiness(force = false): Promise<VaultReadiness> {
   const now = Date.now();
   if (!force && vaultCache && now - vaultCache.at < 15_000) return vaultCache.value;
   const programId = vaultProgramId();
-  const r: VaultReadiness = { requested: vaultRequested(), active: isVault(), programId, deployed: null, executable: null, boxSigner: null, explorer: explorerAddress(programId), problems: [], nextSteps: [] };
+  const r: VaultReadiness = { requested: vaultRequested(), active: vaultOffered(), programId, deployed: null, executable: null, boxSigner: null, explorer: explorerAddress(programId), problems: [], nextSteps: [] };
   if (r.requested && MONEY_MODE !== "solana") r.problems.push("SETTLEMENT=vault needs MONEY_MODE=solana running (see solana.problems)");
   if (MONEY_MODE === "solana") {
     try {

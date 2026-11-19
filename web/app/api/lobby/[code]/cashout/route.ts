@@ -56,12 +56,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
     const { code } = await params;
     const body = await readBody(req);
     const token = playerToken(req);
-    const solana = moneyInfo().payouts === "solana";
-    const onchain = moneyInfo().payouts === "onchain" || solana;
+    const lobby = await getLobby(code, { gemini: false });
+    if (!lobby) throw new ApiError(404, "Lobby not found");
+    const money = moneyInfo(lobby);
+    const solana = money.payouts === "solana";
+    const onchain = money.payouts === "onchain" || solana;
     const address = String(body.address ?? "").trim();
     if (onchain && !solana && !isEvmAddress(address)) throw new ApiError(400, "Enter the 0x address of your wallet on Base");
 
-    if (solana && isVault()) return json(await vaultCashout(code, token, address));
+    if (solana && isVault(lobby)) return json(await vaultCashout(code, token, address));
 
     if (solana) {
       const l = await getLobby(code);

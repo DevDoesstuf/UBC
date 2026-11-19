@@ -14,7 +14,9 @@ export const maxDuration = 60;
 export async function POST(req: Request, { params }: { params: Promise<{ code: string }> }) {
   return handle(async () => {
     const { code } = await params;
-    if (!isVault()) throw new ApiError(400, "On-chain settlement needs SETTLEMENT=vault with MONEY_MODE=solana");
+    const before = await getLobby(code, { gemini: false });
+    if (!before) throw new ApiError(404, "Lobby not found");
+    if (!isVault(before)) throw new ApiError(400, "On-chain settlement needs a Solana game with SETTLEMENT=vault");
     const r = await advanceVault(code, { waitMs: 45_000 });
     const l = await getLobby(code);
     if (!l) throw new ApiError(404, "Lobby not found");
