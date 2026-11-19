@@ -102,9 +102,9 @@ export function JoinScreen({
         <div className="ph-grow" />
 
         {ended ? (
-          <Empty mark>This party has ended. Pick a new game on the box to start another.</Empty>
+          <Empty mark>This party has ended.</Empty>
         ) : l.players.length >= MAX_PARTY ? (
-          <Empty mark>This party is full ({MAX_PARTY} players). Watch along on the TV, or start another game on the box.</Empty>
+          <Empty mark>This party is full ({MAX_PARTY} players).</Empty>
         ) : (
           <form className="ph-join-form hd-rise" style={d(380)} onSubmit={submit} noValidate>
             <label htmlFor="name" className="ph-label">
@@ -140,7 +140,7 @@ export function JoinScreen({
               )}
             </button>
             <p id="name-hint" className="ph-hint ph-center">
-              {tried && !clean ? <span className="ph-hot">Type a name first, so friends know it’s you.</span> : "Test money only. Nothing real is charged."}
+              {tried && !clean ? <span className="ph-hot">Type a name first.</span> : null}
             </p>
             {error && <InlineError text={error} />}
           </form>
@@ -223,7 +223,7 @@ export function BuyInScreen({
               </span>
               <Kinetic as="p" text={`You’re in, ${me.name}.`} className="hd-q ph-done-h" delay={120} stagger={70} />
               <p className="hd-rise ph-lead" style={d(420)}>
-                <span className="hd-num ph-ink">{usd(me.balance)}</span> ready to play. The first question drops on the next big moment.
+                <span className="hd-num ph-ink">{usd(me.balance)}</span> ready to play.
               </p>
             </div>
           ) : (
@@ -287,7 +287,6 @@ export function BuyInScreen({
               )}
             </button>
             {error && <InlineError text={error} />}
-            <p className="ph-hint ph-center">{moneyHint(l)}</p>
             <button onClick={onSkip} className="hd-btn hd-btn-quiet ph-center-btn">
               Just watch for now
             </button>
@@ -297,13 +296,6 @@ export function BuyInScreen({
       </div>
     </div>
   );
-}
-
-export function moneyHint(l: Lobby): string {
-  const mode = l.money.mode as string;
-  if (mode === "solana") return "Pay from any wallet app. Test money only; your balance shows in dollars.";
-  if (mode === "coinbase") return l.money.realMoney ? "You pay by card or bank. Your balance is in dollars." : "Test checkout: no real money moves.";
-  return "Test money for the party. Nothing real is charged.";
 }
 
 // ------------------------------------------------------------------ header
@@ -474,7 +466,7 @@ export function Leaderboard({ l, title = "Leaderboard" }: { l: Lobby; title?: st
           })}
         </ol>
       ) : (
-        <Empty mark>Nobody’s in yet. Share the code and the board fills up.</Empty>
+        <Empty mark>Nobody’s in yet.</Empty>
       )}
     </section>
   );
@@ -524,7 +516,7 @@ export function ResultsTab({ l }: { l: Lobby }) {
   );
 }
 
-/** Friends vs Model vs Gemini: Brier bars (shorter is better), the best gets a gold crown. */
+/** Friends vs Model vs Gemini: Brier bars (shorter wins), the best gets a gold crown. */
 export function ScorecardBlock({ l }: { l: Lobby }) {
   const s = l.scorecard!;
   const rows = [
@@ -537,7 +529,7 @@ export function ScorecardBlock({ l }: { l: Lobby }) {
   const max = Math.max(0.25, ...vals);
   return (
     <section aria-labelledby="sc-title" className="ph-score-card hd-card">
-      <SectionTitle id="sc-title" aside={`${s.n} ${s.n === 1 ? "question" : "questions"} · shorter is better`}>
+      <SectionTitle id="sc-title" aside={`${s.n} ${s.n === 1 ? "question" : "questions"}`}>
         Who called it best
       </SectionTitle>
       <ul className="ph-sc-rows">
@@ -707,7 +699,7 @@ export function PayLink({ url, cents, onCheck, onClose, checking, onBox, onBoxBu
       </span>
       <div className="ph-paylink-body">
         <b className="ph-h3">Add {usd(cents)}</b>
-        <p className="ph-hint">Scan with your wallet app, or open it on this phone. We check for it every few seconds.</p>
+        <p className="ph-hint">Scan with your wallet app.</p>
         <a className="hd-btn hd-btn-primary ph-btn-sm" href={url}>
           <Icon name="wallet" size={18} /> Open in wallet
         </a>
@@ -824,16 +816,14 @@ export function MoneySheet({
             </div>
             {payment}
             {checkButton}
-            <p className="ph-hint">{moneyHint(l)}</p>
           </>
         )}
         {me.balance > 0 && l.money.settlement === "vault" && l.phase !== "ended" && (
-          <p className="ph-hint ph-mt16">Your money is in this party’s vault on Solana. It pays out to your wallet when the host ends the game.</p>
+          <p className="ph-hint ph-mt16">Pays out to your wallet when the game ends.</p>
         )}
         {me.balance > 0 && !(l.money.settlement === "vault" && l.phase !== "ended") && (
           <>
             <h3 className="ph-h3 ph-mt16">Cash out</h3>
-            <p className="ph-hint">Takes your whole balance out of the game.</p>
             {cashOut}
           </>
         )}

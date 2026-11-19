@@ -189,7 +189,6 @@ export default function Home() {
           ) : (
             "Checking the server…"
           )}
-          <span>Test money only. No real-money betting.</span>
         </footer>
       </div>
     </div>

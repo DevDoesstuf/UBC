@@ -529,7 +529,7 @@ export function LobbyStage({ l }: { l: L }) {
   const fresh = useNewIds(players.map((p) => p.id));
   const pot = players.reduce((a, p) => a + p.deposited, 0);
   const replay = l.game?.kind === "replay";
-  const meta = [`${MODE_LABEL[l.mode ?? "market"]} mode`, replay ? "Full game replay, questions written live" : "Clip with questions", l.money.mode === "solana" ? "Test USDC on Solana" : "Test money"];
+  const meta = [`${MODE_LABEL[l.mode ?? "market"]} mode`, replay ? "Full game replay, questions written live" : "Clip with questions", l.money.mode === "solana" ? "USDC on Solana" : null].filter(Boolean);
   return (
     <div className="tv-lobby">
       <section className="hd-slide-l tv-joinpanel" aria-label="Join this game">

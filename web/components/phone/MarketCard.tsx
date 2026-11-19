@@ -482,7 +482,7 @@ function OfferBook({ l, m, live, actions, flow }: { l: Lobby; m: Mkt; live: bool
           })}
         </ul>
       ) : (
-        <p className="ph-hint">{live ? "No offers to take yet. Post one and a friend can take the other side." : "No open offers."}</p>
+        <p className="ph-hint">{live ? "No open offers yet." : "No open offers."}</p>
       )}
 
       {mine.length > 0 && (
@@ -618,7 +618,7 @@ function ResultRow({ l, m }: { l: Lobby; m: Mkt }) {
   if (l.phase === "locked")
     return (
       <p className="ph-line">
-        <Icon name="hourglass" size={16} /> {m.hostSettles ? "Locked. The host taps what happened on the box." : "Locked. Waiting for the result…"}
+        <Icon name="hourglass" size={16} /> Locked. Waiting for the result…
       </p>
     );
   if (l.phase !== "result" || !m.outcome) return null;
@@ -627,7 +627,7 @@ function ResultRow({ l, m }: { l: Lobby; m: Mkt }) {
   const winners = m.winners.filter((w) => w.cents > 0).slice(0, 3);
   return (
     <div className="ph-result">
-      {res.kind === "none" ? <p className="ph-hint">You sat this one out.</p> : <ResultBadge res={res} animate={celebrate} />}
+      {res.kind !== "none" && <ResultBadge res={res} animate={celebrate} />}
       {celebrate && res.kind === "won" && <Burst count={14} seed={m.qIndex + 7} x="4rem" y="1.2rem" spread={8} />}
       {winners.length > 0 && !m.voided && (
         <p className="ph-winners">
@@ -640,7 +640,6 @@ function ResultRow({ l, m }: { l: Lobby; m: Mkt }) {
           ))}
         </p>
       )}
-      <p className="ph-hint">{l.game?.kind === "replay" ? "The next question opens by itself in a few seconds." : "The host opens the next question from the box."}</p>
     </div>
   );
 }
