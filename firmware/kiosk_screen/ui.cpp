@@ -80,6 +80,8 @@ struct GameCard {
   uint16_t color;
   bool enabled, gemini, hasColor;
   bool at;  // "Away at Home" (US style, away drawn first) instead of "Home v Away"
+  int8_t favPct;  // the Gemini / model favourite's chance, 0-100 (-1 = the card has no odds)
+  char favWho[8]; // who that favourite is ("SF"), optional
 };
 struct Person {
   char name[24];
@@ -654,6 +656,15 @@ static void parseInto(Screen &s, JsonObjectConst j) {
     parseTeam(c.away, t["away"], P.ink2);
     // Older servers do not send "at": only the NFL wrote "at" then.
     c.at = t["at"].is<bool>() ? t["at"].as<bool>() : !strcmp(c.league, "NFL");
+    // Optional odds: "fav": {"p": 62, "abbr": "SF"} or a bare "odds": 62 (older servers send neither).
+    JsonVariantConst fv = t["fav"];
+    c.favPct = -1;
+    if (fv.is<JsonObjectConst>() && fv["p"].is<float>()) {
+      c.favPct = (int8_t)constrain((int)(fv["p"] | 0.0f), 0, 100);
+      strlcpy(c.favWho, fv["abbr"] | (fv["label"] | ""), sizeof(c.favWho));
+    } else if (t["odds"].is<float>()) {
+      c.favPct = (int8_t)constrain((int)(t["odds"] | 0.0f), 0, 100);
+    }
   }
   // People.
   if (!j["roster"].isNull()) parsePeople(s.roster, s.nRoster, j["roster"].as<JsonArrayConst>(), "cents", "deposited");
@@ -1335,68 +1346,64 @@ static void codeChip(const Screen &s, int &rx) {
 
 // ---------------------------------------------------------------- select: the game picker
 
+// Kalshi-style market tile: league chip + Live / Replay tag, the two teams with colour dots ("Away at Home"),
+// the favourite's % chip when the card has odds, the date at the foot.
 static void drawGameCard(const GameCard &c, int x, int y, int w, int h, int idx) {
   bool pressed = isPressed(c.id);
-  int ix = pressed ? 3 : 0;
-  float rel = 0;
+  int ix = pressed ? 2 : 0;
   if (!pressed && released[0] && !strcmp(released, c.id)) {
     float p = prog(releasedAt, 0, 380);
-    rel = 3 * (1 - eBack(p, 2.4f));
+    ix = (int)roundf(2 * (1 - eBack(p, 2.4f)));
     if (p < 1) mark(x - 6, y - 6, w + 12, h + 12);
-    ix = (int)roundf(rel);
   }
   x += ix;
   y += ix;
   w -= 2 * ix;
   h -= 2 * ix;
-  const int r = 22;
-  if (c.enabled) {
-    if (!pressed) shadow(x, y, w, h, r);
-    rrect(x, y, w, h, r, P.card);
-  } else {
-    rrect(x, y, w, h, r, P.well);
-  }
-  // team colour ribbon across the top
-  pushClip(x, y, w, 7);
+  const int r = 16;
+  rrect(x, y, w, h, r, c.enabled ? P.card : P.canvas);
+  rrectStroke(x, y, w, h, r, 1, pressed ? P.ink : P.rule);
   // first/second in reading order: "Away at Home" for US leagues, "Home v Away" for soccer
   const Team &t1 = c.at ? c.away : c.home;
   const Team &t2 = c.at ? c.home : c.away;
-  if (c.home.has && c.away.has) {
-    pushClip(x, y, w / 2, 7);
-    rrect(x, y, w, h, r, t1.color, c.enabled ? 255 : 120);
-    popClip();
-    pushClip(x + w / 2, y, w - w / 2, 7);
-    rrect(x, y, w, h, r, t2.color, c.enabled ? 255 : 120);
-    popClip();
-  } else {
-    rrect(x, y, w, h, r, c.hasColor ? c.color : P.accent, c.enabled ? 255 : 120);
-  }
-  popClip();
   uint16_t ink = c.enabled ? P.ink : P.muted;
-  // row 1: league + status
-  int lx = x + 14;
-  if (c.league[0]) lx += pill(lx, y + 18, 26, c.league, F_B3, c.enabled ? P.well : P.rule, P.ink2) + 6;
-  const char *status = !c.enabled ? "Soon" : !strcmp(c.kind, "replay") ? "Replay" : "Live";
-  int sw = textW(F_B3, status) + 24 + (c.enabled && strcmp(c.kind, "replay") ? 10 : 0);
-  int sx = x + w - 14 - sw;
-  if (!c.enabled) pill(sx, y + 18, 26, status, F_B3, P.rule, P.muted);
-  else if (!strcmp(c.kind, "replay")) pill(sx, y + 18, 26, status, F_B3, P.accentTint, P.deep);
+  uint8_t da = c.enabled ? 255 : 110;
+  // row 1: league chip, status tag on the right
+  int lx = x + 16;
+  if (c.league[0]) lx += pill(lx, y + 16, 22, c.league, F_B3, P.well, P.ink2, 255, 9) + 6;
+  bool replay = !strcmp(c.kind, "replay");
+  if (!c.enabled) textRight(F_B3, x + w - 16, y + 32, "Soon", P.muted);
+  else if (replay) textRight(F_B3, x + w - 16, y + 32, "Replay", P.muted);
   else {
-    rrect(sx, y + 18, sw, 26, 13, P.ink);
-    circle(sx + 13, y + 31, 3.5f, P.hot);
-    text(F_B3, sx + 22, y + 36, status, P.white);
+    int sw = textW(F_B3, "Live");
+    circle(x + w - 16 - sw - 9, y + 27, 3.5f, P.no);
+    textRight(F_B3, x + w - 16, y + 32, "Live", P.no);
   }
-  // teams or title
+  // % chip for the favourite (only when the card carries odds)
+  int chipW = 0;
+  if (c.favPct >= 0) {
+    char pc[16];
+    if (c.favWho[0]) snprintf(pc, sizeof(pc), "%s %d%%", c.favWho, (int)c.favPct);
+    else snprintf(pc, sizeof(pc), "%d%%", (int)c.favPct);
+    chipW = textW(F_B2, pc) + 20;
+    int cx = x + w - 16 - chipW;
+    rrect(cx, y + 58, chipW, 26, 13, P.yesTint, da);
+    text(F_B2, cx + 10, y + 77, pc, P.yes, da);
+  }
+  // teams (colour dot + name) or title
   if (c.home.has && c.away.has) {
-    rrect(x + 14, y + 58, 8, 28, 4, t1.color, c.enabled ? 255 : 120);
-    textFit(F_H3, x + 30, y + 80, w - 44, t1.nick[0] ? t1.nick : t1.name, ink);
-    text(F_B3, x + 30, y + 102, c.at ? "at" : "v", P.muted);
-    rrect(x + 14, y + 108, 8, 28, 4, t2.color, c.enabled ? 255 : 120);
-    textFit(F_H3, x + 30, y + 130, w - 44, t2.nick[0] ? t2.nick : t2.name, ink);
+    circle(x + 22, y + 70, 5.5f, t1.color, da);
+    textFit(F_H3, x + 36, y + 79, w - 52 - (chipW ? chipW + 6 : 0), t1.nick[0] ? t1.nick : t1.name, ink);
+    text(F_B3, x + 36, y + 102, c.at ? "at" : "v", P.muted);
+    circle(x + 22, y + 120, 5.5f, t2.color, da);
+    textFit(F_H3, x + 36, y + 129, w - 52, t2.nick[0] ? t2.nick : t2.name, ink);
   } else {
+    if (c.hasColor) circle(x + 22, y + 70, 5.5f, c.color, da);
+    int tx0 = c.hasColor ? x + 36 : x + 16;
     int starts[2], lens[2];
     bool cut;
-    int n = wrap(F_H2, c.title, w - 28, 2, starts, lens, &cut);
+    int tw = x + w - 16 - tx0 - (chipW ? chipW + 6 : 0);
+    int n = wrap(F_H3, c.title, tw, 2, starts, lens, &cut);
     for (int i = 0; i < n; i++) {
       char buf[64];
       int l = min(lens[i], 60);
@@ -1404,43 +1411,25 @@ static void drawGameCard(const GameCard &c, int x, int y, int w, int h, int idx)
       buf[l] = 0;
       if (i == n - 1 && cut) {
         char tmp[64];
-        fit(F_H2, buf, w - 40, tmp, sizeof(tmp));
+        fit(F_H3, buf, tw - 12, tmp, sizeof(tmp));
         strlcpy(buf, tmp, sizeof(buf));
       }
-      text(F_H2, x + 14, y + 86 + i * 34, buf, ink);
+      text(F_H3, tx0, y + 79 + i * 30, buf, ink);
     }
-    if (n < 2 && c.sub[0]) {  // the subtitle gets two lines under a one-line title
-      int ss[2], sl[2];
-      bool scut;
-      int m = wrap(F_B2, c.sub, w - 28, 2, ss, sl, &scut);
-      for (int i = 0; i < m; i++) {
-        char buf[72];
-        int l = min(sl[i], 70);
-        memcpy(buf, c.sub + ss[i], l);
-        buf[l] = 0;
-        if (i == m - 1 && scut) {
-          char tmp[80];
-          snprintf(tmp, sizeof(tmp), "%s ...", buf);
-          fit(F_B2, tmp, w - 28, buf, sizeof(buf));
-        }
-        text(F_B2, x + 14, y + 120 + i * 24, buf, P.ink2);
-      }
-    }
+    if (n < 2 && c.sub[0]) textFit(F_B3, tx0, y + 106, x + w - 16 - tx0, c.sub, P.ink2);
   }
-  // bottom row: date + Gemini badge
-  int gbw = 0;
+  // foot: hairline, date left, a quiet Gemini mark right
+  fill(x + 16, y + h - 40, w - 32, 1, P.rule);
+  int gw = 0;
   if (c.gemini) {
-    gbw = textW(F_B3, "Gemini odds") + 34;
-    int gx = x + w - 14 - gbw;
-    rrect(gx, y + h - 40, gbw, 26, 13, P.ink, c.enabled ? 255 : 140);
-    // hollow triangle = the Gemini marker
-    tri(gx + 10, y + h - 32, gx + 22, y + h - 32, gx + 16, y + h - 21, P.white);
-    tri(gx + 13, y + h - 30.5f, gx + 19, y + h - 30.5f, gx + 16, y + h - 25, P.ink);
-    text(F_B3, gx + 26, y + h - 22, "Gemini odds", P.white);
+    gw = textW(F_B3, "Gemini") + 18;
+    int gx = x + w - 16 - gw;
+    tri(gx + 1, y + h - 25, gx + 11, y + h - 25, gx + 6, y + h - 16, P.ink2, da);
+    text(F_B3, gx + 18, y + h - 15, "Gemini", P.ink2, da);
   }
   const char *bottom = c.date[0] ? c.date : (c.home.has ? c.sub : "");
-  if (bottom[0]) textFit(F_B3, x + 14, y + h - 21, w - 28 - gbw - 8, bottom, P.muted);
-  if (pressed) rrectStroke(x, y, w, h, r, 3, P.accent);
+  if (bottom[0]) textFit(F_B3, x + 16, y + h - 15, w - 32 - gw - 8, bottom, P.muted);
+  if (pressed) rrect(x, y, w, h, r, P.ink, 14);
   (void)idx;
 }
 
@@ -1794,12 +1783,12 @@ static void heroChart(const Screen &s, int x, int y, int w, int h, bool locked) 
     ys[k] = py;
     k++;
   }
-  if (k == 1) {
+  if (k == 1) {  // a single price: a short level line, no fill block
     xs[1] = px0 + 40;
     ys[1] = ys[0];
     k = 2;
   }
-  fillUnderLine(xs, ys, k, py1, mix(P.canvas, lineC, 26), 255);
+  if (n >= 2) fillUnderLine(xs, ys, k, py1, mix(P.canvas, lineC, 26), 255);  // only under the drawn span
   if (c.has && c.hasGem)
     for (int i = 1; i < n; i++)
       if (c.gem[i - 1] >= 0 && c.gem[i] >= 0) line(PX(i - 1), PY(c.gem[i - 1]), PX(i), PY(c.gem[i]), 1.4f, P.ink2, 150);
@@ -2410,7 +2399,7 @@ static void chartSection(const Screen &s, int y, int h) {
     ys[k] = py;
     k++;
   }
-  fillUnderLine(xs, ys, k, py1, mix(P.card, P.yes, 30), 255);
+  if (c.n >= 2) fillUnderLine(xs, ys, k, py1, mix(P.card, P.yes, 30), 255);
   if (c.hasGem)
     for (int i = 1; i < c.n; i++)
       if (c.gem[i - 1] >= 0 && c.gem[i] >= 0) line(PX(i - 1), PY(c.gem[i - 1]), PX(i), PY(c.gem[i]), 2.4f, P.ink);
@@ -2623,14 +2612,16 @@ static void pageChrome(const Screen &s, int contentH, int py) {
   if (py < 60) {
     uint8_t a = (uint8_t)(255 * clampf(1 - py / 60.f, 0, 1));
     const char *lab = s.chart.has ? "Odds graph" : "More";
-    int tw = textW(F_B3, lab) + 46, tx = (SCR_W - tw) / 2, ty = 460;
-    overlay(tx - 4, ty - 6, tw + 8, SCR_H - ty + 6);
-    rrect(tx, ty, tw, 40, 14, P.ink, a);
-    text(F_B3, tx + 16, ty + 16, lab, P.white, a);
-    float bob = 1.5f * sinf(NOW / 260.f);
-    iconArrow(tx + tw - 18, ty + 10 + bob, 0.55f, false, P.white, a);
-    markAmbient(tx + tw - 30, ty, 26, 20);
-    hit(tx - 16, ty, tw + 32, SCR_H - ty, "ui:more");
+    // a slim pill in the bottom-right corner, clear of the bets-in row on the left
+    int tw = textW(F_B3, lab) + 40, tx = SCR_W - 20 - tw, ty = 457;
+    overlay(tx - 4, ty - 4, tw + 8, SCR_H - ty + 4);
+    rrect(tx, ty, tw, 22, 11, P.well, a);
+    rrectStroke(tx, ty, tw, 22, 11, 1, P.ruleStrong, a);
+    text(F_B3, tx + 12, ty + 16, lab, P.ink2, a);
+    float bob = 1.2f * sinf(NOW / 260.f);
+    iconArrow(tx + tw - 15, ty + 10 + bob, 0.45f, false, P.ink2, a);
+    markAmbient(tx + tw - 26, ty, 22, 22);
+    hit(tx - 16, ty - 8, tw + 36, SCR_H - ty + 8, "ui:more");
   }
   // sticky header
   float hp = clampf((py - 150) / 40.f, 0, 1);
