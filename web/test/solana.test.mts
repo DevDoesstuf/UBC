@@ -118,6 +118,7 @@ test("findPayments: by reference, skips failed and already-credited signatures w
 
 async function lobbyWith(names: string[], kiosk: string) {
   const l = await lobby.createLobby(kiosk, "football");
+  await lobby.mutate(l.code, (x) => void (x.money = "solana"));
   const tokens: string[] = [];
   for (const n of names) await lobby.mutate(l.code, (x, now) => void tokens.push(lobby.join(x, n, now).token));
   return { code: l.code, tokens };

@@ -40,7 +40,10 @@ const IDL_IX: Record<string, number[]> = {
 
 test("modes: MONEY_MODE=solana + SETTLEMENT=vault turns the vault on; moneyInfo says so", () => {
   assert.equal(money.MONEY_MODE, "solana");
-  assert.equal(vault.isVault(), true);
+  assert.equal(vault.vaultOffered(), true);
+  assert.equal(vault.isVault({ money: "solana" }), true, "a Solana game settles in the vault");
+  assert.equal(vault.isVault({ money: "demo" }), false, "a demo game never touches the vault");
+  assert.equal(vault.isVault({}), false, "lobbies default to demo money");
   assert.equal(vault.vaultProgramId(), "GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu");
   assert.equal(money.moneyInfo().settlement, "vault");
   assert.equal(money.moneyInfo().boxPay, true);
@@ -129,6 +132,7 @@ async function lobbyWith(names: string[]) {
   const l = await lobby.createLobby(`vt${Math.random().toString(36).slice(2, 7)}`, "football");
   const toks: string[] = [];
   await lobby.mutate(l.code, (x, now) => {
+    x.money = "solana";
     for (const n of names) toks.push(lobby.join(x, n, now).token);
   });
   return { code: l.code, toks };

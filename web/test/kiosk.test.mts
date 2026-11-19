@@ -108,3 +108,13 @@ test("kiosk v2: lobby roster, pot, calls; market timing, trades, model; result w
   assert.ok(s.scorecard && typeof s.scorecard.verdict === "string");
   assert.ok(s.lines!.length === 3, "v1 lines stay");
 });
+
+test("money: a server without Solana shows no money button; the box still reports demo money", async () => {
+  const kiosk = "977";
+  await kioskTouch(kiosk, "game:football", "http://x");
+  const s = await kioskScreen(kiosk, "http://x");
+  assert.equal(s.screen, "lobby");
+  assert.ok(!s.buttons.some((b) => b.id.startsWith("money:")), JSON.stringify(s.buttons));
+  assert.deepEqual(s.money, { mode: "demo", offered: ["demo"], locked: false });
+  await assert.rejects(kioskTouch(kiosk, "money:toggle", "http://x"), /not set up/);
+});

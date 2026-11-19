@@ -156,6 +156,7 @@ test("a delivery credits the Solana Pay deposit once, by reference, re-read from
   const l = await lobby.createLobby("qn1", "football");
   let tok = "";
   await lobby.mutate(l.code, (x, now) => {
+    x.money = "solana";
     tok = lobby.join(x, "Gus", now).token;
   });
   const d = await solLobby.newSolanaDeposit(l.code, tok, 500);
