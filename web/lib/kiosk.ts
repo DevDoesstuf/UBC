@@ -101,6 +101,8 @@ export interface KioskButton {
 }
 
 export interface KioskScreen extends HwKioskFields {
+  /** Set when a hardware moment replaced the screen with a message for the flashed firmware: the screen it replaced. */
+  legacyOf?: string;
   screen: "select" | "lobby" | "market" | "locked" | "result" | "ended" | "message";
   kiosk: string;
   title: string;
@@ -246,7 +248,7 @@ export interface KioskScore {
  */
 export const KIOSK_PALETTE = {
   canvas: "#000000", card: "#111111", well: "#1A1A1A", rule: "#262626", ink: "#E9DFC9", ink2: "#BDB4A2",
-  muted: "#8A8479", accent: "#E9DFC9", accentDeep: "#CFC3A8", accentLight: "#1FD67F", yes: "#1FD67F",
+  muted: "#8A8479", accent: "#17B067", accentDeep: "#0E8C51", accentLight: "#1FD67F", yes: "#1FD67F",
   no: "#FF5148", hot: "#FF5148", gold: "#D9B36C",
 } as const;
 
@@ -579,12 +581,19 @@ export function moneyButton(l: Lobby): KioskButton | null {
 
 /** Lobby buttons within the firmware's budget of 4: Start, the money switch, "Call it!" moments, Cancel. */
 function lobbyButtons(l: Lobby, calls: KioskButton[]): KioskButton[] {
-  const money = moneyButton(l);
-  const extra = money ? [money] : [];
+  // The money switch rides in the "Call it!" row (lobbyCalls): the flashed firmware's lobby only draws Start,
+  // Cancel and that row, so a button here would never show on the box.
+  const extra: KioskButton[] = [];
   const room = 4 - 2 - extra.length;
   const shown = calls.slice(0, room);
   if (shown.length) return [{ id: "start", label: `Start Q${l.qIndex + 1}`, style: "plain" }, ...extra, ...shown, { id: "cancel", label: "Cancel", style: "plain" }];
   return [{ id: "start", label: `Start question ${l.qIndex + 1}`, style: "yes" }, ...extra, { id: "cancel", label: "Cancel", style: "plain" }];
+}
+
+/** The lobby's "Call it!" row with the money switch first (at most 4). */
+function lobbyCalls(l: Lobby, calls: { id: string; label: string; enabled: boolean }[]): { id: string; label: string; enabled: boolean }[] {
+  const money = moneyButton(l);
+  return (money ? [{ id: money.id, label: money.label, enabled: true }, ...calls] : calls).slice(0, 4);
 }
 
 /** v2 additions per screen. */
@@ -607,7 +616,7 @@ function extrasCore(l: Lobby | null): Partial<KioskScreen> {
       ...base,
       roster: players.map((p) => ({ name: kn(p.name), cents: p.balance, deposited: p.deposited })),
       pot: players.reduce((a, p) => a + p.deposited, 0),
-      calls: players.length ? callsOf(l) : [],
+      calls: lobbyCalls(l, players.length ? callsOf(l) : []),
     };
   }
   if ((l.phase === "open" || l.phase === "locked") && m) {
@@ -649,7 +658,53 @@ function extrasCore(l: Lobby | null): Partial<KioskScreen> {
 
 export async function kioskScreen(kioskId: string, baseUrl: string): Promise<KioskScreen> {
   const l = await getKioskLobby(kioskId);
-  return { ...(await kioskScreenV1(kioskId, baseUrl, l)), ...extras(l) };
+  return forFlashedBox({ ...(await kioskScreenV1(kioskId, baseUrl, l)), ...extras(l) }, l);
+}
+
+/**
+ * The lobby's colours on the flashed firmware: it draws the join QR and the code tiles in `ink` on fixed white, so
+ * the lobby gets the beige side of the palette (near-black ink) and the QR scans; every other screen stays black.
+ */
+export const KIOSK_LOBBY_PALETTE = {
+  canvas: "#E9DFC9", card: "#F4EEE0", well: "#DCD0B6", rule: "#CFC3A8", ink: "#0A0A0A", ink2: "#2B2822",
+  muted: "#5C564A", accent: "#17B067", accentDeep: "#0E8C51", accentLight: "#1FD67F", yes: "#17B067",
+  no: "#D93A33", hot: "#D93A33", gold: "#9A6B12",
+};
+
+/**
+ * The boxes in the field run firmware that only knows the original screens (select, lobby, market, locked, result,
+ * ended, message) and draws none of the newer overlays. So the hardware moments are sent as screens it already draws:
+ * a full-screen "message" (title, subtitle, buttons) for the hot seat, tap-to-confirm, standings breaks and inside
+ * info, and the lobby QR swapped for the Solana Pay QR while a box payment is open. Newer firmware draws the same.
+ */
+export function forFlashedBox(s: KioskScreen, l: Lobby | null, now: number = Date.now()): KioskScreen {
+  if (s.screen === "lobby") s = { ...s, palette: { ...KIOSK_LOBBY_PALETTE } };
+  if (!l) return s;
+  const msg = (title: string, subtitle: string, buttons: KioskButton[], color: KioskScreen["color"] = "green"): KioskScreen => {
+    // The overlay fields stay: newer firmware draws its own overlay on top of this message.
+    return { ...s, screen: "message", color, title: k(title).slice(0, 60), subtitle: k(subtitle).slice(0, 150), buttons, legacyOf: s.screen };
+  };
+  if (s.hotseat) {
+    return msg(`Hot seat: ${s.hotseat.name}!`, "Tap below in the next five seconds to double your stake", [{ id: "hotseat:accept", label: "Tap to double", style: "yes" }], "amber");
+  }
+  if (s.confirm && s.confirm.leftMs > 15_000) {
+    return msg(`${s.confirm.name}, tap your phone here`, `to lock ${usd(s.confirm.cents)} on ${s.confirm.side}`, []);
+  }
+  if (s.interlude && s.standings?.length) {
+    const top = s.standings.slice(0, 3).map((p, i) => `${p.rank ?? i + 1}. ${p.name} ${usd(p.cents)}`).join("    ");
+    return msg("Standings check", top, []);
+  }
+  const m = l.market;
+  // Inside info: a 3 s flash on every other question, so the price stays on screen most of the time.
+  if (s.tip && s.screen === "market" && m && m.qIndex % 2 === 1 && now - m.openedAt >= 2500 && now - m.openedAt < 5500 && m.lockAt - now > 6000) {
+    return msg(s.tip.label, s.tip.text, []);
+  }
+  const bp = l.boxPay;
+  if (s.screen === "lobby" && bp && now <= bp.until + (bp.paidAt ? 4000 : 0)) {
+    if (bp.paidAt) return { ...s, title: k(`Paid! ${bp.name} +${usd(bp.cents)}`).slice(0, 60), subtitle: "On Solana. Tap your phone or scan to join" };
+    return { ...s, qr: qrRows(bp.url), title: "Scan with your wallet", subtitle: k(`${bp.name}  ·  ${usd(bp.cents)}  ·  Solana Pay`) };
+  }
+  return s;
 }
 
 /** The original screen (every field the old firmware reads), unchanged. */

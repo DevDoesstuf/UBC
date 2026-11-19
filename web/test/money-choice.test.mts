@@ -90,7 +90,7 @@ test("toggle works before anyone pays in and is refused after", async () => {
   const { kiosk, code, toks } = await lobbyWith(["Cy"]);
   let s = await kioskTouch(kiosk, "money:toggle", "http://x");
   assert.equal(s.money?.mode, "solana");
-  assert.ok(s.buttons.some((b) => b.id === "money:toggle" && b.label === "Money: Solana"));
+  assert.ok((s.calls ?? []).some((b) => b.id === "money:toggle" && b.label === "Money: Solana"));
   s = await kioskTouch(kiosk, "money:toggle", "http://x");
   assert.equal(s.money?.mode, "demo");
   s = await kioskTouch(kiosk, "money:solana", "http://x");
@@ -142,20 +142,17 @@ test("the QuickNode webhook ignores a lobby that plays demo money", async () => 
   await assert.rejects(solLobby.newSolanaDeposit(code, toks[0], 500), /demo money/);
 });
 
-test("box lobby screen: the money button fits the 4-button budget, Latin-1, at most 16 characters", async () => {
+test("box lobby screen: the money button sits in the Call it! row (the flashed firmware draws it), Latin-1, at most 16 characters", async () => {
   const { kiosk } = await lobbyWith([]);
   let s = await kioskScreen(kiosk, "http://x");
-  const b = s.buttons.find((x) => x.id === "money:toggle")!;
+  const b = (s.calls ?? []).find((x) => x.id === "money:toggle")!;
   assert.equal(b.label, "Money: Demo");
   assert.deepEqual(s.money, { mode: "demo", offered: ["demo", "solana"], locked: false });
-  assert.deepEqual(s.buttons.map((x) => x.id), ["start", "money:toggle", "cancel"]);
-  // With players in, "Call it!" moments share the row: never more than 4 buttons.
+  assert.deepEqual(s.buttons.map((x) => x.id), ["start", "cancel"]);
   const code = (await lobby.getKioskCode(kiosk))!;
   await lobby.mutate(code, (x, now) => void lobby.join(x, "Flo", now));
   s = await kioskScreen(kiosk, "http://x");
-  assert.ok(s.buttons.length <= 4, JSON.stringify(s.buttons));
-  assert.equal(s.buttons[0].id, "start");
-  assert.equal(s.buttons.at(-1)!.id, "cancel");
-  assert.ok(s.buttons.some((x) => x.id === "money:toggle"));
-  for (const x of s.buttons) assert.ok(x.label.length <= 16 && /^[\x20-\xff]*$/.test(x.label), x.label);
+  assert.ok((s.calls ?? []).length <= 4);
+  assert.equal(s.calls![0].id, "money:toggle");
+  for (const x of [...s.buttons, ...(s.calls ?? [])]) assert.ok(x.label.length <= 16 && /^[\x20-\xff]*$/.test(x.label), x.label);
 });

@@ -193,9 +193,10 @@ test("replay: pregame Gemini question, engine questions on the game clock, settl
   assert.match(v.market!.text, /convert on 3rd & 3/);
   assert.equal(v.game!.score!.started, true);
   const screen = await kioskScreen(kiosk, "http://x");
-  assert.equal(screen.screen, "market");
+  // A hardware moment (inside info) may briefly show as a message on the flashed firmware.
+  assert.equal(screen.legacyOf ?? screen.screen, "market");
   // Replays ask as the plays come (calls add more): numbered without a fixed total, like the phone and TV.
-  assert.equal(screen.title, "Question 2");
+  if (!screen.legacyOf) assert.equal(screen.title, "Question 2");
   void total;
 
   // Play the whole game, one poll per second, both players buying every question.
@@ -211,7 +212,7 @@ test("replay: pregame Gemini question, engine questions on the game clock, settl
       await lobby.mutate(code, (x, now) => lobby.buy(x, lobby.requirePlayer(x, tokens[1]), "no", 200, now));
     }
     const sc = await kioskScreen(kiosk, "http://x");
-    assert.ok(["lobby", "market", "locked", "result", "ended"].includes(sc.screen), sc.screen);
+    assert.ok(["lobby", "market", "locked", "result", "ended"].includes(sc.legacyOf ?? sc.screen), sc.screen);
   }
   l = (await lobby.getLobby(code))!;
   v = lobby.publicView(l, tokens[0], "http://x");
