@@ -2,8 +2,8 @@
 // The TV page's pieces, after the original Huddle box (Kickoff): scorebug, join chip, the market takeover with
 // the LED-ring countdown, odds rolling, the split bar and the live price line, the trade ticker, leaderboard,
 // caption bar, the result flood, "Who's smarter?" and the end-of-game podium. Green and ivory tokens.
-import { useRef, type CSSProperties, type ReactNode } from "react";
-import type { LobbyData } from "@/components/client";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { api, useQueryParam, type LobbyData } from "@/components/client";
 import { Qr } from "@/components/Qr";
 import {
   Avatar,
@@ -532,12 +532,49 @@ export function IdleStage({ l, compact = false }: { l: L; compact?: boolean }) {
 
 /* ================================================================ lobby */
 
+/** "Demo money | Solana": the host picks this game's money before anyone pays in (POST /money; ?key= when KIOSK_KEY is set). */
+function MoneyPill({ l }: { l: L }) {
+  const key = useQueryParam("key");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [want, setWant] = useState<string | null>(null);
+  if (!l.money.offered?.includes("solana")) return null;
+  const mode = want ?? l.money.mode;
+  const locked = !!l.money.locked;
+  async function pick(m: "demo" | "solana") {
+    if (busy || locked || m === mode) return;
+    setBusy(true);
+    setErr(null);
+    setWant(m);
+    try {
+      await api(`/api/lobby/${l.code}/money`, { body: { mode: m }, headers: key ? { "x-kiosk-key": key } : {} });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWant(null);
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="hd-rise tv-money" style={delay(390)}>
+      <div className={`tv-money-pill ${locked ? "locked" : ""}`} role="radiogroup" aria-label="Money for this game">
+        {(["demo", "solana"] as const).map((m) => (
+          <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? "on" : ""} disabled={busy || (locked && mode !== m)} onClick={() => pick(m)}>
+            {m === "demo" ? "Demo money" : "Solana"}
+          </button>
+        ))}
+      </div>
+      {err && <span className="tv-money-err" role="alert">{err}</span>}
+    </div>
+  );
+}
+
 export function LobbyStage({ l }: { l: L }) {
   const players = l.players;
   const fresh = useNewIds(players.map((p) => p.id));
   const pot = players.reduce((a, p) => a + p.deposited, 0);
   const replay = l.game?.kind === "replay";
-  const meta = [`${MODE_LABEL[l.mode ?? "market"]} mode`, replay ? "Full game replay, questions written live" : "Clip with questions", l.money.mode === "solana" ? "USDC on Solana" : null].filter(Boolean);
+  const meta = [`${MODE_LABEL[l.mode ?? "market"]} mode`, replay ? "Full game replay, questions written live" : "Clip with questions", l.money.mode === "solana" && !l.money.offered?.includes("solana") ? "USDC on Solana" : null].filter(Boolean);
   return (
     <div className="tv-lobby">
       <section className="hd-slide-l tv-joinpanel" aria-label="Join this game">
@@ -554,6 +591,7 @@ export function LobbyStage({ l }: { l: L }) {
       <section className="tv-room" aria-label="The room">
         <h1 className="tvq tv-room-title"><Kinetic text={l.game?.title ?? "Huddle"} delay={120} /></h1>
         <p className="hd-rise tv-room-meta" style={delay(360)}>{meta.join(" · ")}</p>
+        <MoneyPill l={l} />
         <div className="tv-room-stats">
           <p className="hd-rise tv-card tv-stat" style={delay(420)}>
             <span className="tv-stat-k"><span className="tv-golddot" aria-hidden="true" /> In the pot</span>

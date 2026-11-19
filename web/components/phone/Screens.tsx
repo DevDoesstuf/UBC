@@ -158,6 +158,13 @@ export function JoinScreen({
  * room's pot while it rolls up, and a small gold burst lands on the pot. The confirmation stays
  * mounted until the player moves on (or a few seconds pass), even though the money has landed.
  */
+/** Which money this game plays, as a small chip: "Demo", "Solana · USDC", "USDC on Base". */
+function MoneyChip({ l }: { l: Lobby }) {
+  const mode = l.money.mode as string;
+  const label = mode === "solana" ? "Solana · USDC" : mode === "coinbase" ? "USDC on Base" : "Demo";
+  return <span className={`ph-moneychip ${mode}`} data-testid="money-chip">{label}</span>;
+}
+
 export function BuyInScreen({
   l,
   done,
@@ -212,7 +219,7 @@ export function BuyInScreen({
           <span className="hd-num ph-code-plain" translate="no">{l.code}</span>
         </header>
         <div className="ph-mt24">
-          <p className="hd-fade ph-kicker">{l.game?.title ?? "Huddle"}</p>
+          <p className="hd-fade ph-kicker">{l.game?.title ?? "Huddle"} <MoneyChip l={l} /></p>
           <Kinetic as="h1" text={`Hi ${me.name}. Grab your chips.`} className="hd-q ph-title-h" stagger={50} />
         </div>
 

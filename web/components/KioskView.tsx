@@ -479,6 +479,8 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
   const calls = s.calls ?? s.buttons.filter((b) => b.id.startsWith("moment:")).map((b) => ({ ...b, enabled: true }));
   const start = s.buttons.find((b) => b.id === "start");
   const cancel = s.buttons.find((b) => b.id === "cancel");
+  const moneyB = s.buttons.find((b) => b.id.startsWith("money:"));
+  const startX = (cancel ? 136 : 0) + (moneyB ? 164 : 0);
   const x0 = 322;
   const w = 800 - 14 - x0;
   const listY = 190;
@@ -558,7 +560,8 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
       )}
       <div className="hk-rise" style={d(680)}>
         {cancel && <Button b={cancel} x={x0} y={400} w={124} h={66} r={20} onTouch={onTouch} pending={pending === cancel.id} />}
-        {start && <Button b={start} style="brand" f="H3" x={x0 + (cancel ? 136 : 0)} y={400} w={800 - 14 - x0 - (cancel ? 136 : 0)} h={66} r={22} onTouch={onTouch} pending={pending === start.id} />}
+        {moneyB && <Button b={moneyB} x={x0 + (cancel ? 136 : 0)} y={400} w={152} h={66} r={20} onTouch={onTouch} pending={pending === moneyB.id} />}
+        {start && <Button b={start} style="brand" f="H3" x={x0 + startX} y={400} w={800 - 14 - x0 - startX} h={66} r={22} onTouch={onTouch} pending={pending === start.id} />}
       </div>
     </>
   );

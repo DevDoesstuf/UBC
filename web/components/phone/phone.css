@@ -60,6 +60,8 @@ html:has(.ph-screen) {
 .ph-count { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 999px; background: var(--k-green-100); color: var(--k-green-deep); font-size: 0.9375rem; }
 .ph-k { font-size: 0.8125rem; font-weight: 600; color: var(--k-ink-muted); }
 .ph-kicker { margin: 0; font-size: 0.9375rem; font-weight: 600; color: var(--k-ink-muted); }
+.ph-moneychip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; vertical-align: 1px; box-shadow: inset 0 0 0 1px currentColor; opacity: 0.8; }
+.ph-moneychip.solana, .ph-moneychip.coinbase { color: var(--k-green-deep); }
 .ph-lead { margin: 0; color: var(--k-ink-2); text-wrap: pretty; }
 .ph-hint { margin: 8px 0 0; font-size: 0.9375rem; color: var(--k-ink-muted); text-wrap: pretty; }
 .ph-icon-btn { min-height: 44px; width: 44px; padding: 0; flex: none; }
