@@ -178,6 +178,23 @@ solanaPay: true, faucet: true, depositOptions: [500, 1000, 2000]}`. In demo/coin
 goes to by default, learned from the first payment or the faucet; prefill the field with it) and `me.fauceted`
 (boolean: hide the faucet button once used) are in every lobby view.
 
+### Per-game money choice (demo or Solana)
+
+`MONEY_MODE=solana` only **offers** Solana; each lobby picks its own money (`lobby.money`, `lib/money.ts`
+`lobbyMoneyMode`). New lobbies play **demo** money. The host switches in the lobby phase, before anyone has paid in:
+box touch `money:toggle` (or `money:demo` / `money:solana`), `POST /api/lobby/:code/money {mode: "demo"|"solana"|"toggle"}`
+(x-kiosk-key when `KIOSK_KEY` is set; `{ok, money}`), or the TV lobby's "Demo money | Solana" pill. After a deposit:
+400 "Money is already in: start a new game to switch". Everything follows the lobby: `/deposit` (instant demo credit vs
+Solana Pay URL), `/deposit/sync`, `/deposit/box`, `/faucet`, `/cashout`, `/settle` and vault settlement
+(`isVault(lobby)`: `SETTLEMENT=vault` applies to Solana lobbies only), the box-pay read check, and the QuickNode
+webhook (deliveries for a demo lobby are ignored). Coinbase stays server-wide.
+- Lobby view `money`: per lobby (`mode`, `depositOptions`, `solanaPay`, `faucet`, `boxPay`, `asset`, `settlement`), plus
+  `offered: ["demo"] | ["demo","solana"]` and `locked` (money is in). `/api/health` `money` is the server's capability
+  (with `offered`).
+- Box JSON: optional `money {mode, offered, locked}` on every lobby screen; the lobby row gets a `money:toggle` button
+  ("Money: Demo" / "Money: Solana") only where Solana is offered and nobody has paid in (still at most 4 buttons:
+  Start, money, moments, Cancel).
+
 ### Solana money (`MONEY_MODE=solana`)
 
 Everything on chain is test USDC (a 6-decimal SPL token) on **devnet**, or on a local `solana-test-validator`. The
@@ -341,7 +358,7 @@ close quarter (random-walk margin, asked only between 15% and 60%). Kiosk "Call 
 | `GEMINI_API_BASE` | Gemini Prediction Markets | `https://api.gemini.com` (public, no key) |
 | `GEMINI_DISABLED=1` | turn Gemini off | |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis on Vercel (lobbies, Gemini and TTS caches) | memory |
-| `MONEY_MODE=solana` | Solana Pay money (devnet test USDC) | `demo`. If the two vars below are missing or malformed it runs demo money and `/api/health` (`solana.problems`, `solana.nextSteps`, `warnings`) says why |
+| `MONEY_MODE=solana` | offers Solana Pay money (devnet test USDC) as a per-game choice; games start on demo money | `demo`. If the two vars below are missing or malformed it runs demo money and `/api/health` (`solana.problems`, `solana.nextSteps`, `warnings`) says why |
 | `SOLANA_TREASURY_SECRET_KEY` | treasury keypair (base58 or JSON byte array); receives deposits, pays cash-outs, fees and the faucet | |
 | `USDC_MINT` | the test USDC mint | |
 | `SETTLEMENT=vault` | parties settle through the `huddle_vault` program (needs `MONEY_MODE=solana`) | plain treasury |
