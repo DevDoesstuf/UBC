@@ -1025,8 +1025,8 @@ static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int
     case B_PRIMARY: bg = P.accent; fg = P.white; break;
     case B_YES: bg = P.yes; fg = P.white; break;
     case B_NO: bg = P.no; fg = P.ink; break;
-    case B_BRAND: grad = true; fg = P.white; break;
-    case B_CALL: bg = P.accentTint; fg = P.deep; break;
+    case B_BRAND: bg = P.ink; fg = P.white; break;
+    case B_CALL: bg = P.card; fg = P.ink; break;
     case B_INK: bg = P.ink; fg = P.white; break;
     case B_WHITE: bg = P.white; fg = P.ink; break;
     default: bg = P.card; fg = P.ink; break;
@@ -1036,11 +1036,9 @@ static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int
     fg = P.muted;
     grad = false;
   }
-  if (!pressed && b.enabled) shadow(bx, by, bw, bh, r, b.style == B_PLAIN || b.style == B_WHITE || b.style == B_CALL ? 200 : 255);
   if (grad) rrectGrad(bx, by, bw, bh, r, P.deep, P.accent, P.lime);
   else rrect(bx, by, bw, bh, r, bg);
-  if (b.style == B_PLAIN && b.enabled) rrectStroke(bx, by, bw, bh, r, 1, P.rule);
-  if (b.style == B_CALL && b.enabled) rrectStroke(bx, by, bw, bh, r, 2, P.accent, 110);
+  if ((b.style == B_PLAIN || b.style == B_CALL) && b.enabled) rrectStroke(bx, by, bw, bh, r, 1, P.ruleStrong);
   if (pressed) rrect(bx, by, bw, bh, r, P.ink, 30);
   // label (+ icon)
   char lab[48];
@@ -1056,7 +1054,7 @@ static void button(int x, int y, int w, int h, const Btn &b, const HFont &f, int
   int tx = bx + (bw - tw) / 2;
   int ty = by + bh / 2 + lf->size * 35 / 100;
   if (b.style == B_CALL && iconW) {
-    iconBolt(tx + 6, by + bh / 2, 0.9f, b.enabled ? P.accent : P.muted);
+    iconBolt(tx + 6, by + bh / 2, 0.75f, b.enabled ? P.gold : P.muted);
     tx += iconW;
   }
   text(*lf, tx, ty, lab, fg);
@@ -1479,9 +1477,9 @@ static void drawSelect(const Screen &s, const NetStatus &st) {
 // ---------------------------------------------------------------- lobby
 
 static void drawQR(const Screen &s, int x, int y, int box) {
-  rrect(x, y, box, box, 18, P.ink);  // light quiet zone, dark modules (scanners want dark on light)
+  rrect(x, y, box, box, 14, P.ink);  // beige quiet zone, black modules (scanners want dark on light)
   if (!s.qrSize) return;
-  int inner = box - 20;
+  int inner = box - 24;  // >= 12 px quiet zone each side
   int scale = max(1, inner / s.qrSize);
   int ox = x + (box - scale * s.qrSize) / 2, oy = y + (box - scale * s.qrSize) / 2;
   for (int r = 0; r < s.qrSize; r++)
@@ -1489,6 +1487,7 @@ static void drawQR(const Screen &s, int x, int y, int box) {
       if (s.qr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.canvas);
 }
 
+// A list row: avatar, name, amount on the right, hairline under. New arrivals slide in from the right.
 static void personRow(const Person &p, int x, int y, int w, int h, uint32_t bornAt, bool lobby) {
   float sl = bornAt ? prog(bornAt, 0, 520) : 1;
   if (sl < 1) {
@@ -1496,112 +1495,104 @@ static void personRow(const Person &p, int x, int y, int w, int h, uint32_t born
     layer((int)((1 - e) * 60), 0, (uint8_t)(255 * clampf(sl * 2, 0, 1)));
     mark(x - 10, y - 10, w + 80, h + 20);
   }
-  card(x, y, w, h, 16);
-  if (sl < 1 && bornAt) rrectStroke(x, y, w, h, 16, 2, P.accent, (uint8_t)(255 * (1 - sl)));
-  avatar(x + 26, y + h / 2, 17, p.name);
+  avatar(x + 16, y + h / 2, 14, p.name);
   char amt[16] = "";
   if (lobby) {
     if (p.has2 && p.extra <= 0) strlcpy(amt, "adding...", sizeof(amt));
     else if (p.has2 || p.cents) fmtMoney(p.cents, amt, sizeof(amt));
   }
   int aw = amt[0] ? textW(amt[0] == '$' ? F_N4 : F_B3, amt) : 0;
-  textFit(F_B1, x + 52, y + h / 2 + 7, w - 64 - aw - 8, p.name, P.ink);
-  if (amt[0] == '$') textRight(F_N4, x + w - 14, y + h / 2 + 7, amt, P.ink2);
-  else if (amt[0]) textRight(F_B3, x + w - 14, y + h / 2 + 6, amt, P.muted);
+  textFit(F_B1, x + 40, y + h / 2 + 7, w - 48 - aw - 8, p.name, P.ink);
+  if (amt[0] == '$') textRight(F_N4, x + w - 4, y + h / 2 + 7, amt, P.ink2);
+  else if (amt[0]) textRight(F_B3, x + w - 4, y + h / 2 + 6, amt, P.muted);
+  fill(x, y + h - 1, w, 1, P.rule);
   layerReset();
 }
 
+// Lobby, Kalshi-calm: the QR big on its beige quiet zone with the code under it on the left; on the right the game
+// title, one thin "N players · $pot" line, players as list rows (names slide in), Call it! pills, Start / Cancel.
 static void drawLobby(const Screen &s, const NetStatus &st) {
-  // Join panel: the one loud thing.
-  const int px = 12, py = 12, pw = 292, ph = 456;
-  if (enter(tScreen, 0, 4, {px, py, pw, ph})) {
-    rrectGrad(px, py, pw, ph, 30, P.deep, P.accent, P.lime);
-    drawQR(s, px + 40, py + 22, 212);  // still: phones scan it
-    textCenter(F_H3, px + pw / 2, 276, "Tap your phone here", P.white);
-    textCenter(F_B2, px + pw / 2, 300, "or scan the code to join", P.white, 230);
-    textCenter(F_B3, px + pw / 2, 328, "Party code", P.white, 220);
+  const int qx = 24, qy = 24, qb = 248;
+  if (enter(tScreen, 0, 4, {qx, qy, qb, 440})) {
+    drawQR(s, qx, qy, qb);  // still: phones scan it
+    textCenter(F_B2, qx + qb / 2, qy + qb + 30, "Scan or tap your phone to join", P.ink2);
     int n = strlen(s.code);
-    int tw = 50, gap = 8, tx = px + (pw - (n * tw + (n - 1) * gap)) / 2;
+    int tw = 46, gap = 8, tx = qx + (qb - (n * tw + (n - 1) * gap)) / 2, ty = qy + qb + 48;
     for (int i = 0; i < n; i++) {
       float p = prog(tScreen, 320 + i * 90, 600);
       if (p <= 0) {
-        mark(tx - 10, 330, tw + 20, 80);
+        mark(tx - 10, ty - 6, tw + 20, 80);
         tx += tw + gap;
         continue;
       }
       float e = eBack(p, 2.0f);
-      int sz = (int)(tw * (0.6f + 0.4f * e)), sh = (int)(62 * (0.6f + 0.4f * e));
-      int cx = tx + tw / 2, cy = 338 + 31;
-      rrect(cx - sz / 2, cy - sh / 2, sz, sh, 14, P.white);
+      int sh = (int)(64 * (0.7f + 0.3f * e));
+      int cx = tx + tw / 2, cy = ty + 32;
+      rrect(tx, cy - sh / 2, tw, sh, 12, P.card);
+      rrectStroke(tx, cy - sh / 2, tw, sh, 12, 1, P.ruleStrong);
       char ch[2] = {s.code[i], 0};
       if (p > 0.3f) textCenter(F_H1, cx, cy + 15, ch, P.ink, (uint8_t)(255 * clampf((p - 0.3f) * 3, 0, 1)));
-      if (p < 1) mark(tx - 12, 324, tw + 24, 90);
+      if (p < 1) mark(tx - 12, ty - 8, tw + 24, 84);
       tx += tw + gap;
     }
     char url[96];
-    fit(F_B3, s.joinUrl, pw - 28, url, sizeof(url));
-    textCenter(F_B3, px + pw / 2, 432, url, P.white, 220);
+    fit(F_B3, s.joinUrl, qb, url, sizeof(url));
+    textCenter(F_B3, qx + qb / 2, 460, url, P.muted);
   }
   layerReset();
 
-  const int x0 = 322, x1 = SCR_W - 14, w = x1 - x0;
+  const int x0 = 304, x1 = SCR_W - 20, w = x1 - x0;
   int rx = SCR_W - 16;
   topRight(s, rx, st);
-  kinetic(F_H2, x0, 46, rx - x0 - 8, 1, 34, s.gameTitle[0] ? s.gameTitle : s.title, P.ink, tScreen, 120, 45);
-  if (enter(tScreen, 360, 0, {(int16_t)x0, 58, (int16_t)w, 26})) textFit(F_B2, x0, 76, w, s.subtitle, P.ink2);
+  kinetic(F_H3, x0, 44, rx - x0 - 8, 1, 30, s.gameTitle[0] ? s.gameTitle : s.title, P.ink, tScreen, 120, 45);
+  if (enter(tScreen, 360, 0, {(int16_t)x0, 56, (int16_t)w, 26})) textFit(F_B3, x0, 72, w, s.subtitle, P.muted);
   layerReset();
 
-  // stats: pot + players
-  int sy = 90, sh = 88, cw = (w - 12) / 2;
-  if (enter(tScreen, 420, 0, {(int16_t)x0, (int16_t)sy, (int16_t)cw, (int16_t)sh})) {
-    card(x0, sy, cw, sh, 20);
-    circle(x0 + 22, sy + 21, 6, P.gold);
-    text(F_B3, x0 + 34, sy + 26, "In the pot", P.ink2);
-    char pot[16];
+  // one thin line: "3 players · $15.00 pot"
+  if (enter(tScreen, 420, 0, {(int16_t)x0, 84, (int16_t)w, 30})) {
     int potC = s.pot;
     if (potC < 0) {
       potC = 0;
       for (int i = 0; i < s.nRoster; i++) potC += s.roster[i].has2 ? s.roster[i].extra : 0;
     }
-    fmtMoney(potC, pot, sizeof(pot));
-    rollSet(rPot, pot, 1);
-    rollDraw(rPot, F_N2, x0 + 16, sy + 78, P.ink, P.deep, P.no600, 900);
-  }
-  layerReset();
-  if (enter(tScreen, 500, 0, {(int16_t)(x0 + cw + 12), (int16_t)sy, (int16_t)cw, (int16_t)sh})) {
-    card(x0 + cw + 12, sy, cw, sh, 20);
-    text(F_B3, x0 + cw + 28, sy + 26, s.nRoster == 1 ? "Player" : "Players", P.ink2);
-    char cnt[8];
+    char cnt[8], pot[16];
     snprintf(cnt, sizeof(cnt), "%d", s.nRoster);
+    fmtMoney(potC, pot, sizeof(pot));
+    circle(x0 + 5, 98, 4, s.nRoster ? P.yes : P.muted);
+    int x = x0 + 16;
     rollSet(rCount, cnt, 1);
-    rollDraw(rCount, F_N2, x0 + cw + 28, sy + 78, P.accent, P.deep, P.deep, 700);
-    markLogo(x0 + 2 * cw + 12 - 34, sy + 50, 18, max(1, min(12, s.nRoster)), false);
+    x += rollDraw(rCount, F_N4, x, 105, P.ink, P.ink, P.ink, 700) + 6;
+    x += text(F_B2, x, 104, s.nRoster == 1 ? "player" : "players", P.ink2) + 8;
+    circle(x + 2, 98, 2, P.muted);
+    x += 12;
+    rollSet(rPot, pot, 1);
+    x += rollDraw(rPot, F_N4, x, 105, P.ink, P.yes, P.no, 900) + 6;
+    text(F_B2, x, 104, "pot", P.ink2);
   }
   layerReset();
+  fill(x0, 118, w, 1, P.rule);
 
-  // players list (scrolls), then Call it! + Start / Cancel
+  // players: two columns of list rows (scrolls), then Call it! + Start / Cancel
   bool calls = s.nCalls > 0;
-  int listY = sy + sh + 12;
-  int listBottom = calls ? 302 : 392;
-  int rowH = 52, gap = 8, colW = (w - 10) / 2;
+  int listY = 124;
+  int listBottom = calls ? 330 : 396;
+  int rowH = 46, colGap = 20, colW = (w - colGap) / 2;
   int rows = (s.nRoster + 1) / 2;
-  int contentH = rows * (rowH + gap);
+  int contentH = rows * rowH;
   float off = scrollArea(0, x0 - 6, listY, w + 12, listBottom - listY, contentH);
   pushClip(x0 - 10, listY, w + 20, listBottom - listY);
   if (s.nRoster == 0) {
     if (enter(tScreen, 560, 0, {(int16_t)x0, (int16_t)listY, (int16_t)w, 60})) {
-      rrectStroke(x0, listY + 2, w, 64, 16, 2, P.ruleStrong);
       float b = 0.5f + 0.5f * sinf(NOW / 400.f);
-      circle(x0 + 22, listY + 34, 5, P.accent, (uint8_t)(120 + 135 * b));
-      markAmbient(x0 + 10, listY + 22, 24, 24);
-      text(F_B1, x0 + 40, listY + 31, "Waiting for the first player", P.ink);
-      text(F_B3, x0 + 40, listY + 52, "Tap a phone on the box or scan the code", P.ink2);
+      circle(x0 + 6, listY + 30, 4, P.ink, (uint8_t)(90 + 140 * b));
+      markAmbient(x0, listY + 22, 16, 16);
+      text(F_B1, x0 + 20, listY + 37, "Waiting for the first player", P.ink2);
     }
     layerReset();
   }
   for (int i = 0; i < s.nRoster; i++) {
-    int rxp = x0 + (i % 2) * (colW + 10);
-    int ry = listY + (i / 2) * (rowH + gap) - (int)off;
+    int rxp = x0 + (i % 2) * (colW + colGap);
+    int ry = listY + (i / 2) * rowH - (int)off;
     // Register every name (visible or not) so only real arrivals slide in, not rows scrolled into view.
     uint32_t born = seenAt(seenRoster, strHash(s.roster[i].name), NOW - tScreen < 400);
     if (ry + rowH < listY - 4 || ry > listBottom + 4) continue;
@@ -1611,30 +1602,29 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
   if (scrolls[0].maxOff > 0) {
     int vh = listBottom - listY, barH = max(30, vh * vh / max(1, contentH));
     int barY = listY + (int)((vh - barH) * clampf(scrolls[0].off / max(1.f, scrolls[0].maxOff), 0, 1));
-    rrect(x1 + 6, barY, 4, barH, 2, P.ink, NOW - scrolls[0].lastMove < 1200 ? 110 : 40);
-    if (NOW - scrolls[0].lastMove < 1500) mark(x1 + 2, listY, 12, vh);
+    rrect(x1 + 8, barY, 3, barH, 1, P.ink, NOW - scrolls[0].lastMove < 1200 ? 110 : 40);
+    if (NOW - scrolls[0].lastMove < 1500) mark(x1 + 4, listY, 12, vh);
   }
 
   if (calls) {
-    if (enter(tScreen, 600, 0, {(int16_t)x0, 304, (int16_t)w, 86})) {
-      iconBolt(x0 + 8, 316, 0.75f, P.accent);
-      text(F_B3, x0 + 20, 322, "Call it! Tap the moment it happens on TV", P.ink2);
-      callRow(s.calls, s.nCalls, x0, x0 + w, 330, 60, 16);
+    if (enter(tScreen, 600, 0, {(int16_t)x0, 334, (int16_t)w, 60})) {
+      text(F_B3, x0, 350, "Call it! Tap the moment it happens", P.muted);
+      callRow(s.calls, s.nCalls, x0, x1, 358, 40, 20);
     }
     layerReset();
   }
   const Btn *start = findBtn(s, "start");
   const Btn *cancel = findBtn(s, "cancel");
-  if (enter(tScreen, 680, 0, {(int16_t)x0, 400, (int16_t)w, 68})) {
+  if (enter(tScreen, 680, 0, {(int16_t)x0, 412, (int16_t)w, 52})) {
     int bx = x0;
     if (cancel) {
-      button(bx, 400, 124, 66, *cancel, F_B1, 20);
-      bx += 136;
+      button(bx, 412, 120, 52, *cancel, F_B1, 26);
+      bx += 132;
     }
     if (start) {
       Btn b = *start;
       b.style = B_BRAND;
-      button(bx, 400, x1 - bx, 66, b, F_H3, 22);
+      button(bx, 412, x1 - bx, 52, b, F_B1, 26);
     }
   }
   layerReset();
@@ -1788,7 +1778,7 @@ static void heroChart(const Screen &s, int x, int y, int w, int h, bool locked) 
     ys[1] = ys[0];
     k = 2;
   }
-  if (n >= 2) fillUnderLine(xs, ys, k, py1, mix(P.canvas, lineC, 26), 255);  // only under the drawn span
+  if (n >= 2 && xs[k - 1] - xs[0] >= 80) fillUnderLine(xs, ys, k, py1, mix(P.canvas, lineC, 26), 255);  // no stub block
   if (c.has && c.hasGem)
     for (int i = 1; i < n; i++)
       if (c.gem[i - 1] >= 0 && c.gem[i] >= 0) line(PX(i - 1), PY(c.gem[i - 1]), PX(i), PY(c.gem[i]), 1.4f, P.ink2, 150);
