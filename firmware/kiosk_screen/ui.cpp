@@ -1751,7 +1751,8 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
         badge = shortBadge;
       }
       int w = textW(F_B1, badge) + 52;
-      rrectGrad(bx, 12, w, 38, 19, P.deep, P.accent, P.lime);
+      // one even blend, beige to green, across the whole pill (the 3-stop brand gradient bunched the green at the end)
+      rrectGrad(bx, 12, w, 38, 19, P.accent, mix(P.accent, P.lime, 128), P.lime);
       iconBolt(bx + 22, 31, 0.9f, P.white);
       text(F_B1, bx + 38, 38, badge, P.white);
       bx += w + 12;

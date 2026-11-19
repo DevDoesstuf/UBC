@@ -17,6 +17,8 @@ const P = {
   accentTint: "#E3F2E7",
 };
 const GRAD = `linear-gradient(90deg, ${P.deep}, ${P.accent} 50%, ${P.lime})`;
+/** The question badge: one even blend from beige to green across the whole pill (matches the firmware). */
+const BADGE_GRAD = `linear-gradient(90deg, ${P.accent}, ${P.lime})`;
 
 type FontKey = "HERO" | "H1" | "H2" | "H3" | "B1" | "B2" | "B3" | "N1" | "N2" | "N3" | "N4";
 /** Firmware fonts (firmware/tools/mkfonts.py): px size, ascent, descent. */
@@ -718,7 +720,7 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
             <span className="hk-body hk-w700">Trading closed</span>
           </div>
         ) : (
-          <div ref={badgeRef} className="hk-badge" style={{ background: GRAD }} aria-label={title}>
+          <div ref={badgeRef} className="hk-badge" style={{ background: BADGE_GRAD }} aria-label={title}>
             <svg width="14" height="20" viewBox="-7 -10 14 20" aria-hidden="true"><path d="M2 -9 L-6 1.5 L1 1.5 Z M-2 9 L6 -1.5 L-1 -1.5 Z" fill="#fff" /></svg>
             <span className="hk-body hk-w700">{shortBadge ? title.replace(/^Question /, "Q") : title}</span>
           </div>
