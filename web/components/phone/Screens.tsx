@@ -896,6 +896,48 @@ function OtherAmount({ min, max, busy, onDeposit }: { min: number; max: number; 
   );
 }
 
+/** The Solana mark: three slanted bars in the Solana gradient. */
+function SolMark({ size = 22 }: { size?: number }) {
+  return (
+    <svg className="ph-sol-mark" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <defs>
+        <linearGradient id={`ph-sol-g${size}`} x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stopColor="#9945FF" />
+          <stop offset="1" stopColor="#14F195" />
+        </linearGradient>
+      </defs>
+      <path fill={`url(#ph-sol-g${size})`} d="M5.5 16.5h14l-3 3h-14zM5.5 10.5h14l-3 3h-14zM8.5 4.5h14l-3 3h-14z" />
+    </svg>
+  );
+}
+
+function SolPaying() {
+  return (
+    <div className="ph-sol ph-sol-busy hd-rise" role="status">
+      <SolMark />
+      <span>Paying on Solana…</span>
+    </div>
+  );
+}
+
+function SolDone({ done }: { done: { cents: number; explorer: string; pending: boolean } }) {
+  return (
+    <div className="ph-sol ph-sol-ok hd-rise" role="status" data-testid="instant-done">
+      <span className="ph-sol-check" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+          <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+      <span className="ph-sol-text">
+        <b className="hd-num">{usd(done.cents)}</b> {done.pending ? "confirming" : "paid"}
+      </span>
+      <a className="ph-sol-link" href={done.explorer} target="_blank" rel="noreferrer" data-testid="view-on-solana">
+        <SolMark size={14} /> View on Solana
+      </a>
+    </div>
+  );
+}
+
 export function MoneySheet({
   l,
   open,
@@ -905,6 +947,8 @@ export function MoneySheet({
   payment,
   cashOut,
   checkButton,
+  onInstant,
+  instantDone,
 }: {
   l: Lobby;
   open: boolean;
@@ -914,8 +958,14 @@ export function MoneySheet({
   payment: ReactNode;
   cashOut: ReactNode;
   checkButton: ReactNode;
+  /** Solana lobbies: "Pay instantly" from the embedded devnet wallet (the primary action). */
+  onInstant?: (cents: number, el: HTMLElement) => void;
+  instantDone?: { cents: number; explorer: string; pending: boolean; at: number } | null;
 }) {
   const me = l.me!;
+  const [withWallet, setWithWallet] = useState(false);
+  const instant = !!onInstant && !withWallet;
+  const add = instant ? onInstant! : onDeposit;
   return (
     <Sheet open={open} onClose={onClose} title="Your money">
       <div className="ph-sheet-body">
@@ -925,18 +975,29 @@ export function MoneySheet({
         </p>
         {l.phase !== "ended" && (
           <>
-            <h3 className="ph-h3 ph-mt16">Add money</h3>
-            <div className="ph-chips n3 ph-mt8">
+            <h3 className="ph-h3 ph-mt16">{instant ? "Pay instantly" : onInstant ? "Pay with my wallet" : "Add money"}</h3>
+            <div className={cx("ph-chips n3 ph-mt8", instant && "ph-sol-chips")}>
               {l.money.depositOptions.map((c) => (
-                <button key={c} className="ph-chip hd-press" disabled={busy} onClick={(e) => onDeposit(c, e.currentTarget)}>
+                <button key={c} className="ph-chip hd-press" disabled={busy} onClick={(e) => add(c, e.currentTarget)} data-testid={instant ? "pay-instant" : undefined}>
                   <span className="hd-num ph-chip-amt">{usdShort(c)}</span>
-                  <span className="ph-chip-get">add</span>
+                  <span className="ph-chip-get">{instant ? "pay" : "add"}</span>
                 </button>
               ))}
             </div>
-            <OtherAmount min={l.money.depositMin} max={l.money.depositMax} busy={busy} onDeposit={onDeposit} />
-            {payment}
-            {checkButton}
+            <OtherAmount min={l.money.depositMin} max={l.money.depositMax} busy={busy} onDeposit={add} />
+            {instant && busy && <SolPaying />}
+            {instant && !busy && instantDone && <SolDone key={instantDone.at} done={instantDone} />}
+            {!instant && payment}
+            {!instant && checkButton}
+            {onInstant && (
+              <button className="hd-btn hd-btn-quiet ph-btn-sm ph-mt8" onClick={() => setWithWallet((w) => !w)} data-testid="pay-mode">
+                {withWallet ? "Pay instantly instead" : (
+                  <>
+                    <Icon name="wallet" size={16} /> Pay with my wallet
+                  </>
+                )}
+              </button>
+            )}
           </>
         )}
         {me.balance > 0 && l.money.settlement === "vault" && l.phase !== "ended" && (

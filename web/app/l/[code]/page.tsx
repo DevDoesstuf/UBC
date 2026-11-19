@@ -41,6 +41,8 @@ export default function PhonePage() {
   const [payLink, setPayLink] = useState<{ url: string; cents: number } | null>(null);
   const [checking, setChecking] = useState(false);
   const [boxBusy, setBoxBusy] = useState(false);
+  /** The last "Pay instantly" deposit: drives the confirmation and the "View on Solana" link. */
+  const [instantDone, setInstantDone] = useState<{ cents: number; explorer: string; pending: boolean; at: number } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [cashed, setCashed] = useState<{ cents: number; explorer?: string } | null>(null);
   const balanceCoins = useCoins();
@@ -255,6 +257,21 @@ export default function PhonePage() {
     return true;
   };
 
+  /** "Pay instantly": the player's embedded devnet wallet pays (no wallet app). A retry reuses the nonce: never twice. */
+  const payInstantly = async (cents: number): Promise<boolean> => {
+    const nonce = `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    type R = { credited: number; cents: number; explorer: string; pending?: boolean };
+    const call = () => api<R>(`/api/lobby/${code}/deposit/instant`, { body: { cents, nonce }, token });
+    const r = await run(
+      () => call().catch((e) => (e instanceof HttpError ? Promise.reject(e) : call())),
+      (r) => (r.pending ? "Confirming on Solana…" : null),
+    );
+    if (!r) return false;
+    setPayLink(null);
+    setInstantDone({ cents: r.cents, explorer: r.explorer, pending: !!r.pending, at: Date.now() });
+    return !r.pending;
+  };
+
   const checkPayment = () => {
     setChecking(true);
     run(
@@ -429,6 +446,14 @@ export default function PhonePage() {
             balanceCoins[1](el, document.querySelector("[data-testid=balance]"), 3);
           }
         }}
+        onInstant={
+          solana
+            ? async (c, el) => {
+                if (await payInstantly(c)) balanceCoins[1](el, document.querySelector("[data-testid=balance]"), 3);
+              }
+            : undefined
+        }
+        instantDone={instantDone}
         payment={payment}
         checkButton={checkButton}
         cashOut={cashOutEl}
