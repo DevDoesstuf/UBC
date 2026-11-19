@@ -1,7 +1,7 @@
 "use client";
-// Laptop / TV page: /watch/ABCD. The room's big screen, after the original Huddle box (Kickoff design, green
-// and ivory): a broadcast-style market takeover with the LED-ring countdown, rolling odds, the split bar and
-// the live price line, the trade ticker and leaderboard, the announcer's caption bar (read out with "Sound on"),
+// Laptop / TV page: /watch/ABCD. The room's big screen, after the box (dark, Kalshi-style: black canvas, beige
+// ink, muted green/red): a market takeover with a huge "% chance" over the live price chart, slim Yes/No pills
+// and a thin countdown, the trade ticker and leaderboard, the announcer's caption bar (read out with "Sound on"),
 // the result flood, "Who's smarter?" and the podium. Clip games play the YouTube clip in sync with the market.
 // Readable from across a room at 1280x720 and 1920x1080 (the layout scales with the viewport, no scroll).
 import { useParams } from "next/navigation";
@@ -34,7 +34,7 @@ import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
 
 /** "#003594" + alpha -> rgba(); unknown colours fall back to the brand green. */
 const hexA = (hex: string | undefined, a: number) =>
-  /^#?[0-9a-f]{6}$/i.test(hex ?? "") ? withAlpha(hex!, a) : `rgba(18,161,80,${a})`;
+  /^#?[0-9a-f]{6}$/i.test(hex ?? "") ? withAlpha(hex!, a) : `rgba(31,214,127,${a})`;
 
 export default function WatchPage() {
   const params = useParams<{ code: string }>();
@@ -188,14 +188,14 @@ export default function WatchPage() {
 
   const blobs: AuroraBlob[] | undefined = live
     ? [
-        { c: hexA(l.game?.color, 0.16), x: "-14vmax", y: "-10vmax", s: "58vmax", mx: "6vmax", my: "5vmax", dur: "18s" },
-        { c: "rgba(124,203,78,0.18)", x: "58vw", y: "20vh", s: "58vmax", mx: "-6vmax", my: "-5vmax", dur: "22s", d: "-5s" },
-        { c: "rgba(18,161,80,0.14)", x: "20vw", y: "50vh", s: "48vmax", mx: "5vmax", my: "-4vmax", dur: "26s", d: "-9s" },
+        { c: hexA(l.game?.color, 0.10), x: "-14vmax", y: "-10vmax", s: "58vmax", mx: "6vmax", my: "5vmax", dur: "18s" },
+        { c: "rgba(31,214,127,0.06)", x: "58vw", y: "20vh", s: "58vmax", mx: "-6vmax", my: "-5vmax", dur: "22s", d: "-5s" },
+        { c: "rgba(217,179,108,0.05)", x: "20vw", y: "50vh", s: "48vmax", mx: "5vmax", my: "-4vmax", dur: "26s", d: "-9s" },
       ]
     : l.phase === "ended"
       ? [
-          { c: "rgba(232,163,61,0.20)", x: "5vw", y: "-25vmax", s: "60vmax", mx: "6vmax", my: "6vmax", dur: "24s" },
-          { c: "rgba(18,161,80,0.16)", x: "-15vmax", y: "35vh", s: "55vmax", mx: "8vmax", my: "-5vmax", dur: "28s", d: "-6s" },
+          { c: "rgba(217,179,108,0.12)", x: "5vw", y: "-25vmax", s: "60vmax", mx: "6vmax", my: "6vmax", dur: "24s" },
+          { c: "rgba(31,214,127,0.07)", x: "-15vmax", y: "35vh", s: "55vmax", mx: "8vmax", my: "-5vmax", dur: "28s", d: "-6s" },
         ]
       : undefined;
 
@@ -208,13 +208,13 @@ export default function WatchPage() {
     else stage = <IdleStage key={`idle${l.qIndex}`} l={l} />;
     side = (
       <>
-        {m && (live || showResult) ? (
+        {m && showResult ? (
           <section className="hd-rise tv-card tv-chart-card"><PriceChart key={marketKey} m={m} /></section>
         ) : l.scorecard && l.scorecard.n > 0 ? (
           <section className="hd-rise tv-card"><ScorecardPanel card={l.scorecard} compact /></section>
         ) : null}
         {m && live && m.mode === "h2h" && <OffersCard m={m} />}
-        <Leaderboard players={players} max={m && live && m.mode === "h2h" ? 3 : 5} />
+        <Leaderboard players={players} max={m && live && m.mode === "h2h" ? 4 : showResult ? 5 : 7} />
       </>
     );
   } else if (layout === "video") {
