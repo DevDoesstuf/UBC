@@ -14,7 +14,7 @@ const P = {
   canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ruleStrong: "#CFC8B8", ink: "#10261C",
   ink2: "#3E5247", muted: "#616D64", accent: "#12A150", deep: "#0B7A3E", lime: "#7CCB4E", yes: "#1468FF",
   yes600: "#0B57E6", no: "#FF6B00", no600: "#B84300", hot: "#E5484D", gold: "#E8A33D", white: "#FFFFFF",
-  accentTint: "#E3F2E7",
+  accentTint: "#E3F2E7", yesTint: "#10261C", noTint: "#2B1513",
 };
 const GRAD = `linear-gradient(90deg, ${P.deep}, ${P.accent} 50%, ${P.lime})`;
 /** The question badge: one even blend from beige to green across the whole pill (matches the firmware). */
@@ -644,22 +644,69 @@ function Sparkline({ x, y, w, h, hist }: { x: number; y: number; w: number; h: n
   );
 }
 
-function OutcomeTile({ s, yes, x, y, w, h, locked, delay }: { s: KioskScreen; yes: boolean; x: number; y: number; w: number; h: number; locked: boolean; delay: number }) {
-  const v = yes ? s.yes ?? 50 : s.no ?? 50;
-  const fg = yes ? P.white : P.ink;
-  const dir = (yes ? s.move ?? 0 : -(s.move ?? 0)) || 0;
-  const pays = money(Math.floor(10000 / Math.max(1, v)));
-  const digits = String(v);
+// Kalshi-style market (mirrors drawMarket): slim top bar, calm title, huge "67% chance", a clean YES chart
+// (room solid, model dashed, Gemini quiet), a right rail with a thin countdown, slim Yes / No tiles, trades.
+const clampPct = (v: number | null | undefined, def = 50) => Math.min(100, Math.max(0, typeof v === "number" && Number.isFinite(v) ? v : def));
+
+function HeroChart({ s, x, y, w, h, locked }: { s: KioskScreen; x: number; y: number; w: number; h: number; locked: boolean }) {
+  const c = s.chart;
+  const vals = (c?.room?.length ? c.room : s.history ?? []).slice(-64).map((v) => clampPct(v));
+  const span = c ? Math.min(100, Math.max(5, c.span ?? 100)) : 100;
+  const px0 = 0, px1 = w - 44, py0 = 24, py1 = h - 22;
+  const PY = (v: number) => py1 - (v * (py1 - py0)) / 100;
+  const n = vals.length;
+  const PX = (i: number) => (n <= 1 ? px0 : px0 + ((px1 - px0) * span * i) / (100 * (n - 1)));
+  const lineC = locked ? P.muted : P.yes;
+  let path = "";
+  vals.forEach((v, i) => {
+    path += i === 0 ? `M${r2(PX(i))} ${r2(PY(v))}` : ` H${r2(PX(i))} V${r2(PY(v))}`;
+  });
+  if (n === 1) path += ` H${px0 + 40}`;
+  const endX = n === 1 ? px0 + 40 : PX(n - 1);
+  const gem = c?.gemini;
+  let gpath = "";
+  if (gem) gem.slice(-64).forEach((g, i) => { if (g !== null && g !== undefined) gpath += `${gpath && gem[i - 1] != null ? " L" : " M"}${r2(PX(i))} ${r2(PY(clampPct(g)))}`; });
+  const model = typeof c?.model === "number" ? clampPct(c.model) : null;
   return (
-    <div className="hk-abs hk-pop" style={{ left: x, top: y, width: w, height: h, ...d(delay) }}>
-      <div key={`${v}`} className={`hk-tile hk-lift ${dir ? "hk-kick" : ""}`} style={{ background: yes ? P.yes : P.no, color: fg }}>
-        <T f="H3" x={18} y={34} color={fg}>{yes ? "Yes" : "No"}</T>
-        <Roll f="N1" x={16} y={120} text={digits} color={fg} />
-        <T f="N3" x={20 + digits.length * 41} y={66} color={fg}>¢</T>
-        {dir !== 0 && <Arrow cx={w - 28} cy={28} s={1.1} up={dir > 0} color={fg} className="hk-arrow" />}
-        <T f="B1" x={18} y={h - 16} color={fg} style={{ opacity: 0.92 }}>$1 pays {pays}</T>
-        {locked && <i className="hk-veil" />}
+    <div className="hk-abs hk-fade" style={{ left: x, top: y, width: w, height: h, ...d(260) }}>
+      <div className="hk-abs hk-legend" style={{ left: 0, top: 0 }}>
+        <span><i style={{ background: lineC }} />Room</span>
+        {model !== null && <span><i className="hk-dash" />Model</span>}
+        {gpath && <span><i style={{ background: P.ink2, opacity: 0.6, height: 1.5 }} />Gemini</span>}
       </div>
+      {locked && (
+        <div className="hk-abs hk-lockbadge hk-pop" style={{ right: 44, top: -7 }}>
+          <Lock cx={0} cy={0} s={0.55} color={P.ink} />Locked
+        </div>
+      )}
+      <svg className="hk-abs" style={{ left: 0, top: 0 }} width={w} height={h} aria-hidden="true">
+        {[0, 25, 50, 75, 100].map((v) => (
+          <g key={v}>
+            <line x1={px0} x2={px1} y1={PY(v) + 0.5} y2={PY(v) + 0.5} stroke={v === 50 ? P.ruleStrong : P.rule} strokeDasharray="2 4" />
+            <text x={px1 + 8} y={PY(v) + 5} className="hk-axis">{v}%</text>
+          </g>
+        ))}
+        <text x={px0} y={py1 + 18} className="hk-axis">{c?.x0 || "Open"}</text>
+        <text x={px1} y={py1 + 18} className="hk-axis" textAnchor="end">{locked ? "Locked" : c?.x1 || "Now"}</text>
+        {n === 0 && <text x={(px0 + px1) / 2} y={(py0 + py1) / 2 + 6} className="hk-axis" textAnchor="middle">No trades yet</text>}
+        {model !== null && <line x1={px0} x2={px1} y1={PY(model)} y2={PY(model)} stroke={P.ink2} strokeWidth="1.4" strokeDasharray="6 6" opacity="0.66" />}
+        {n > 0 && <path d={`${path} V${py1} H${px0} Z`} fill={lineC} opacity="0.1" stroke="none" />}
+        {gpath && <path d={gpath} fill="none" stroke={P.ink2} strokeWidth="1.4" opacity="0.6" className="hk-draw" pathLength={1} />}
+        {n > 0 && <path key={n} d={path} fill="none" stroke={lineC} strokeWidth="2.6" className="hk-draw" pathLength={1} />}
+        {n > 0 && <circle cx={endX} cy={PY(vals[n - 1])} r="4.5" fill={lineC} />}
+        {n > 0 && !locked && <circle cx={endX} cy={PY(vals[n - 1])} r="4.5" fill={P.yes} className="hk-ping" />}
+      </svg>
+    </div>
+  );
+}
+
+function PriceTile({ s, yes, x, y, w, h, locked }: { s: KioskScreen; yes: boolean; x: number; y: number; w: number; h: number; locked: boolean }) {
+  const v = Math.round(clampPct(yes ? s.yes : s.no));
+  const c = yes ? P.yes : P.no;
+  return (
+    <div className={`hk-abs hk-ptile ${locked ? "hk-dim" : ""}`} style={{ left: x, top: y, width: w, height: h, borderRadius: h / 2, background: yes ? P.yesTint : P.noTint, borderColor: c, color: c }}>
+      <T f="B1" x={22} y={h / 2 + 7} color={c}>{yes ? "Yes" : "No"}</T>
+      <T f="N3" x={w - 20} y={h / 2 + 11} w={120} align="right" color={c}>{`${v}¢`}</T>
     </div>
   );
 }
@@ -673,130 +720,97 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
   const yesB = s.buttons.find((b) => b.id === "resolve:yes");
   const noB = s.buttons.find((b) => b.id === "resolve:no");
   const q = s.question ?? "";
-  // Same rule as the firmware: the big face when the question fits in two lines of it.
-  const [big, setBig] = useState(q.length <= 44);
+  const [two, setTwo] = useState(q.length > 40);
   useEffect(() => {
     let alive = true;
     void document.fonts.ready.then(() => {
-      const n = wrapLines("800 44px 'HK Bricolage'", q, 532);
-      if (alive && n !== null) setBig(n <= 2);
+      const n = wrapLines("700 24px 'HK Bricolage'", q, 508);
+      if (alive && n !== null) setTwo(n >= 2);
     });
     return () => {
       alive = false;
     };
   }, [q]);
-  const LX = 32, LW = 532, tw = (LW - 12) / 2;
   const hist = s.history ?? [];
-  const diff = hist.length ? (s.yes ?? 50) - hist[0] : 0;
-  const lockW = lockB ? Math.round(lockB.label.length * 10.6) + 40 : 0;
-  const right = 800 - 16 - 26 - (lockB && !locked ? lockW + 12 : 0);
-  // Width budget (same rule as the firmware): the badge, the amount and "traded" stop 12 px before the
-  // scorebug / code chip. "Question 10 of 12" becomes "Q10 of 12", then "traded", then the amount drop out.
-  const title = s.title || "Market open";
-  const [shortBadge, setShortBadge] = useState(false);
-  const [fit, setFit] = useState<0 | 1 | 2>(2);
-  const badgeRef = useRef<HTMLDivElement>(null);
-  const amtRef = useRef<HTMLSpanElement>(null);
-  const wordRef = useRef<HTMLSpanElement>(null);
-  const rightRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const bug = rightRef.current?.getBoundingClientRect();
-    const badge = badgeRef.current?.getBoundingClientRect();
-    if (!bug || !badge || !bug.width) return;
-    const k = (badgeRef.current?.offsetWidth ?? 0) > 0 ? badge.width / badgeRef.current!.offsetWidth : 1;
-    const limit = bug.left - 12 * k;
-    const amt = amtRef.current?.getBoundingClientRect();
-    const word = wordRef.current?.getBoundingClientRect();
-    if (!shortBadge && (!word || word.right > limit) && /^Question \d/.test(title)) setShortBadge(true);
-    const next: 0 | 1 | 2 = word && word.right <= limit ? 2 : amt && amt.right <= limit ? 1 : 0;
-    if (next !== fit) setFit(next);
-  });
+  const yesP = Math.round(clampPct(s.yes));
+  const diff = hist.length ? yesP - hist[0] : 0;
+  const lockW = lockB ? Math.round(lockB.label.length * 9.4) + 32 : 0;
+  const right = 800 - 16 - 26 - (lockB && !locked ? lockW + 10 : 0);
+  const title = locked ? "Trading closed" : (s.title || "Market open").replace(/^Question /, "Q");
+  const heroY = two ? 190 : 162;
+  const secs = Math.ceil(rem / 1000);
+  const frac = tot > 0 ? Math.min(1, Math.max(0, rem / tot)) : 0;
   return (
     <div key={q} className="hk-fill">
-      <div className="hk-drop hk-abs" style={{ left: 16, top: 12, height: 38, display: "flex", alignItems: "center", gap: 12, whiteSpace: "nowrap" }}>
-        {locked ? (
-          <div ref={badgeRef} className="hk-badge hk-pop">
-            <svg width="20" height="22" viewBox="-10 -11 20 24" aria-hidden="true"><path d="M-5.5 -0.5 V-3 A5.5 5.5 0 0 1 5.5 -3 V-0.5" fill="none" stroke="#fff" strokeWidth="2.6" /><rect x="-9" y="-0.5" width="18" height="13" rx="3" fill="#fff" /></svg>
-            <span className="hk-body hk-w700">Trading closed</span>
-          </div>
-        ) : (
-          <div ref={badgeRef} className="hk-badge" style={{ background: BADGE_GRAD }} aria-label={title}>
-            <svg width="14" height="20" viewBox="-7 -10 14 20" aria-hidden="true"><path d="M2 -9 L-6 1.5 L1 1.5 Z M-2 9 L6 -1.5 L-1 -1.5 Z" fill="#fff" /></svg>
-            <span className="hk-body hk-w700">{shortBadge ? title.replace(/^Question /, "Q") : title}</span>
-          </div>
-        )}
-        <div className="hk-traded" aria-label={s.volume !== undefined ? `${money(s.volume)} traded` : s.traded}>
-          <span ref={amtRef} className="hk-num hk-w700 hk-c90" style={{ visibility: fit >= 1 ? "visible" : "hidden" }}>{s.volume !== undefined ? money(s.volume) : ""}</span>{" "}
-          <span ref={wordRef} className="hk-body hk-w400" style={{ visibility: fit >= 2 ? "visible" : "hidden" }}>{s.volume !== undefined ? "traded" : s.traded}</span>
-        </div>
+      <div className="hk-abs hk-fade hk-topline" style={{ left: 20, top: 16 }}>
+        {locked ? <Lock cx={5} cy={13} s={0.6} color={P.ink2} /> : <i className="hk-dot" />}
+        <span className="hk-body">{title}</span>
+        {s.volume !== undefined ? <span className="hk-body hk-muted">{money(s.volume)} vol</span> : s.traded ? <span className="hk-body hk-muted">{s.traded}</span> : null}
       </div>
       <LiveDot cx={776} cy={30} fresh={fresh} />
-      {lockB && !locked && <Button b={lockB} x={800 - 16 - 26 - lockW} y={10} w={lockW} h={42} r={21} onTouch={onTouch} pending={pending === "lock"} />}
-      {s.score ? <Scorebug s={s} rx={right} y={10} h={42} elRef={rightRef} /> : s.code ? <CodeChip code={s.code} rx={right} elRef={rightRef} /> : null}
-
-      <div className={`hk-abs hk-stage hk-zoom hk-lift ${urgent ? "hk-urgent-edge" : ""}`} style={{ left: 12, top: 64, width: 776, height: 404 }}>
-        <i className="hk-ribbon" style={{ background: GRAD, height: 7 }} />
-        <i className="hk-sweep" />
-        {locked && <i className="hk-flashout" />}
+      {lockB && !locked && <Button b={lockB} f="B2" x={800 - 16 - 26 - lockW} y={12} w={lockW} h={36} r={18} onTouch={onTouch} pending={pending === "lock"} />}
+      {s.score ? <Scorebug s={s} rx={right} y={10} h={40} /> : s.code ? <CodeChip code={s.code} rx={right} /> : null}
+      <i className="hk-abs hk-hr" style={{ left: 16, top: 58, width: 768 }} />
+      <Kinetic f="H3" x={24} y={94} w={508} lines={2} lh={29} text={q} delay={80} stagger={30} />
+      <div className="hk-abs hk-rise" style={{ left: 0, top: 0, ...d(200) }}>
+        <Roll f="N2" x={22} y={heroY} text={`${yesP}%`} color={locked ? P.ink2 : P.ink} up={P.yes} down={P.no} dir={Math.sign(s.move ?? 0)} ms={700} />
+        <T f="B1" x={34 + `${yesP}%`.length * 31} y={heroY - 2} color={P.ink2}>
+          chance
+          {diff !== 0 && <span style={{ color: diff > 0 ? P.yes : P.no, marginLeft: 14, fontSize: 18 }}>{diff > 0 ? "▲" : "▼"} {Math.abs(diff)}</span>}
+        </T>
       </div>
-      <Kinetic f={big ? "H1" : "H2"} x={LX} y={big ? 116 : 106} w={LW} lines={big ? 2 : 3} lh={big ? 46 : 34} text={q} delay={140} />
-      <OutcomeTile s={s} yes x={LX} y={196} w={tw} h={166} locked={locked} delay={380} />
-      <OutcomeTile s={s} yes={false} x={LX + tw + 12} y={196} w={tw} h={166} locked={locked} delay={460} />
-      <div className="hk-abs hk-fade" style={{ left: LX, top: 370, width: LW, height: 32, ...d(560) }}>
-        {typeof s.model === "number" && <Arrow cx={(LW * s.model) / 100} cy={7} s={1} up={false} color={P.ink} className="hk-marker" />}
-        {s.gemini && (
-          <svg className="hk-abs hk-marker" style={{ left: (LW * s.gemini.cents) / 100 - 7, top: 2 }} width="14" height="11" viewBox="0 0 14 11" aria-hidden="true">
-            <path d="M0 0 H14 L7 10 Z M3.4 1.8 L7 7 L10.6 1.8 Z" fill={P.ink} fillRule="evenodd" />
-          </svg>
-        )}
-        <div className="hk-split" style={{ top: 14 }}>
-          <i className="hk-split-yes" style={{ width: `${Math.min(98, Math.max(2, s.yes ?? 50))}%` }} />
-          {locked && <i className="hk-veil" style={{ borderRadius: 8 }} />}
-        </div>
-      </div>
-      <div className="hk-abs hk-fade hk-pros" style={{ left: LX, top: 422, width: LW, ...d(640) }}>
-        {typeof s.model === "number" || s.gemini ? (
-          <>
-            <span className="hk-body hk-w400">Room </span><b className="hk-num hk-w700 hk-c90" style={{ color: P.deep }}>{s.yes}¢</b>
-            {typeof s.model === "number" && (<><span className="hk-tri" /> <span className="hk-body hk-w400">Model </span><b className="hk-num hk-w700 hk-c90">{s.model}¢</b></>)}
-            {s.gemini && (<><span className="hk-tri hk-hollow" /> <span className="hk-body hk-w400">Gemini </span><b className="hk-num hk-w700 hk-c90">{s.gemini.cents}¢</b>{!s.gemini.live && <small> (last seen)</small>}</>)}
-          </>
-        ) : (
-          <span className="hk-body hk-w400">{locked ? s.subtitle : "Buy YES or NO on your phone. A winning share pays $1"}</span>
-        )}
-      </div>
-
-      <div className="hk-abs hk-rise" style={{ left: 0, top: 0, ...d(240) }}>
-        <LockRing cx={678} cy={172} R={76} rem={rem} tot={tot} locked={locked} manual={manual} />
-      </div>
-      {locked ? (
-        <div className="hk-rise" style={d(200)}>
-          {yesB && <Button b={yesB} x={584} y={280} w={188} h={70} r={20} onTouch={onTouch} pending={pending === yesB.id} />}
-          {noB && <Button b={noB} x={584} y={362} w={188} h={70} r={20} onTouch={onTouch} pending={pending === noB.id} />}
-          {!yesB && !noB && <T f="B2" x={678} y={300} w={188} align="center" color={P.ink2}>Watch the play.</T>}
-        </div>
-      ) : (
-        <div className="hk-rise" style={d(700)}>
-          <T f="B3" x={584} y={276} color={P.ink2}>Yes price</T>
-          <T f="N4" x={772} y={277} w={100} align="right" color={diff > 0 ? P.yes600 : diff < 0 ? P.no600 : P.muted}>{diff === 0 ? "Flat" : `${diff > 0 ? "+" : ""}${diff} pts`}</T>
-          <Sparkline x={584} y={286} w={188} h={54} hist={hist} />
-          {(s.trades ?? []).length === 0 ? (
-            <>
-              <T f="B3" x={584} y={376} color={P.muted}>No trades yet.</T>
-              <T f="B3" x={584} y={396} color={P.muted}>Phones buy YES or NO.</T>
-            </>
-          ) : (
-            (s.trades ?? []).slice(0, 3).map((t, i) => (
-              <div key={`${t.name}${t.cents}${t.side}${hist.length - i}`} className={`hk-abs hk-trade ${i === 0 ? "hk-slide-r" : ""}`} style={{ left: 584, top: 356 + i * 34, width: 188, height: 28 }}>
-                <span className="hk-avatar hk-body hk-w600" style={{ width: 22, height: 22, fontSize: 13, background: AVATAR[hash(t.name) % 8] }} aria-hidden="true">{(t.name.trim()[0] ?? "?").toUpperCase()}</span>
-                <span className="hk-body hk-w600 hk-name">{t.name}</span>
-                <span className="hk-body hk-w600" style={{ color: t.side === "yes" ? P.yes600 : P.no600 }}>{t.side === "yes" ? "▲ Yes" : "▼ No"}</span>
-                <b className="hk-num hk-w700 hk-c90">{money(t.cents)}</b>
-              </div>
-            ))
-          )}
+      <HeroChart s={s} x={24} y={heroY + 20} w={508} h={446 - heroY - 20} locked={locked} />
+      {(s.betsIn?.of ?? 0) > 0 && (
+        <div className="hk-abs hk-bets" style={{ left: 24, top: 456 }}>
+          {Array.from({ length: Math.min(14, s.betsIn!.of) }, (_, i) => <i key={i} className={i < s.betsIn!.n ? "on" : ""} />)}
+          <span className="hk-body" style={{ color: s.betsIn!.n >= s.betsIn!.of ? P.yes : P.muted }}>{s.betsIn!.n} of {s.betsIn!.of} in</span>
         </div>
       )}
+
+      <div className="hk-abs hk-card hk-fade" style={{ left: 544, top: 70, width: 248, height: 382, borderRadius: 18, ...d(160) }} />
+      <div className="hk-abs hk-fade" style={{ left: 0, top: 0, ...d(160) }}>
+        <div className="hk-abs hk-cd" style={{ left: 560, top: 84, width: 216 }} role="timer" aria-label={locked ? "Trading closed" : manual ? "Open until the host locks" : `${secs} seconds to lock`}>
+          {locked ? (
+            <span className="hk-body" style={{ color: P.ink }}>Trading closed</span>
+          ) : manual ? (
+            <span className="hk-body hk-ink2">Open until the host locks</span>
+          ) : (
+            <>
+              <span className="hk-body hk-ink2">Closes in</span>
+              <b className="hk-num" style={{ color: urgent ? P.hot : P.ink }}>{secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` : `${secs}s`}</b>
+            </>
+          )}
+          <i className="hk-cd-bar"><i style={{ width: `${locked || manual ? 0 : frac * 100}%`, background: urgent ? P.hot : P.ink }} /></i>
+        </div>
+        <PriceTile s={s} yes x={556} y={132} w={224} h={58} locked={locked} />
+        <PriceTile s={s} yes={false} x={556} y={200} w={224} h={58} locked={locked} />
+        {locked ? (
+          <>
+            {(yesB || noB) && <T f="B3" x={560} y={292} color={P.muted}>Settle it</T>}
+            {yesB && <Button b={yesB} f="B2" x={556} y={304} w={224} h={48} r={24} onTouch={onTouch} pending={pending === yesB.id} />}
+            {noB && <Button b={noB} f="B2" x={556} y={362} w={224} h={48} r={24} onTouch={onTouch} pending={pending === noB.id} />}
+            {!yesB && !noB && <T f="B3" x={560} y={300} color={P.ink2}>Watch the play.</T>}
+          </>
+        ) : (
+          <>
+            <T f="B3" x={560} y={290} color={P.muted}>Recent trades</T>
+            {(s.trades ?? []).length === 0 && <T f="B3" x={560} y={322} color={P.muted}>No trades yet</T>}
+            {(s.trades ?? []).slice(0, 3).map((t, i) => (
+              <div key={`${t.name}${t.cents}${t.side}${hist.length - i}`} className={`hk-abs hk-trade hk-trow ${i === 0 ? "hk-slide-r" : ""}`} style={{ left: 556, top: 300 + i * 32, width: 224, height: 30 }}>
+                <span className="hk-avatar hk-body hk-w600" style={{ width: 20, height: 20, fontSize: 12, background: AVATAR[hash(t.name) % 8] }} aria-hidden="true">{(t.name.trim()[0] ?? "?").toUpperCase()}</span>
+                <span className="hk-body hk-name">{t.name}</span>
+                <span className="hk-body" style={{ color: t.side === "yes" ? P.yes : P.no }}>{t.side === "yes" ? "Yes" : "No"}</span>
+                <b className="hk-body hk-ink2">{money(t.cents)}</b>
+              </div>
+            ))}
+          </>
+        )}
+        {s.tip && (
+          <div className="hk-abs hk-tipchip" style={{ left: 556, top: 414, width: 224, height: 30 }}>
+            <i /><b>{s.tip.label || "Inside info"}</b><span>{s.tip.text}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -805,17 +819,17 @@ function People({ x, y, w, h, title, win, rows, empty, delay }: {
   x: number; y: number; w: number; h: number; title: string; win: boolean; rows: { name: string; label: string }[]; empty: string; delay: number;
 }) {
   return (
-    <div className="hk-abs hk-card hk-lift hk-rise" style={{ left: x, top: y, width: w, height: h, borderRadius: 20, ...d(delay) }}>
-      <Arrow cx={20} cy={21} s={0.8} up={win} color={win ? P.yes600 : P.no600} />
-      <T f="B1" x={34} y={28} color={win ? P.yes600 : P.no600}>{title}</T>
-      <div className="hk-scroll" style={{ left: 0, top: 38, width: w, height: h - 44 }}>
-        {rows.length === 0 && <T f="B2" x={16} y={24} color={P.ink2}>{empty}</T>}
-        <div style={{ position: "relative", height: rows.length * 34 }}>
+    <div className="hk-abs hk-rise" style={{ left: x, top: y, width: w, height: h, ...d(delay) }}>
+      <T f="B3" x={4} y={16} color={P.muted}>{title}</T>
+      {rows.length > 0 && <T f="B3" x={w - 4} y={16} w={60} align="right" color={P.muted}>{String(rows.length)}</T>}
+      <div className="hk-scroll" style={{ left: 0, top: 26, width: w, height: h - 26 }}>
+        {rows.length === 0 && <T f="B2" x={4} y={26} color={P.ink2}>{empty}</T>}
+        <div style={{ position: "relative", height: rows.length * 36 }}>
           {rows.map((r, i) => (
-            <div key={i} className={`hk-abs ${win ? "hk-shine" : ""}`} style={{ left: 0, top: i * 34, width: w, height: 34, ...d(delay + 400 + i * 180) }}>
-              <Avatar name={r.name} cx={28} cy={16} r={12} dim={!win} />
-              <T f="B1" x={48} y={23} w={w - 170} color={win ? P.ink : P.ink2}>{r.name}</T>
-              <T f="N4" x={w - 14} y={23} w={120} align="right" color={win ? P.ink2 : P.muted}>{r.label}</T>
+            <div key={i} className="hk-abs hk-prow" style={{ left: 0, top: i * 36, width: w, height: 36 }}>
+              <Avatar name={r.name} cx={16} cy={18} r={12} dim={!win} />
+              <T f="B2" x={36} y={24} w={w - 120} color={win ? P.ink : P.ink2}>{r.name}</T>
+              <T f="N4" x={w - 4} y={25} w={110} align="right" color={win ? P.yes : P.muted}>{r.label}</T>
             </div>
           ))}
         </div>
@@ -827,67 +841,68 @@ function People({ x, y, w, h, title, win, rows, empty, delay }: {
 function Result({ s, onTouch, pending, fresh }: Ctx) {
   const yes = s.result === "YES";
   const voided = !s.result;
-  const win = voided ? P.well : yes ? P.yes : P.no;
-  const on = voided ? P.ink : yes ? P.white : P.ink;
-  let share = s.lockYes != null ? s.lockYes / 100 : yes ? (s.yes ?? 50) / 100 : (s.no ?? 50) / 100;
-  if (!yes && s.lockYes != null) share = 1 - s.lockYes / 100;
-  share = Math.min(0.95, Math.max(0.05, share));
+  const oc = voided ? P.ink : yes ? P.yes : P.no;
+  const fin = Math.round(clampPct(s.lockYes ?? s.yes));
   const next = s.buttons.find((b) => b.id === "next");
   const end = s.buttons.find((b) => b.id === "end");
   const allCalls: (KioskButton & { enabled?: boolean })[] = s.calls ?? s.buttons.filter((b) => b.id.startsWith("moment:"));
   const winners = s.winners ?? (s.lines ?? []).map((l) => ({ name: l, cents: 0, profit: 0 }));
   const losers = s.losers ?? [];
-  const trailing = (s.volume !== undefined ? `${money(s.volume)} traded` : s.traded) ?? "";
-  let x = 36;
-  let x1 = 764;
-  // With Call it! buttons in the row, Next and End shrink to their labels so the calls get the room (firmware too).
+  const summary = s.volume !== undefined ? `${money(s.volume)} traded  ·  ${winners.length} ${winners.length === 1 ? "winner" : "winners"}` : s.traded ?? "";
+  let x = 24;
+  let x1 = 776;
   const has = allCalls.length > 0;
   const nextW = next ? (has ? Math.min(230, labelW(next.label, 20) + 62) : 230) : 0;
   const endW = end ? (has ? Math.min(120, labelW(end.label, 20) + 44) : next ? 120 : 230) : 0;
-  if (next) x += nextW + 12;
-  if (end) x1 -= endW + 12;
+  if (next) x += nextW + 10;
+  if (end) x1 -= endW + 10;
   const { shown: calls, bw, small, noIcon } = callRow(allCalls, x1 - x);
+  const wordW = voided ? 0 : yes ? 166 : 128;
+  const wh = losers.length ? 168 : 290;
   return (
     <div key={s.question} className="hk-fill">
-      <Wordmark x={20} y={40} />
+      <div className="hk-abs hk-topline" style={{ left: 20, top: 16 }}>
+        <span style={{ color: oc }}>✓</span><span className="hk-body hk-ink2">{voided ? "Voided" : "Resolved"}</span>
+      </div>
       <LiveDot cx={776} cy={30} fresh={fresh} />
-      {s.score ? <Scorebug s={s} rx={758} y={10} h={42} /> : s.code ? <CodeChip code={s.code} rx={758} /> : null}
-      <div className="hk-abs hk-stage hk-zoom hk-lift" style={{ left: 12, top: 64, width: 776, height: 404, color: on }}>
-        <i className="hk-flood" style={{ background: win, transformOrigin: yes || voided ? "left" : "right", ["--from" as string]: share } as CSSProperties} />
+      {s.score ? <Scorebug s={s} rx={758} y={10} h={40} /> : s.code ? <CodeChip code={s.code} rx={758} /> : null}
+      <i className="hk-abs hk-hr" style={{ left: 16, top: 58, width: 768 }} />
+      <div className="hk-fade" style={d(80)}>
+        <div className="hk-t hk-head hk-w700 hk-clamp2" style={{ left: 24, top: 96 - 23, width: 500, fontSize: 24, lineHeight: "29px", color: P.ink, whiteSpace: "normal" }}>{s.question}</div>
       </div>
-      <div className="hk-fade" style={{ ...d(120), color: on }}>
-        <T f="B2" x={36} y={98} color="inherit">{voided ? "Voided" : "Result"}</T>
-        <div className="hk-t hk-head hk-w700 hk-clamp2" style={{ left: 36, top: 128 - 23, width: 720, fontSize: 24, lineHeight: "28px", color: "inherit", whiteSpace: "normal" }}>{s.question}</div>
-      </div>
-      <div className="hk-stamp" style={{ ...d(380), color: on }}>
+      <div className="hk-rise" style={d(300)}>
+        <T f={voided ? "H1" : "HERO"} x={20} y={voided ? 236 : 252} color={oc}>{voided ? "Refunded" : yes ? "YES" : "NO"}</T>
         {!voided && (
-          <svg className="hk-abs" style={{ left: 44, top: 196 }} width="54" height="44" viewBox="-27 -22 54 44" aria-hidden="true">
-            <path d="M-21 0 L-6.5 15.6 L23.4 -18.2" fill="none" stroke="currentColor" strokeWidth="8.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <>
+            <T f="N3" x={38 + wordW} y={212} color={P.ink}>{`${yes ? fin : 100 - fin}%`}</T>
+            <T f="B3" x={38 + wordW} y={236} color={P.muted}>final chance</T>
+          </>
         )}
-        <T f={voided ? "H1" : "HERO"} x={voided ? 36 : 112} y={voided ? 232 : 262} color="inherit">{voided ? "Refunded" : yes ? "YES" : "NO"}</T>
       </div>
-      <div className="hk-fade" style={{ ...d(600), color: on }}>
-        <T f="N3" x={760} y={218} w={400} align="right" color="inherit">{trailing}</T>
-        <T f="B1" x={760} y={248} w={400} align="right" color="inherit" style={{ opacity: 0.9 }}>
-          {winners.length || losers.length ? `${winners.length} ${winners.length === 1 ? "winner" : "winners"}` : "Winning shares pay $1"}
-        </T>
+      <div className="hk-fade" style={d(560)}>
+        <T f="B2" x={24} y={292} color={P.ink2}>{summary}</T>
+        <div className="hk-abs hk-endbar" style={{ left: 24, top: 316, width: 500, background: voided ? P.rule : undefined }}>
+          <i style={{ width: `${fin}%`, opacity: yes || voided ? 1 : 0.45, background: voided ? P.muted : P.yes }} />
+        </div>
+        <T f="B3" x={24} y={346} color={P.muted}>Yes at lock</T>
+        <T f="B3" x={524} y={346} w={100} align="right" color={P.muted}>{`${fin}%`}</T>
       </div>
-      {!voided && winners.length > 0 && <Burst count={Math.min(48, 18 + winners.length * 6)} x={240} y={230} delay={520} colors={[P.gold, P.lime, P.white, P.accent, yes ? "#9CC2FF" : "#FFC08A"]} />}
+      {!voided && winners.length > 0 && <Burst count={Math.min(24, 10 + winners.length * 3)} x={160} y={200} delay={520} colors={[P.gold, P.yes, P.ink]} />}
+      <div className="hk-abs hk-card" style={{ left: 544, top: 70, width: 248, height: 314, borderRadius: 18 }} />
       {s.winners !== undefined || !(s.lines ?? []).length ? (
         <>
-          <People x={36} y={274} w={358} h={112} title="Called it" win rows={winners.map((w) => ({ name: w.name, label: `${money(Math.max(0, w.profit), true)} won` }))} empty="Nobody. Brutal." delay={760} />
-          <People x={406} y={274} w={358} h={112} title="Cooked" win={false} rows={losers.map((l) => ({ name: l.name, label: `${money(l.cents)} lost` }))} empty="Clean sweep." delay={840} />
+          <People x={556} y={80} w={224} h={wh} title="Called it" win rows={winners.map((w) => ({ name: w.name, label: money(Math.max(0, w.profit), true) }))} empty="Nobody. Brutal." delay={600} />
+          {(losers.length > 0 || winners.length > 0) && <People x={556} y={80 + wh + 8} w={224} h={290 - wh - 2} title="Cooked" win={false} rows={losers.map((l) => ({ name: l.name, label: `-${money(l.cents)}` }))} empty="Clean sweep." delay={680} />}
         </>
       ) : (
-        <People x={36} y={274} w={728} h={112} title="Called it" win rows={(s.lines ?? []).map((l) => ({ name: l, label: "" }))} empty="" delay={760} />
+        <People x={556} y={80} w={224} h={290} title="Called it" win rows={(s.lines ?? []).map((l) => ({ name: l, label: "" }))} empty="" delay={600} />
       )}
-      <div className="hk-rise" style={d(900)}>
-        {next && <Button b={next} style={voided ? "brand" : "ink"} x={36} y={396} w={nextW} h={62} r={20} onTouch={onTouch} pending={pending === next.id} />}
+      <div className="hk-fade" style={d(760)}>
+        {next && <Button b={next} style={voided ? "brand" : "ink"} x={24} y={400} w={nextW} h={56} r={28} onTouch={onTouch} pending={pending === next.id} />}
         {calls.map((c, i) => (
-          <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={small} noIcon={noIcon} x={x + i * (bw + 8)} y={396} w={bw} h={62} r={18} onTouch={onTouch} pending={pending === c.id} />
+          <Button key={c.id} b={{ ...c, style: "primary" }} style="call" small={small} noIcon={noIcon} x={x + i * (bw + 8)} y={400} w={bw} h={56} r={28} onTouch={onTouch} pending={pending === c.id} />
         ))}
-        {end && <Button b={end} style={next ? "white" : "ink"} x={764 - endW} y={396} w={endW} h={62} r={20} onTouch={onTouch} pending={pending === end.id} />}
+        {end && <Button b={end} style={next ? "white" : "ink"} x={776 - endW} y={400} w={endW} h={56} r={28} onTouch={onTouch} pending={pending === end.id} />}
       </div>
     </div>
   );
