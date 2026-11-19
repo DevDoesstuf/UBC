@@ -21,8 +21,8 @@ export function Backdrop({ tint }: { tint?: string | null }) {
   const blobs = tint
     ? [
         { c: withAlpha(tint, 0.2), x: "-20vmax", y: "-14vmax", s: "64vmax", mx: "10vmax", my: "8vmax", dur: "18s" },
-        { c: "rgba(124,203,78,0.2)", x: "40vw", y: "40vh", s: "60vmax", mx: "-9vmax", my: "-7vmax", dur: "22s", d: "-5s" },
-        { c: "rgba(232,163,61,0.12)", x: "20vw", y: "10vh", s: "40vmax", mx: "6vmax", my: "5vmax", dur: "26s", d: "-9s" },
+        { c: "rgba(31,214,127,0.10)", x: "40vw", y: "40vh", s: "60vmax", mx: "-9vmax", my: "-7vmax", dur: "22s", d: "-5s" },
+        { c: "rgba(217,179,108,0.08)", x: "20vw", y: "10vh", s: "40vmax", mx: "6vmax", my: "5vmax", dur: "26s", d: "-9s" },
       ]
     : undefined;
   return <Aurora key={tint ? "tint" : "default"} blobs={blobs} fixed className="hd-fade" />;
@@ -532,7 +532,7 @@ export function ResultsTab({ l, trail = {} }: { l: Lobby; trail?: Trail }) {
                     </span>
                   )}
                   {pts.length > 1 && (
-                    <Sparkline points={pts} className="ph-res-spark" dot={false} stroke={r.outcome === "yes" ? "var(--k-yes)" : "var(--k-no)"} fill={r.outcome === "yes" ? "rgba(20,104,255,0.10)" : "rgba(255,107,0,0.10)"} />
+                    <Sparkline points={pts} className="ph-res-spark" dot={false} stroke={r.outcome === "yes" ? "var(--k-yes)" : "var(--k-no)"} fill={r.outcome === "yes" ? "rgba(31,214,127,0.12)" : "rgba(255,81,72,0.12)"} />
                   )}
                   {r.volume > 0 && <span className="ph-res-meta hd-tnum">{usd(r.volume)}</span>}
                 </li>

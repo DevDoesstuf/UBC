@@ -66,8 +66,8 @@ export function TapConfirm({ code, token, pending }: { code: string; token: stri
         gap: 12,
         padding: "14px 16px",
         borderRadius: 18,
-        background: "var(--k-ink, #10261C)",
-        color: "#fff",
+        background: "var(--k-card, #111111)", boxShadow: "inset 0 0 0 1px var(--k-rule, #262626), 0 18px 40px -18px #000",
+        color: "var(--k-ink, #E9DFC9)",
       }}
     >
       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
@@ -76,7 +76,7 @@ export function TapConfirm({ code, token, pending }: { code: string; token: stri
       <div style={{ display: "grid", gap: 2 }}>
         <strong style={{ fontSize: 17 }}>Tap the box</strong>
         <span style={{ fontSize: 14, opacity: 0.85 }}>
-          ${(pending.cents / 100).toFixed(2)} on <b style={{ color: yes ? "#7CDCA8" : "#FFA08F" }}>{yes ? "YES" : "NO"}</b> · {left}s
+          ${(pending.cents / 100).toFixed(2)} on <b style={{ color: yes ? "var(--k-yes-600, #1FD67F)" : "var(--k-no-600, #FF6A62)" }}>{yes ? "YES" : "NO"}</b> · {left}s
         </span>
       </div>
       <button className="hd-btn" onClick={confirm} data-testid="tap-confirm-here" style={{ fontSize: 13, padding: "8px 12px" }}>

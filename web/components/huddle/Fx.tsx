@@ -63,8 +63,8 @@ export function Kinetic({
 
 /* ------------------------------------------------------------------ confetti */
 
-export const BURST_COLOURS = ["#12A150", "#7CCB4E", "#E8A33D", "#1468FF", "#0B7A3E", "#F2C94C", "#FF6B00"];
-export const GOLD_BURST = ["#E8A33D", "#F2C94C", "#7CCB4E", "#12A150"];
+export const BURST_COLOURS = ["#1FD67F", "#8FE3B0", "#D9B36C", "#E9DFC9", "#17B067", "#F2D79B", "#FF5148"];
+export const GOLD_BURST = ["#D9B36C", "#F2D79B", "#E9DFC9", "#1FD67F"];
 
 /** Small deterministic PRNG so a burst looks the same on every render of the same seed. */
 function rng(seed: number) {
@@ -154,9 +154,9 @@ export interface AuroraBlob {
 }
 
 export const AURORA_DEFAULT: AuroraBlob[] = [
-  { c: "rgba(18,161,80,0.18)", x: "-14vmax", y: "-18vmax", s: "62vmax", mx: "10vmax", my: "6vmax", dur: "26s" },
-  { c: "rgba(124,203,78,0.18)", x: "48vw", y: "30vh", s: "56vmax", mx: "-8vmax", my: "-6vmax", dur: "30s", d: "-6s" },
-  { c: "rgba(232,163,61,0.13)", x: "6vw", y: "58vh", s: "50vmax", mx: "9vmax", my: "-4vmax", dur: "34s", d: "-12s" },
+  { c: "rgba(31,214,127,0.09)", x: "-14vmax", y: "-18vmax", s: "62vmax", mx: "10vmax", my: "6vmax", dur: "26s" },
+  { c: "rgba(31,214,127,0.06)", x: "48vw", y: "30vh", s: "56vmax", mx: "-8vmax", my: "-6vmax", dur: "30s", d: "-6s" },
+  { c: "rgba(217,179,108,0.07)", x: "6vw", y: "58vh", s: "50vmax", mx: "9vmax", my: "-4vmax", dur: "34s", d: "-12s" },
 ];
 
 /** "#E4002B" + alpha -> "rgba(228,0,43,a)"; anything else passes through. */
@@ -255,7 +255,7 @@ export function Sparkline({
   className = "",
   style,
   stroke = "var(--k-green)",
-  fill = "rgba(18,161,80,0.12)",
+  fill = "rgba(31,214,127,0.14)",
   dot = true,
 }: {
   points: SeriesPoint[];
@@ -266,7 +266,7 @@ export function Sparkline({
   dot?: boolean;
 }) {
   const n = points.length;
-  const [drawn, setDrawn] = useState<{ n: number; flip: boolean; from: number }>({ n, flip: false, from: 1 });
+  const [drawn, setDrawn] = useState<{ n: number; flip: boolean; from: number }>({ n, flip: false, from: n > 1 ? 0 : 1 });
   if (drawn.n !== n) setDrawn({ n, flip: !drawn.flip, from: drawn.n <= 1 || n <= 1 ? 0 : (drawn.n - 1) / (n - 1) });
   if (n === 0) return <div className={className} style={style} aria-hidden="true" />;
   const ps = points.map((x) => x.p);
@@ -303,7 +303,7 @@ export function Sparkline({
       {dot && (
         <svg viewBox="0 0 10 10" className="hd-spark-dot" style={{ top: `${lastY}%` }}>
           <circle cx="5" cy="5" r="3.2" fill={stroke} className="hd-ping" />
-          <circle cx="5" cy="5" r="3.2" fill={stroke} stroke="#fff" strokeWidth="1.4" />
+          <circle cx="5" cy="5" r="3.2" fill={stroke} stroke="var(--k-card, #111)" strokeWidth="1.4" />
         </svg>
       )}
     </div>

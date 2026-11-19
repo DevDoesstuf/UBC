@@ -1,51 +1,54 @@
-/* ================================================================ Huddle "Kickoff" tokens (green + ivory)
-   Shared by the box preview, the phones and the TV page. Kit styles: components/huddle/huddle.css.
-   Fonts (bundled by app/layout.tsx, no runtime CDN): --font-head Bricolage Grotesque (headings),
-   --font-num Archivo (numbers, tabular), --font-body Atkinson Hyperlegible Next (body).
-   Contrast: ink 15:1 on canvas, ink-2 7.6:1, muted 4.9:1 (5.3:1 on card, 4.5:1 on well: small text passes AA
-   on every surface); white on green-deep 5.4:1 (green #12A150
-   carries white text only at 18.7px bold or larger); white on yes 4.7:1; ink on no 6.6:1. */
+/* ================================================================ Huddle tokens: dark "Kalshi" (black + beige)
+   Shared by the phones, the home page and the TV page; the same palette as the box (app/kiosk/kiosk.css).
+   Kit styles: components/huddle/huddle.css. Fonts (bundled by app/layout.tsx, no runtime CDN): --font-head
+   Bricolage Grotesque (headings), --font-num Archivo (numbers, tabular), --font-body Atkinson Hyperlegible Next.
+   Contrast on card #111: ink 14.6:1, ink-2 9.4:1, muted 5.0:1 (4.6:1 on the #1A1A1A well: small text passes AA
+   on every surface). Bright fills (green, YES, NO, gold, beige ink) carry black text (--k-on-fill), 7:1 or more. */
 :root {
-  --k-canvas: #F6F3EA;       /* ivory page */
-  --k-canvas-deep: #EFEBDF;  /* docks, inset rows */
-  --k-card: #FFFDF8;         /* raised surfaces */
-  --k-well: #EEEAE0;         /* tracks and wells inside cards */
-  --k-control: #E7E2D5;      /* disabled fills */
-  --k-rule: #E2DDD0;         /* hairlines, unlit ring pixels */
-  --k-rule-strong: #CBC4B2;  /* input rings */
-  --k-ink: #10261C;          /* deep green-black text, dark chips */
-  --k-ink-2: #3E5247;
-  --k-ink-muted: #616D64;     /* small secondary text: >= 4.5:1 on canvas, card and well (was #6C7A70, 4.07:1) */
-  --k-ink-faint: #949E96;    /* disabled text only */
+  --k-canvas: #000000;       /* page */
+  --k-canvas-deep: #0A0A0A;  /* docks, inset rows */
+  --k-card: #111111;         /* raised surfaces */
+  --k-well: #1A1A1A;         /* tracks and wells inside cards */
+  --k-control: #1F1F1F;      /* disabled fills */
+  --k-rule: #262626;         /* hairlines, unlit ring pixels */
+  --k-rule-strong: #3A3A3A;  /* input rings */
+  --k-ink: #E9DFC9;          /* beige text, light chips */
+  --k-ink-2: #BDB4A2;
+  --k-ink-muted: #8A8479;
+  --k-ink-faint: #5C574F;    /* disabled text only */
+  --k-on-fill: #000000;      /* text on any bright fill (green, YES, NO, gold, beige) */
+  --k-on-fill-2: rgba(0, 0, 0, 0.72);
 
-  --k-green: #12A150;        /* the accent: lit ring pixels, "now", the room's number, big fills */
-  --k-green-deep: #0B7A3E;   /* green fills under small white text, green text on light */
-  --k-green-50: #E8F5EC;
-  --k-green-100: #D2EDDB;
-  --k-lime: #7CCB4E;
-  --k-prime: linear-gradient(120deg, #0B7A3E 0%, #12A150 52%, #7CCB4E 100%);      /* big moments, hero CTAs */
-  --k-prime-deep: linear-gradient(120deg, #075E30 0%, #0B7A3E 55%, #2F8F2E 100%); /* same, under small white text */
-  --k-prime-soft: linear-gradient(120deg, #E3F3E8 0%, #EDF7E4 60%, #FBF1DE 100%);
+  --k-green: #1FD67F;        /* the accent: lit ring pixels, "now", the room's number, big fills */
+  --k-green-deep: #17B067;   /* hover / pressed fills; green text on dark (7.3:1 on card) */
+  --k-green-50: #0C2318;
+  --k-green-100: #113323;
+  --k-lime: #8FE3B0;
+  --k-prime: linear-gradient(120deg, #17B067 0%, #1FD67F 60%, #6EE7A8 100%);      /* big moments, hero CTAs */
+  --k-prime-deep: linear-gradient(120deg, #149C5B 0%, #17B067 55%, #1FD67F 100%); /* same, a step darker */
+  --k-prime-soft: linear-gradient(120deg, #0C2318 0%, #111A14 60%, #1E1A12 100%);
 
-  --k-yes: #1468FF;          /* YES fill, white text */
-  --k-yes-50: #EAF1FF;
-  --k-yes-600: #0B57E6;      /* blue text on light */
-  --k-no: #FF6B00;           /* NO fill, ink text */
-  --k-no-50: #FFF1E6;
-  --k-no-600: #B84300;       /* orange text on light */
-  --k-hot: #E5484D;          /* last 5 s, live */
-  --k-hot-50: #FDECEC;
-  --k-hot-600: #B42318;
-  --k-gold: #E8A33D;         /* money moving */
-  --k-gold-50: #FDF4E3;
-  --k-gold-600: #8A5A0B;
+  --k-yes: #1FD67F;          /* YES fill, black text */
+  --k-yes-50: #0C2318;       /* YES tint */
+  --k-yes-600: #1FD67F;      /* YES text on dark */
+  --k-yes-press: #17B067;
+  --k-no: #FF5148;           /* NO fill, black text */
+  --k-no-50: #2A1110;
+  --k-no-600: #FF6A62;       /* NO text on dark: 6.2:1 on card */
+  --k-no-press: #D93A33;
+  --k-hot: #FF5148;          /* last 5 s, live */
+  --k-hot-50: #2A1110;
+  --k-hot-600: #FF6A62;
+  --k-gold: #D9B36C;         /* money moving */
+  --k-gold-50: #211B10;
+  --k-gold-600: #D9B36C;
 
-  --k-shadow-lift: 0 1px 2px rgba(16, 38, 28, 0.06), 0 6px 18px -8px rgba(16, 38, 28, 0.16);
-  --k-shadow-pop: 0 2px 6px rgba(16, 38, 28, 0.08), 0 22px 44px -18px rgba(16, 38, 28, 0.32);
-  --k-shadow-green: 0 10px 24px -10px rgba(11, 122, 62, 0.65);
-  --k-shadow-yes: 0 10px 24px -10px rgba(20, 104, 255, 0.6);
-  --k-shadow-no: 0 10px 24px -10px rgba(255, 107, 0, 0.6);
-  --k-shadow-gold: 0 10px 24px -10px rgba(232, 163, 61, 0.7);
+  --k-shadow-lift: 0 0 0 1px var(--k-rule), 0 8px 22px -12px rgba(0, 0, 0, 0.9);
+  --k-shadow-pop: 0 0 0 1px #2E2E2E, 0 24px 48px -18px rgba(0, 0, 0, 0.95);
+  --k-shadow-green: 0 10px 28px -12px rgba(31, 214, 127, 0.55);
+  --k-shadow-yes: 0 10px 28px -12px rgba(31, 214, 127, 0.5);
+  --k-shadow-no: 0 10px 28px -12px rgba(255, 81, 72, 0.5);
+  --k-shadow-gold: 0 10px 28px -12px rgba(217, 179, 108, 0.55);
 
   --k-r-chip: 8px;
   --k-r-tile: 14px;
@@ -78,8 +81,8 @@
     --ease-bounce: linear(0, 0.058, 0.192, 0.351, 0.531, 0.688, 0.834, 0.942, 1.022, 1.078, 1.107, 1.118, 1.114, 1.1, 1.082, 1.062, 1.042, 1.025, 1.01, 1, 0.992, 0.988, 0.986, 0.986, 0.988, 0.99, 0.994, 0.997, 1, 1.001, 1.002, 1.001, 1);
   }
 }
-:focus-visible { outline: 3px solid var(--k-green-deep); outline-offset: 3px; }
-::selection { background: #CDEBD6; color: var(--k-ink); }
+:focus-visible { outline: 3px solid var(--k-green); outline-offset: 3px; }
+::selection { background: rgba(31, 214, 127, 0.35); color: var(--k-ink); }
 
 /* ================================================================ legacy classes
    Still used by the watch page and the web kiosk until they move to the kit. */
