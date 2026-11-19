@@ -13,9 +13,9 @@ import { avatarHash } from "@/lib/boxText";
 const P = {
   // Same as the firmware defaults (ui.cpp) and the palette lib/kiosk.ts sends: black, beige ink, muted green/red.
   canvas: "#000000", card: "#111111", well: "#1A1A1A", rule: "#262626", ruleStrong: "#3A3A3A", ink: "#E9DFC9",
-  ink2: "#BDB4A2", muted: "#8A8479", accent: "#E9DFC9", deep: "#CFC3A8", lime: "#3DBE84", yes: "#3DBE84",
-  yes600: "#2E9C6B", no: "#E5615A", no600: "#C24A44", hot: "#E5615A", gold: "#D9B36C", white: "#0A0A0A",
-  accentTint: "#26231C", yesTint: "#10261C", noTint: "#2B1513",
+  ink2: "#BDB4A2", muted: "#8A8479", accent: "#E9DFC9", deep: "#CFC3A8", lime: "#1FD67F", yes: "#1FD67F",
+  yes600: "#17B067", no: "#FF5148", no600: "#D93A33", hot: "#FF5148", gold: "#D9B36C", white: "#0A0A0A",
+  accentTint: "#26231C", yesTint: "#0B2E1E", noTint: "#36130F",
 };
 const GRAD = `linear-gradient(90deg, ${P.deep}, ${P.accent} 50%, ${P.lime})`;
 /** The question badge: one even blend from beige to green across the whole pill (matches the firmware). */

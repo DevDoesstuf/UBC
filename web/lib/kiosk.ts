@@ -240,8 +240,8 @@ export interface KioskScore {
  */
 export const KIOSK_PALETTE = {
   canvas: "#000000", card: "#111111", well: "#1A1A1A", rule: "#262626", ink: "#E9DFC9", ink2: "#BDB4A2",
-  muted: "#8A8479", accent: "#E9DFC9", accentDeep: "#CFC3A8", accentLight: "#3DBE84", yes: "#3DBE84",
-  no: "#E5615A", hot: "#E5615A", gold: "#D9B36C",
+  muted: "#8A8479", accent: "#E9DFC9", accentDeep: "#CFC3A8", accentLight: "#1FD67F", yes: "#1FD67F",
+  no: "#FF5148", hot: "#FF5148", gold: "#D9B36C",
 } as const;
 
 /** The firmware uses Latin-1 fonts: swap typographic characters, transliterate, drop what it cannot draw. */

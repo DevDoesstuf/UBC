@@ -37,18 +37,18 @@ static void defaultPalette() {
   P.muted = rgb(0x8A8479);  // AA on black, card and well
   P.accent = rgb(0xE9DFC9);
   P.deep = rgb(0xCFC3A8);
-  P.lime = rgb(0x3DBE84);
-  P.yes = rgb(0x3DBE84);
-  P.yes600 = rgb(0x2E9C6B);
-  P.no = rgb(0xE5615A);
-  P.no600 = rgb(0xC24A44);
-  P.hot = rgb(0xE5615A);
+  P.lime = rgb(0x1FD67F);
+  P.yes = rgb(0x1FD67F);
+  P.yes600 = rgb(0x17B067);
+  P.no = rgb(0xFF5148);
+  P.no600 = rgb(0xD93A33);
+  P.hot = rgb(0xFF5148);
   P.gold = rgb(0xD9B36C);
   P.white = rgb(0x0A0A0A);  // text on a filled button: near-black on beige / green / red
   P.accentTint = rgb(0x26231C);
   P.goldTint = rgb(0x2A2418);
-  P.yesTint = rgb(0x10261C);
-  P.noTint = rgb(0x2B1513);
+  P.yesTint = rgb(0x0B2E1E);
+  P.noTint = rgb(0x36130F);
 }
 
 // ================================================================ screen model (parsed once per JSON)
