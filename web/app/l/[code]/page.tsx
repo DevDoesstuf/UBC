@@ -349,8 +349,8 @@ export default function PhonePage() {
     addMoney: () => setMoneyOpen(true),
     buy: async (side: Side, cents: number) =>
       !!(await run(
-        () => api<{ shares: number }>(`/api/lobby/${code}/buy`, { body: { side, cents, ...tapBody() }, token }),
-        () => `${usd(cents)} on ${SIDE[side]}. You’re in.`,
+        () => api<{ shares: number; pending?: boolean }>(`/api/lobby/${code}/buy`, { body: { side, cents, ...tapBody() }, token }),
+        (r) => (r.pending ? `Tap the box to lock ${usd(cents)} on ${SIDE[side]}` : `${usd(cents)} on ${SIDE[side]}. You’re in.`),
       )),
     offer: async (side, cents, odds) =>
       !!(await run(
