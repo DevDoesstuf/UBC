@@ -173,23 +173,6 @@ export default function Home() {
           ))}
         </ol>
 
-        <footer className="hm-foot" role="status">
-          {health ? (
-            <>
-              <span>
-                Server ok · storage {health.storage} · money {health.money.mode}
-                {health.money.mode === "coinbase" && ` (${health.money.realMoney ? "real money" : "test mode"})`} · box key {health.kioskKey ? "on" : "off"}
-              </span>
-              {health.warnings.map((w) => (
-                <span key={w} className="hm-warn">
-                  {w}
-                </span>
-              ))}
-            </>
-          ) : (
-            "Checking the server…"
-          )}
-        </footer>
       </div>
     </div>
   );
