@@ -118,7 +118,12 @@ export async function creditPayments(code: string, playerId: string, found: Foun
         } else if (via === "quicknode") {
           pushChainEvent(lobby, { at, kind: "deposit", sig: pay.signature, explorer: explorerTx(pay.signature), playerId: me.id, cents: pay.cents, via });
         }
-        if (pay.from && !me.solanaAddress) me.solanaAddress = pay.from;
+        // The paying wallet becomes the payout address, unless the player already has their own one. A payment from a
+        // wallet app replaces the embedded Pay-instantly wallet (wallet "huddle").
+        if (pay.from && (!me.solanaAddress || (me.wallet === "huddle" && pay.from !== me.solanaAddress))) {
+          me.solanaAddress = pay.from;
+          me.wallet = "own";
+        }
       }
       if (paid && lobby.solanaRefs) delete lobby.solanaRefs[ref];
       if (paid && lobby.boxPay && lobby.boxPay.reference === ref && !lobby.boxPay.paidAt) lobby.boxPay.paidAt = at;

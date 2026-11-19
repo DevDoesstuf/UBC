@@ -75,6 +75,8 @@ export interface Player {
   lastSyncAt?: number;
   /** Solana wallet the player paid from or got faucet money at (default cash-out address). */
   solanaAddress?: string;
+  /** Whose wallet solanaAddress is: "huddle" = the embedded per-player devnet wallet (Pay instantly), "own" = the player's wallet app. */
+  wallet?: "huddle" | "own";
   /** Faucet already used in this lobby. */
   fauceted?: boolean;
 }
@@ -249,6 +251,8 @@ export interface Lobby {
   gemini?: GeminiSnapshot | null;
   /** MONEY_MODE=solana: open Solana Pay deposit requests by reference key. */
   solanaRefs?: Record<string, { playerId: string; cents: number; at: number }>;
+  /** "Pay instantly" requests by "playerId:nonce": the transaction's signature is recorded before it is sent. */
+  instantPays?: Record<string, { playerId: string; cents: number; reference: string; signature: string | null; at: number }>;
   /**
    * "Pay on the box": a phone asked the box to show a Solana Pay QR for this player's deposit. The box draws it and
    * clears it on touch `pay:close`; the server sets `paidAt` once the payment is credited and clears it ~4 s later
@@ -272,7 +276,7 @@ export interface ChainEvent {
   playerId?: string;
   cents?: number;
   /** Who found it: our own send ("server"), deposit polling ("sync"), the box QR check ("box"), or QuickNode ("quicknode"). */
-  via?: "server" | "sync" | "box" | "quicknode";
+  via?: "server" | "sync" | "box" | "quicknode" | "instant";
   /** A QuickNode Stream also delivered this transaction. */
   streamed?: boolean;
 }

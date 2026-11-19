@@ -24,7 +24,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
       const p = requirePlayer(l, token);
       if (p.fauceted) throw new ApiError(400, "You already got test money in this lobby");
       p.fauceted = true;
-      p.solanaAddress ??= address;
+      if (!p.solanaAddress) {
+        p.solanaAddress = address;
+        p.wallet = "own";
+      }
       playerId = p.id;
     });
     try {

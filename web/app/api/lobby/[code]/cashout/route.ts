@@ -39,6 +39,7 @@ async function vaultCashout(code: string, token: string | null, address: string)
     await mutate(code, (lobby) => {
       const me = requirePlayer(lobby, token);
       me.solanaAddress = address;
+      me.wallet = "own";
     });
   } else if (!p.solanaAddress) {
     throw new ApiError(400, "Enter the Solana address of your wallet");
@@ -85,7 +86,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ code: s
       const p = requirePlayer(l, token);
       const to = solana ? address || p.solanaAddress || "" : address;
       if (solana && !to) throw new ApiError(400, "Enter the Solana address of your wallet");
-      if (solana && address) p.solanaAddress = address;
+      if (solana && address) {
+        p.solanaAddress = address;
+        p.wallet = "own";
+      }
       w = reserveWithdrawal(l, p, onchain ? to : null, now);
     });
     const rec = w as unknown as WithdrawalRecord;

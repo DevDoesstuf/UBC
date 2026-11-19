@@ -1152,6 +1152,8 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
           stake: m && modeOf(m) === "pool" ? m.stakes?.[me.id] ?? { yes: 0, no: 0 } : undefined,
           /** MONEY_MODE=solana: the wallet cash-out goes to by default (paid from / faucet), and whether the faucet was used. */
           solanaAddress: me.solanaAddress ?? null,
+          /** "huddle": solanaAddress is the embedded Pay-instantly wallet; "own": a wallet app; null: none yet. */
+          wallet: me.solanaAddress ? me.wallet ?? "own" : null,
           fauceted: !!me.fauceted,
         }
       : null,
