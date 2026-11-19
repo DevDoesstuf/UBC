@@ -2983,7 +2983,7 @@ static void hotseatCard(const Screen &s) {
   textCenter(F_HERO, 400, 200, nm, P.ink, (uint8_t)(255 * fp));
   char m[16];
   snprintf(m, sizeof(m), "%dx", s.hotMult);
-  textCenter(F_N2, 400, 282, m, P.yes);
+  textCenter(F_H1, 400, 270, m, P.yes);  // the number fonts have digits only
   watch(wHot, (uint32_t)secs, 640, 300, 120, 120);
   countdownRing(700, 366, 44, left, max(hotBase, (int32_t)1000), P.gold);
   Btn b = {};
