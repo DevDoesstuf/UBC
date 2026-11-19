@@ -2091,13 +2091,17 @@ static void drawResult(const Screen &s, const NetStatus &st) {
 
 // ---------------------------------------------------------------- ended: podium + leaderboard
 
+// Ended, Kalshi-calm: the winner as a hero on the left (gold crown, name, final total, P&L; no crown on a tie),
+// the scorecard verdict as one short line, ranked list rows with +/- P&L on the right (shared ranks on ties),
+// a New game pill.
 static void drawEnded(const Screen &s, const NetStatus &st) {
-  wordmark(20, 40);
-  text(F_H2, 176, 42, s.title[0] ? s.title : "Session over", P.ink);
+  const char *ttl = s.title[0] ? s.title : "Session over";
+  text(F_H3, 24, 42, ttl, P.ink);
   int rx = SCR_W - 16;
   topRight(s, rx, st);
-  int tx = 176 + textW(F_H2, s.title[0] ? s.title : "Session over") + 16;
-  textFit(F_B2, tx, 41, rx - tx - 8, s.subtitle, P.ink2);
+  int tx = 24 + textW(F_H3, ttl) + 14;
+  textFit(F_B3, tx, 41, rx - tx - 8, s.subtitle, P.muted);
+  fill(16, 58, SCR_W - 32, 1, P.rule);
 
   // Leaderboard data: new field, else parse "1.  Sam  $12.00" lines.
   Person board[MAX_PEOPLE];
@@ -2118,60 +2122,61 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
     }
   }
 
-  // podium (left)
-  const int PX = 16, PW = 380, base = 452;
-  struct Slot { int rank, x, h; } slots[3] = {{2, PX + 8, 104}, {1, PX + 134, 156}, {3, PX + 260, 72}};
-  for (int k = 0; k < 3; k++) {
-    int rank = slots[k].rank;
-    if (rank > nb) continue;
-    const Person &p = board[rank - 1];
-    int x = slots[k].x, w = 112, h = slots[k].h, y = base - h;
-    int delay = rank == 1 ? 520 : rank == 2 ? 300 : 120;
-    float pr = prog(tScreen, delay, 640);
-    if (pr <= 0) {
-      mark(x - 10, 60, w + 20, SCR_H - 60);
-      continue;
-    }
-    float e = eBack(pr, 1.3f);
-    int bh = (int)(h * clampf(e, 0, 1.2f));
-    if (pr < 1) mark(x - 10, 60, w + 20, SCR_H - 60);
-    pushClip(0, 0, SCR_W, base);  // flat bottoms: the podium stands on the line
-    if (rank == 1) rrectGrad(x, base - bh, w, bh + 20, 18, P.deep, P.accent, P.lime);
-    else if (rank == 2) rrect(x, base - bh, w, bh + 20, 18, P.ink);
-    else {
-      shadow(x, base - bh, w, bh + 20, 18);
-      rrect(x, base - bh, w, bh + 20, 18, P.card);
-      rrectStroke(x, base - bh, w, bh + 20, 18, 1, P.rule);
-    }
-    popClip();
-    char rk[4];
-    snprintf(rk, sizeof(rk), "%d", rank);
-    if (bh > 50) textCenter(F_N2, x + w / 2, base - bh + 58, rk, rank == 3 ? P.ink : P.white, (uint8_t)(255 * clampf(pr * 2, 0, 1)));
-    uint8_t a = (uint8_t)(255 * clampf((pr - 0.4f) * 2.5f, 0, 1));
-    int ay = y - 92;
-    avatar(x + w / 2, ay + 22, 22, p.name, a);
-    if (rank == 1 && !s.boardTie) iconCrown(x + w / 2, ay - 12, 1.2f, P.gold, a);
-    char nm[24];
-    fit(F_B1, p.name, w + 8, nm, sizeof(nm));
-    textCenter(F_B1, x + w / 2, ay + 66, nm, P.ink, a);
-    char m[16];
-    fmtMoney(p.cents, m, sizeof(m));
-    textCenter(F_N4, x + w / 2, ay + 88, m, rank == 1 ? P.deep : P.ink2, a);
-  }
+  // ---- hero (left)
+  const int HX = 24, HW = 340;
   if (nb == 0) {
-    textCenter(F_B1, PX + PW / 2, 260, "No players this time", P.ink2);
+    textCenter(F_B1, HX + HW / 2, 250, "No players this time", P.ink2);
+  } else if (enter(tScreen, 120, 0, {HX, 70, HW, 300}, 640)) {
+    const Person &w0 = board[0];
+    bool tie = s.boardTie;
+    float pr = prog(tScreen, 120, 640);
+    if (pr < 1) mark(HX - 10, 70, HW + 20, 300);
+    avatar(HX + 34, 140, 32, w0.name);
+    if (!tie) iconCrown(HX + 34, 94, 1.1f, P.gold);
+    text(F_B3, HX + 80, 126, tie ? "Tied at the top" : "Winner", tie ? P.ink2 : P.gold);
+    char nm[24];
+    fit(F_H2, w0.name, HW - 80, nm, sizeof(nm));
+    text(F_H2, HX + 80, 158, nm, P.ink);
+    if (tie) {  // everyone sharing rank 1, in one quiet line
+      char also[64] = "with ";
+      int k = 0;
+      for (int i = 1; i < nb && board[i].rank == w0.rank && w0.rank > 0; i++, k++) {
+        if (k) strlcat(also, ", ", sizeof(also));
+        strlcat(also, board[i].name, sizeof(also));
+      }
+      if (k) textFit(F_B3, HX + 80, 180, HW - 80, also, P.ink2);
+    }
+    char m[16];
+    fmtMoney(w0.cents, m, sizeof(m));
+    text(F_N2, HX - 2, 262, m, P.ink);
+    if (w0.has2 && w0.extra != 0) {
+      char pl[16];
+      fmtMoney(w0.extra, pl, sizeof(pl), true);
+      uint16_t c = w0.extra > 0 ? P.yes : P.no;
+      iconArrow(HX + 6, 290, 0.6f, w0.extra > 0, c);
+      text(F_B1, HX + 18, 297, pl, c);
+      text(F_B2, HX + 26 + textW(F_B1, pl), 297, "this session", P.muted);
+    } else {
+      text(F_B2, HX, 297, "final total", P.muted);
+    }
   }
-  fill(PX, base, PW, 2, P.ruleStrong);
-  if (s.verdict[0]) textFit(F_B3, PX, 472, PW, s.verdict, P.ink2);
+  layerReset();
+  // scorecard: one short line
+  if (s.verdict[0] && enter(tScreen, 520, 0, {HX, 330, HW, 40})) {
+    fill(HX, 334, HW, 1, P.rule);
+    circle(HX + 4, 356, 3, P.ink2);
+    textFit(F_B3, HX + 14, 361, HW - 14, s.verdict, P.ink2);
+  }
+  layerReset();
 
-  // standings (right, scrolls)
-  const int LX = 412, LW = SCR_W - 16 - LX;
-  text(F_H3, LX, 92, "Final standings", P.ink);
-  int listY = 104, listH = 286, rowH = 56, gap = 6;
-  float off = scrollArea(0, LX - 4, listY, LW + 8, listH, nb * (rowH + gap));
+  // ---- ranked rows (right, scrolls)
+  const int LX = 396, LW = SCR_W - 20 - LX;
+  text(F_B3, LX, 86, "Final standings", P.muted);
+  int listY = 96, listH = 300, rowH = 50;
+  float off = scrollArea(0, LX - 4, listY, LW + 8, listH, nb * rowH);
   pushClip(LX - 8, listY, LW + 16, listH);
   for (int i = 0; i < nb; i++) {
-    int ry = listY + i * (rowH + gap) - (int)off;
+    int ry = listY + i * rowH - (int)off;
     if (ry + rowH < listY || ry > listY + listH) continue;
     float pr = prog(tScreen, 300 + i * 70, 480);
     if (pr <= 0) {
@@ -2184,48 +2189,38 @@ static void drawEnded(const Screen &s, const NetStatus &st) {
     }
     const Person &p = board[i];
     bool lead = i == 0 && !s.boardTie;
-    if (lead) rrect(LX, ry, LW, rowH, 16, P.ink);
-    else card(LX, ry, LW, rowH, 16);
+    if (lead) rrect(LX - 6, ry + 2, LW + 12, rowH - 4, 12, P.goldTint);
     char rk[4];
     snprintf(rk, sizeof(rk), "%d", p.rank > 0 ? p.rank : i + 1);
-    textCenter(F_N4, LX + 20, ry + 35, rk, lead ? P.gold : P.muted);
-    avatar(LX + 54, ry + rowH / 2, 17, p.name);
+    textCenter(F_N4, LX + 12, ry + 32, rk, lead ? P.gold : P.muted);
+    avatar(LX + 46, ry + rowH / 2, 15, p.name);
     char m[16];
     fmtMoney(p.cents, m, sizeof(m));
+    char pl[16] = "";
+    if (p.has2 && p.extra != 0) fmtMoney(p.extra, pl, sizeof(pl), true);
+    int plw = pl[0] ? textW(F_B2, pl) + 14 : 0;
     int mw = textW(F_N4, m);
-    textFit(F_B1, LX + 80, ry + 35, LW - 100 - mw, p.name, lead ? P.white : P.ink);
-    if (p.has2 && p.extra != 0) {
-      textRight(F_N4, LX + LW - 14, ry + 27, m, lead ? P.white : P.ink);
-      char pl[16];
-      fmtMoney(p.extra, pl, sizeof(pl), true);
-      uint16_t c = lead ? P.lime : p.extra > 0 ? P.yes600 : P.no600;
-      int pw = textW(F_B3, pl);
-      iconArrow(LX + LW - 14 - pw - 9, ry + 42, 0.55f, p.extra > 0, c);
-      textRight(F_B3, LX + LW - 14, ry + 47, pl, c);
-    } else {
-      textRight(F_N4, LX + LW - 14, ry + 36, m, lead ? P.white : P.ink);
-    }
+    textFit(F_B1, LX + 70, ry + 32, LW - 70 - mw - plw - 14, p.name, P.ink);
+    textRight(F_N4, LX + LW - plw, ry + 32, m, P.ink);
+    if (pl[0]) textRight(F_B2, LX + LW, ry + 31, pl, p.extra > 0 ? P.yes : P.no);
+    if (!lead) fill(LX, ry + rowH - 1, LW, 1, P.rule);
     layerReset();
   }
   popClip();
   if (scrolls[0].maxOff > 0) {
     Scroller &sc = scrolls[0];
-    int barH = max(30, listH * listH / max(1, nb * (rowH + gap)));
+    int barH = max(30, listH * listH / max(1, nb * rowH));
     int barY = listY + (int)((listH - barH) * clampf(sc.off / max(1.f, sc.maxOff), 0, 1));
-    rrect(SCR_W - 9, barY, 4, barH, 2, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
+    rrect(SCR_W - 9, barY, 3, barH, 1, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
     if (NOW - sc.lastMove < 1500) mark(SCR_W - 12, listY, 12, listH);
   }
   const Btn *nw = findBtn(s, "new");
-  if (nw && enter(tScreen, 700, 0, {(int16_t)LX, 400, (int16_t)LW, 66})) {
+  if (nw && enter(tScreen, 700, 0, {(int16_t)LX, 410, (int16_t)LW, 52})) {
     Btn b = *nw;
     b.style = B_BRAND;
-    button(LX, 400, LW, 66, b, F_H3, 22);
+    button(LX, 410, LW, 52, b, F_B1, 26);
   }
   layerReset();
-  if (nb > 0) {
-    uint16_t cols[5] = {P.gold, P.lime, P.accent, P.yes, P.no};
-    burst(tScreen, 900, PX + 190, 230, 40, 7, cols, 5);
-  }
 }
 
 // ---------------------------------------------------------------- pages: market / locked / result scroll down
@@ -2728,14 +2723,14 @@ static void payCard(const Screen &s) {
   hit(0, 0, SCR_W, SCR_H, "ui:none");  // nothing under the card reacts while it is up
   const int X = 60, Y = 40, W = 680, H = 400;
   if (enter(tPay, 60, 0, {X, Y, W, H})) {
-    card(X, Y, W, H, 30);
+    rrect(X, Y, W, H, 20, P.card);
+    rrectStroke(X, Y, W, H, 20, 1, P.ruleStrong);
     const int qx = 84, qy = 64, qb = 352, qcx = qx + qb / 2, qcy = qy + qb / 2;
     char amt[16];
     fmtMoney(s.payCents, amt, sizeof(amt));
     bool expired = !s.payPaid && payLeft() <= 0;
     if (!s.payPaid) {
-      rrect(qx, qy, qb, qb, 22, P.ink);
-      rrectStroke(qx, qy, qb, qb, 22, 2, P.rule);
+      rrect(qx, qy, qb, qb, 14, P.ink);
       if (s.payQrSize) {
         int scale = max(1, (qb - 28) / s.payQrSize);
         int ox = qx + (qb - scale * s.payQrSize) / 2, oy = qy + (qb - scale * s.payQrSize) / 2;
@@ -2796,7 +2791,7 @@ static void payCard(const Screen &s) {
       strlcpy(b.label, "Close", sizeof(b.label));
       b.style = B_PLAIN;
       b.enabled = true;
-      button(rx, 360, rw, 58, b, F_B1, 20);
+      button(rx, 366, rw, 48, b, F_B1, 24);
     } else {
       float tp = prog(tPaid, 360, 420);
       uint8_t a = (uint8_t)(255 * tp);
@@ -2812,7 +2807,7 @@ static void payCard(const Screen &s) {
       strlcpy(b.label, "Done", sizeof(b.label));
       b.style = B_BRAND;
       b.enabled = true;
-      button(rx, 360, rw, 58, b, F_B1, 20);
+      button(rx, 366, rw, 48, b, F_B1, 24);
     }
   }
   layerReset();
@@ -2942,22 +2937,26 @@ static void hotseatCard(const Screen &s) {
   hit(0, 0, SCR_W, SCR_H, "ui:none");
   int32_t left = xLeft(hotBase);
   int secs = (left + 999) / 1000;
-  textCenter(F_B1, 400, 90, "HOT SEAT", P.gold);
+  rrect(140, 60, 520, 360, 20, P.card);
+  rrectStroke(140, 60, 520, 360, 20, 1, P.ruleStrong);
+  circle(178, 100, 4, P.gold);
+  text(F_B2, 190, 106, "Hot seat", P.gold);
   char nm[24];
-  fit(F_HERO, s.hotName[0] ? s.hotName : "Player", 720, nm, sizeof(nm));
-  textCenter(F_HERO, 400, 200, nm, P.ink, (uint8_t)(255 * fp));
+  fit(F_H1, s.hotName[0] ? s.hotName : "Player", 440, nm, sizeof(nm));
+  text(F_H1, 172, 190, nm, P.ink, (uint8_t)(255 * fp));
   char m[16];
   snprintf(m, sizeof(m), "%dx", s.hotMult);
-  textCenter(F_H1, 400, 270, m, P.yes);  // the number fonts have digits only
-  watch(wHot, (uint32_t)secs, 640, 300, 120, 120);
-  countdownRing(700, 366, 44, left, max(hotBase, (int32_t)1000), P.gold);
+  text(F_H2, 172, 246, m, P.yes);  // the number fonts have digits only
+  text(F_B2, 172 + textW(F_H2, m) + 10, 244, "on your next call", P.ink2);
+  watch(wHot, (uint32_t)secs, 540, 60, 120, 120);
+  countdownRing(590, 128, 32, left, max(hotBase, (int32_t)1000), P.gold);
   Btn b = {};
   strlcpy(b.id, "hotseat:accept", sizeof(b.id));
   if (s.hotMult == 2) strlcpy(b.label, "Tap to double", sizeof(b.label));
   else snprintf(b.label, sizeof(b.label), "Tap for %dx", s.hotMult);
   b.style = B_YES;
   b.enabled = left > 0;
-  button(220, 330, 360, 72, b, F_H3, 36);
+  button(172, 330, 456, 56, b, F_B1, 28);
 }
 
 // Confirm: "Ayan, tap your phone here to lock $5 on YES" with a tap icon and a countdown.
@@ -2968,6 +2967,8 @@ static void confirmCard(const Screen &s) {
   fill(0, 0, SCR_W, SCR_H, P.canvas, (uint8_t)(225 * eOut(fp)));
   hit(0, 0, SCR_W, SCR_H, "ui:none");
   uint16_t c = s.confYes ? P.yes : P.no;
+  rrect(110, 36, 580, 408, 20, P.card);
+  rrectStroke(110, 36, 580, 408, 20, 1, P.ruleStrong);
   const int ix = 400, iy = 140;
   rrectStroke(ix - 28, iy - 48, 56, 96, 12, 3, P.ink);
   fill(ix - 10, iy + 34, 20, 3, P.ink);
@@ -2979,13 +2980,13 @@ static void confirmCard(const Screen &s) {
   char amt[16], l1[64], l2[48], fl[64];
   fmtMoney(s.confCents, amt, sizeof(amt));
   snprintf(l1, sizeof(l1), "%s, tap your phone here", s.confName[0] ? s.confName : "Player");
-  fit(F_H2, l1, 740, fl, sizeof(fl));
-  textCenter(F_H2, 400, 262, fl, P.ink);
+  fit(F_H3, l1, 540, fl, sizeof(fl));
+  textCenter(F_H3, 400, 262, fl, P.ink);
   snprintf(l2, sizeof(l2), "to lock %s on ", amt);
   const char *side = s.confYes ? "YES" : "NO";
-  int w1 = textW(F_H2, l2), w2 = textW(F_H2, side), x0 = 400 - (w1 + w2) / 2;
-  text(F_H2, x0, 304, l2, P.ink2);
-  text(F_H2, x0 + w1, 304, side, c);
+  int w1 = textW(F_H3, l2), w2 = textW(F_H3, side), x0 = 400 - (w1 + w2) / 2;
+  text(F_H3, x0, 300, l2, P.ink2);
+  text(F_H3, x0 + w1, 300, side, c);
   int32_t left = xLeft(confBase);
   countdownRing(400, 396, 40, left, max(confBase, (int32_t)1000), c);
 }
@@ -2997,19 +2998,20 @@ static void flashToast(const Screen &s) {
   overlay(x - 4, 0, w + 8, h + 30);
   if (fp < 1) mark(x - 4, 0, w + 8, h + 30);
   uint16_t c = s.flashKind == 'w' ? P.yes : s.flashKind == 'l' ? P.no : P.gold;
-  rrect(x, y, w, h, 20, P.card);
-  rrectStroke(x, y, w, h, 20, 2, c);
-  avatar(x + 42, y + h / 2, 24, s.flashName[0] ? s.flashName : "?");
+  rrect(x, y, w, h, 16, P.card);
+  rrectStroke(x, y, w, h, 16, 1, P.ruleStrong);
+  fill(x + 16, y + 14, 3, h - 28, c);
+  avatar(x + 48, y + h / 2, 20, s.flashName[0] ? s.flashName : "?");
   int tx = x + 80;
   char nm[24];
-  fit(F_H3, s.flashName[0] ? s.flashName : "Someone", 240, nm, sizeof(nm));
-  text(F_H3, tx, y + 32, nm, P.ink);
-  textFit(F_B2, tx, y + 58, w - 100 - (s.flashCents ? 120 : 0), s.flashText, P.ink2);
+  fit(F_B1, s.flashName[0] ? s.flashName : "Someone", 240, nm, sizeof(nm));
+  text(F_B1, tx, y + 32, nm, P.ink);
+  textFit(F_B3, tx, y + 56, w - 100 - (s.flashCents ? 120 : 0), s.flashText, P.ink2);
   if (s.flashCents) {
     char amt[16], sg[20];
     fmtMoney(s.flashCents, amt, sizeof(amt));
     snprintf(sg, sizeof(sg), "%s%s", s.flashKind == 'l' ? "-" : "+", amt);
-    textRight(F_N3, x + w - 18, y + 50, sg, c);
+    textRight(F_N4, x + w - 20, y + 46, sg, c);
   }
 }
 
@@ -3020,7 +3022,8 @@ static void interludeCard(const Screen &s) {
   if (fp < 1) mark(0, 0, SCR_W, SCR_H);
   fill(0, 0, SCR_W, SCR_H, P.canvas);
   hit(0, 0, SCR_W, SCR_H, "ui:none");
-  text(F_H2, 40, 64, "Standings", P.ink);
+  text(F_H3, 40, 60, "Standings", P.ink);
+  fill(40, 76, 720, 1, P.rule);
   int32_t left = xLeft(interBase);
   int secs = (left + 999) / 1000;
   char t[24];
@@ -3035,18 +3038,19 @@ static void interludeCard(const Screen &s) {
     int y = 96 + i * 62, x = 40 + (int)(40 * (1 - rp));
     uint8_t a = (uint8_t)(255 * rp);
     bool lead = i == 0 && !s.standTie;
-    rrect(x, y, 720, 54, 14, lead ? P.accentTint : P.card, a);
+    if (lead) rrect(x - 8, y, 736, 54, 12, P.goldTint, a);
+    else fill(x, y + 53, 720, 1, P.rule, a);
     char rk[6];
     snprintf(rk, sizeof(rk), "%d", p.rank > 0 ? p.rank : i + 1);
-    text(F_N3, x + 20, y + 39, rk, i == 0 ? P.gold : P.muted, a);
-    avatar(x + 92, y + 27, 18, p.name, a);
-    textFit(F_H3, x + 124, y + 36, 380, p.name, P.ink, a);
+    textCenter(F_N4, x + 14, y + 35, rk, lead ? P.gold : P.muted, a);
+    avatar(x + 56, y + 27, 16, p.name, a);
+    textFit(F_B1, x + 84, y + 34, 420, p.name, P.ink, a);
     char m[16], pl[20], sg[24];
     fmtMoney(p.cents, m, sizeof(m));
-    textRight(F_N4, x + 700, y + 26, m, P.ink, a);
+    textRight(F_N4, x + 720 - 110, y + 34, m, P.ink, a);
     fmtMoney(abs(p.extra), pl, sizeof(pl));
     snprintf(sg, sizeof(sg), "%s%s", p.extra < 0 ? "-" : "+", pl);
-    textRight(F_B3, x + 700, y + 46, sg, p.extra < 0 ? P.no : P.yes, a);
+    textRight(F_B2, x + 720, y + 33, sg, p.extra < 0 ? P.no : P.yes, a);
   }
 }
 
