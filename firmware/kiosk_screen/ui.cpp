@@ -26,28 +26,29 @@ struct Palette {
 };
 static Palette P;
 static void defaultPalette() {
-  P.canvas = rgb(0xF6F3EA);
-  P.card = rgb(0xFFFDF8);
-  P.well = rgb(0xEEEAE0);
-  P.rule = rgb(0xE2DDD0);
-  P.ruleStrong = rgb(0xCFC8B8);
-  P.ink = rgb(0x10261C);
-  P.ink2 = rgb(0x3E5247);
-  P.muted = rgb(0x616D64);  // AA on canvas, card and well (the site sends the same in palette.muted)
-  P.accent = rgb(0x12A150);
-  P.deep = rgb(0x0B7A3E);
-  P.lime = rgb(0x7CCB4E);
-  P.yes = rgb(0x1468FF);
-  P.yes600 = rgb(0x0B57E6);
-  P.no = rgb(0xFF6B00);
-  P.no600 = rgb(0xB84300);
-  P.hot = rgb(0xE5484D);
-  P.gold = rgb(0xE8A33D);
-  P.white = rgb(0xFFFFFF);
-  P.accentTint = rgb(0xE3F2E7);
-  P.goldTint = rgb(0xFBEFD9);
-  P.yesTint = rgb(0xE8F0FF);
-  P.noTint = rgb(0xFFF0E5);
+  // Dark, calm look: black canvas, beige ink and highlights, muted green / red for YES / NO and win / lose.
+  P.canvas = rgb(0x000000);
+  P.card = rgb(0x111111);
+  P.well = rgb(0x1A1A1A);
+  P.rule = rgb(0x262626);
+  P.ruleStrong = rgb(0x3A3A3A);
+  P.ink = rgb(0xE9DFC9);
+  P.ink2 = rgb(0xBDB4A2);
+  P.muted = rgb(0x8A8479);  // AA on black, card and well
+  P.accent = rgb(0xE9DFC9);
+  P.deep = rgb(0xCFC3A8);
+  P.lime = rgb(0x3DBE84);
+  P.yes = rgb(0x3DBE84);
+  P.yes600 = rgb(0x2E9C6B);
+  P.no = rgb(0xE5615A);
+  P.no600 = rgb(0xC24A44);
+  P.hot = rgb(0xE5615A);
+  P.gold = rgb(0xD9B36C);
+  P.white = rgb(0x0A0A0A);  // text on a filled button: near-black on beige / green / red
+  P.accentTint = rgb(0x26231C);
+  P.goldTint = rgb(0x2A2418);
+  P.yesTint = rgb(0x10261C);
+  P.noTint = rgb(0x2B1513);
 }
 
 // ================================================================ screen model (parsed once per JSON)
@@ -163,6 +164,15 @@ struct Screen {
   int nStand;
   bool standTie;
   uint32_t chartHash, oddsHash, standHash;
+  // ---- box-only extras (optional JSON; missing = nothing drawn). leftMs values tick: not in xHash.
+  int16_t betsN, betsOf;  // betsIn {n, of}; betsOf 0 = none
+  bool hasHot, hasTip, hasFlash, hasConfirm, hasInter;
+  char hotName[24], tipLabel[24], tipText[140], flashName[24], flashText[64], confName[24];
+  int16_t hotMult;
+  char flashKind;  // 'j' join, 'w' bigwin, 'l' bigloss
+  bool confYes;
+  int32_t flashCents, confCents, hotLeft, flashLeft, confLeft, interLeft;
+  uint32_t xHash;
 };
 #define SCREEN_CORE offsetof(Screen, chart)  // memcmp up to here decides a full redraw
 
@@ -468,6 +478,60 @@ static void parsePage(Screen &s, JsonObjectConst j) {
   s.chartHash = memHash(&s.chart, sizeof(s.chart));
   s.oddsHash = memHash(s.odds, sizeof(s.odds)) ^ memHash(s.oddsNote, sizeof(s.oddsNote)) ^ (uint32_t)s.nOdds;
   s.standHash = memHash(s.stand, sizeof(s.stand)) ^ (uint32_t)s.nStand * 977u ^ (s.standTie ? 1u : 0u);
+
+  // box-only extras
+  s.betsN = s.betsOf = 0;
+  s.hasHot = s.hasTip = s.hasFlash = s.hasConfirm = s.hasInter = false;
+  {
+    JsonObjectConst b = j["betsIn"].as<JsonObjectConst>();
+    if (!b.isNull()) {
+      s.betsOf = constrain((int)(b["of"] | 0), 0, 99);
+      s.betsN = constrain((int)(b["n"] | 0), 0, (int)s.betsOf);
+    }
+    JsonObjectConst h = j["hotseat"].as<JsonObjectConst>();
+    if (!h.isNull()) {
+      s.hasHot = true;
+      CPY(s.hotName, h["name"]);
+      s.hotMult = constrain((int)(h["mult"] | 2), 1, 99);
+      s.hotLeft = constrain((int32_t)(h["leftMs"] | 0), (int32_t)0, (int32_t)600000);
+    }
+    JsonObjectConst t = j["tip"].as<JsonObjectConst>();
+    if (!t.isNull()) {
+      CPY(s.tipLabel, t["label"]);
+      CPY(s.tipText, t["text"]);
+      s.hasTip = s.tipText[0] != 0;
+    }
+    JsonObjectConst f = j["flash"].as<JsonObjectConst>();
+    if (!f.isNull()) {
+      s.hasFlash = true;
+      const char *k = f["kind"] | "join";
+      s.flashKind = !strcmp(k, "bigwin") ? 'w' : !strcmp(k, "bigloss") ? 'l' : 'j';
+      CPY(s.flashName, f["name"]);
+      CPY(s.flashText, f["text"]);
+      s.flashCents = constrain((int32_t)(f["cents"] | 0), (int32_t)0, (int32_t)100000000);
+      s.flashLeft = constrain((int32_t)(f["leftMs"] | 0), (int32_t)0, (int32_t)60000);
+    }
+    JsonObjectConst c = j["confirm"].as<JsonObjectConst>();
+    if (!c.isNull()) {
+      s.hasConfirm = true;
+      CPY(s.confName, c["name"]);
+      s.confYes = strcmp(c["side"] | "YES", "NO") != 0;
+      s.confCents = constrain((int32_t)(c["cents"] | 0), (int32_t)0, (int32_t)100000000);
+      s.confLeft = constrain((int32_t)(c["leftMs"] | 0), (int32_t)0, (int32_t)600000);
+    }
+    JsonObjectConst in = j["interlude"].as<JsonObjectConst>();
+    if (!in.isNull()) {
+      s.hasInter = true;
+      s.interLeft = constrain((int32_t)(in["leftMs"] | 0), (int32_t)0, (int32_t)600000);
+    }
+    uint32_t hh = (uint32_t)s.betsN * 131u + (uint32_t)s.betsOf * 7u;
+    hh ^= (s.hasHot ? 1u : 0) | (s.hasTip ? 2u : 0) | (s.hasFlash ? 4u : 0) | (s.hasConfirm ? 8u : 0) | (s.hasInter ? 16u : 0);
+    hh ^= memHash(s.hotName, sizeof(s.hotName)) * 3u ^ memHash(s.tipText, sizeof(s.tipText)) * 5u;
+    hh ^= memHash(s.flashText, sizeof(s.flashText)) * 7u ^ memHash(s.confName, sizeof(s.confName)) * 11u;
+    hh ^= memHash(s.flashName, sizeof(s.flashName)) * 13u ^ memHash(s.tipLabel, sizeof(s.tipLabel)) * 17u;
+    hh ^= (uint32_t)s.hotMult * 19u ^ (uint32_t)s.confCents * 23u ^ (uint32_t)s.flashCents * 29u ^ (s.confYes ? 64u : 0);
+    s.xHash = hh;
+  }
 
   JsonObjectConst pay = j["pay"].as<JsonObjectConst>();
   if (!pay.isNull()) {
@@ -1426,14 +1490,14 @@ static void drawSelect(const Screen &s, const NetStatus &st) {
 // ---------------------------------------------------------------- lobby
 
 static void drawQR(const Screen &s, int x, int y, int box) {
-  rrect(x, y, box, box, 18, P.white);
+  rrect(x, y, box, box, 18, P.ink);  // light quiet zone, dark modules (scanners want dark on light)
   if (!s.qrSize) return;
   int inner = box - 20;
   int scale = max(1, inner / s.qrSize);
   int ox = x + (box - scale * s.qrSize) / 2, oy = y + (box - scale * s.qrSize) / 2;
   for (int r = 0; r < s.qrSize; r++)
     for (int c = 0; c < s.qrSize; c++)
-      if (s.qr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.ink);
+      if (s.qr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.canvas);
 }
 
 static void personRow(const Person &p, int x, int y, int w, int h, uint32_t bornAt, bool lobby) {
@@ -1802,7 +1866,6 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
         x += text(F_B2, x, y, "Gemini ", P.ink2);
         snprintf(v, sizeof(v), "%d\xC2\xA2", s.gemini);
         x += text(F_N4, x, y + 1, v, P.ink);
-        if (!s.geminiLive) text(F_B3, x + 8, y, "(last seen)", P.muted);
       }
     } else {
       textFit(F_B2, x, y, LW, locked ? s.subtitle : "Buy YES or NO on your phone. A winning share pays $1", P.ink2);
@@ -1850,8 +1913,7 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
       // recent trades
       int y = 356;
       if (s.nTrades == 0) {
-        text(F_B3, RX, y + 20, "No trades yet.", P.muted);
-        text(F_B3, RX, y + 40, "Phones buy YES or NO.", P.muted);
+        text(F_B3, RX, y + 20, "No trades", P.muted);
       }
       for (int i = 0; i < min(3, s.nTrades); i++) {
         const TradeRow &t = s.trades[i];
@@ -2509,7 +2571,7 @@ static void listsSection(const Screen &s, int y, int h) {
     card(x, y, cw, h, 22);
     text(F_H3, x + 18, y + 36, side ? "Standings" : "Recent trades", P.ink);
     int n = side ? min(8, s.nStand) : min(8, s.nTrades);
-    if (n == 0) text(F_B2, x + 18, y + 80, side ? "No players yet." : "No trades yet. Phones buy YES or NO.", P.ink2);
+    if (n == 0) text(F_B2, x + 18, y + 80, side ? "No players" : "No trades", P.ink2);
     for (int i = 0; i < n; i++) {
       int ry = y + 54 + i * rowH;
       if (!side) {
@@ -2698,7 +2760,7 @@ static void payCard(const Screen &s) {
   float fp = prog(tPay, 0, 260);
   overlay(0, 0, SCR_W, SCR_H);
   if (fp < 1) mark(0, 0, SCR_W, SCR_H);
-  fill(0, 0, SCR_W, SCR_H, P.ink, (uint8_t)(150 * eOut(fp)));
+  fill(0, 0, SCR_W, SCR_H, P.canvas, (uint8_t)(190 * eOut(fp)));
   hit(0, 0, SCR_W, SCR_H, "ui:none");  // nothing under the card reacts while it is up
   const int X = 60, Y = 40, W = 680, H = 400;
   if (enter(tPay, 60, 0, {X, Y, W, H})) {
@@ -2708,14 +2770,14 @@ static void payCard(const Screen &s) {
     fmtMoney(s.payCents, amt, sizeof(amt));
     bool expired = !s.payPaid && payLeft() <= 0;
     if (!s.payPaid) {
-      rrect(qx, qy, qb, qb, 22, P.white);
+      rrect(qx, qy, qb, qb, 22, P.ink);
       rrectStroke(qx, qy, qb, qb, 22, 2, P.rule);
       if (s.payQrSize) {
         int scale = max(1, (qb - 28) / s.payQrSize);
         int ox = qx + (qb - scale * s.payQrSize) / 2, oy = qy + (qb - scale * s.payQrSize) / 2;
         for (int r = 0; r < s.payQrSize; r++)
           for (int c = 0; c < s.payQrSize; c++)
-            if (s.payQr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.ink);
+            if (s.payQr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.canvas);
       } else {
         textCenter(F_B1, qcx, qcy - 6, "Pay from your phone", P.ink2);
         textCenter(F_B3, qcx, qcy + 20, "This request does not fit a QR", P.muted);
@@ -2857,6 +2919,181 @@ static void drawConnection(const NetStatus &st, bool hadScreen) {
   if (!st.lastOkMs) text(F_B3, 32, y + 130, "A hosted site can take 30 s to wake up.", P.muted);
 }
 
+// ---------------------------------------------------------------- box-only extras (betsIn, tip, overlays)
+
+static uint32_t xAt = 0, tHot = 0, tFlash = 0, tConf = 0, tInter = 0;
+static int32_t hotBase = 0, flashBase = 0, confBase = 0, interBase = 0;
+static Watch wHot, wConf, wInter;
+static int32_t xLeft(int32_t base) {
+  int32_t r = base - (int32_t)(NOW - xAt);
+  return r < 0 ? 0 : r;
+}
+
+// "3 of 5 in": one dot per player, filled for those who have bet (bottom left of the market view).
+static void betsInStrip(const Screen &s) {
+  if (s.betsOf <= 0 || (s.scr != S_MARKET && s.scr != S_LOCKED)) return;
+  const int x = 24, y = 462;
+  overlay(x - 4, y - 14, 400, 28);
+  char b[24];
+  snprintf(b, sizeof(b), "%d of %d in", s.betsN, s.betsOf);
+  text(F_B3, x, y + 5, b, s.betsN >= s.betsOf ? P.yes : P.ink2);
+  int dx = x + textW(F_B3, b) + 14, n = min((int)s.betsOf, 12);
+  for (int i = 0; i < n; i++) {
+    if (i < s.betsN) circle(dx + i * 16 + 5, y, 5, P.yes);
+    else ring(dx + i * 16 + 5, y, 5, 1.5f, P.ruleStrong);
+  }
+}
+
+// "Inside info": a small gold-edged card only the box shows.
+static void tipCard(const Screen &s) {
+  if (!s.hasTip || (s.scr != S_MARKET && s.scr != S_LOCKED)) return;
+  const int x = 500, y = 398, w = 284, h = 52;
+  overlay(x, y, w, h);
+  rrect(x, y, w, h, 12, P.card);
+  rrectStroke(x, y, w, h, 12, 1, P.gold);
+  text(F_B3, x + 12, y + 20, s.tipLabel[0] ? s.tipLabel : "Inside info", P.gold);
+  textFit(F_B3, x + 12, y + 40, w - 24, s.tipText, P.ink);
+}
+
+static void countdownRing(int cx, int cy, int r, int32_t left, int32_t total, uint16_t c) {
+  ring(cx, cy, r, 4, P.rule);
+  float f = total > 0 ? clampf((float)left / total, 0, 1) : 0;
+  int segs = (int)(90 * f);
+  for (int i = 0; i < segs; i++) {
+    float a0 = -1.5708f + 6.2832f * i / 90.f;
+    circle(cx + cosf(a0) * r, cy + sinf(a0) * r, 2.6f, c);
+  }
+  char t[8];
+  snprintf(t, sizeof(t), "%d", (int)((left + 999) / 1000));
+  textCenter(F_N3, cx, cy + 11, t, P.ink);
+}
+
+// Hot seat: name huge, "Tap to double" (touch id hotseat:accept), a countdown.
+static void hotseatCard(const Screen &s) {
+  float fp = prog(tHot, 0, 320);
+  overlay(0, 0, SCR_W, SCR_H);
+  if (fp < 1) mark(0, 0, SCR_W, SCR_H);
+  fill(0, 0, SCR_W, SCR_H, P.canvas, (uint8_t)(235 * eOut(fp)));
+  hit(0, 0, SCR_W, SCR_H, "ui:none");
+  int32_t left = xLeft(hotBase);
+  int secs = (left + 999) / 1000;
+  textCenter(F_B1, 400, 90, "HOT SEAT", P.gold);
+  char nm[24];
+  fit(F_HERO, s.hotName[0] ? s.hotName : "Player", 720, nm, sizeof(nm));
+  textCenter(F_HERO, 400, 200, nm, P.ink, (uint8_t)(255 * fp));
+  char m[16];
+  snprintf(m, sizeof(m), "%dx", s.hotMult);
+  textCenter(F_H1, 400, 270, m, P.yes);  // the number fonts have digits only
+  watch(wHot, (uint32_t)secs, 640, 300, 120, 120);
+  countdownRing(700, 366, 44, left, max(hotBase, (int32_t)1000), P.gold);
+  Btn b = {};
+  strlcpy(b.id, "hotseat:accept", sizeof(b.id));
+  if (s.hotMult == 2) strlcpy(b.label, "Tap to double", sizeof(b.label));
+  else snprintf(b.label, sizeof(b.label), "Tap for %dx", s.hotMult);
+  b.style = B_YES;
+  b.enabled = left > 0;
+  button(220, 330, 360, 72, b, F_H3, 36);
+}
+
+// Confirm: "Ayan, tap your phone here to lock $5 on YES" with a tap icon and a countdown.
+static void confirmCard(const Screen &s) {
+  float fp = prog(tConf, 0, 260);
+  overlay(0, 0, SCR_W, SCR_H);
+  mark(0, 0, SCR_W, SCR_H);  // the waves pulse
+  fill(0, 0, SCR_W, SCR_H, P.canvas, (uint8_t)(225 * eOut(fp)));
+  hit(0, 0, SCR_W, SCR_H, "ui:none");
+  uint16_t c = s.confYes ? P.yes : P.no;
+  const int ix = 400, iy = 140;
+  rrectStroke(ix - 28, iy - 48, 56, 96, 12, 3, P.ink);
+  fill(ix - 10, iy + 34, 20, 3, P.ink);
+  float pulse = (NOW % 1400) / 1400.f;
+  for (int k = 0; k < 3; k++) {
+    float r = 62 + k * 16 + pulse * 16;
+    ring(ix, iy, r, 2.5f, c, (uint8_t)(200 * (1 - (k + pulse) / 3.f)), true);
+  }
+  char amt[16], l1[64], l2[48], fl[64];
+  fmtMoney(s.confCents, amt, sizeof(amt));
+  snprintf(l1, sizeof(l1), "%s, tap your phone here", s.confName[0] ? s.confName : "Player");
+  fit(F_H2, l1, 740, fl, sizeof(fl));
+  textCenter(F_H2, 400, 262, fl, P.ink);
+  snprintf(l2, sizeof(l2), "to lock %s on ", amt);
+  const char *side = s.confYes ? "YES" : "NO";
+  int w1 = textW(F_H2, l2), w2 = textW(F_H2, side), x0 = 400 - (w1 + w2) / 2;
+  text(F_H2, x0, 304, l2, P.ink2);
+  text(F_H2, x0 + w1, 304, side, c);
+  int32_t left = xLeft(confBase);
+  countdownRing(400, 396, 40, left, max(confBase, (int32_t)1000), c);
+}
+
+// Flash: a short toast with an avatar (join / big win / big loss).
+static void flashToast(const Screen &s) {
+  float fp = prog(tFlash, 0, 300);
+  const int w = 520, h = 76, x = (SCR_W - w) / 2, y = 20 + (int)(-30 * (1 - eOut(fp)));
+  overlay(x - 4, 0, w + 8, h + 30);
+  if (fp < 1) mark(x - 4, 0, w + 8, h + 30);
+  uint16_t c = s.flashKind == 'w' ? P.yes : s.flashKind == 'l' ? P.no : P.gold;
+  rrect(x, y, w, h, 20, P.card);
+  rrectStroke(x, y, w, h, 20, 2, c);
+  avatar(x + 42, y + h / 2, 24, s.flashName[0] ? s.flashName : "?");
+  int tx = x + 80;
+  char nm[24];
+  fit(F_H3, s.flashName[0] ? s.flashName : "Someone", 240, nm, sizeof(nm));
+  text(F_H3, tx, y + 32, nm, P.ink);
+  textFit(F_B2, tx, y + 58, w - 100 - (s.flashCents ? 120 : 0), s.flashText, P.ink2);
+  if (s.flashCents) {
+    char amt[16], sg[20];
+    fmtMoney(s.flashCents, amt, sizeof(amt));
+    snprintf(sg, sizeof(sg), "%s%s", s.flashKind == 'l' ? "-" : "+", amt);
+    textRight(F_N3, x + w - 18, y + 50, sg, c);
+  }
+}
+
+// Interlude: full-screen standings between questions (uses the standings field).
+static void interludeCard(const Screen &s) {
+  float fp = prog(tInter, 0, 800);
+  overlay(0, 0, SCR_W, SCR_H);
+  if (fp < 1) mark(0, 0, SCR_W, SCR_H);
+  fill(0, 0, SCR_W, SCR_H, P.canvas);
+  hit(0, 0, SCR_W, SCR_H, "ui:none");
+  text(F_H2, 40, 64, "Standings", P.ink);
+  int32_t left = xLeft(interBase);
+  int secs = (left + 999) / 1000;
+  char t[24];
+  snprintf(t, sizeof(t), "Next in %d", secs);
+  watch(wInter, (uint32_t)secs, 560, 30, 220, 50);
+  textRight(F_B1, 760, 62, t, P.muted);
+  int n = min(s.nStand, 6);
+  if (!n) textCenter(F_H3, 400, 260, "No bets yet", P.muted);
+  for (int i = 0; i < n; i++) {
+    const Person &p = s.stand[i];
+    float rp = eOut(prog(tInter, 80 + i * 70, 360));
+    int y = 96 + i * 62, x = 40 + (int)(40 * (1 - rp));
+    uint8_t a = (uint8_t)(255 * rp);
+    bool lead = i == 0 && !s.standTie;
+    rrect(x, y, 720, 54, 14, lead ? P.accentTint : P.card, a);
+    char rk[6];
+    snprintf(rk, sizeof(rk), "%d", p.rank > 0 ? p.rank : i + 1);
+    text(F_N3, x + 20, y + 39, rk, i == 0 ? P.gold : P.muted, a);
+    avatar(x + 92, y + 27, 18, p.name, a);
+    textFit(F_H3, x + 124, y + 36, 380, p.name, P.ink, a);
+    char m[16], pl[20], sg[24];
+    fmtMoney(p.cents, m, sizeof(m));
+    textRight(F_N4, x + 700, y + 26, m, P.ink, a);
+    fmtMoney(abs(p.extra), pl, sizeof(pl));
+    snprintf(sg, sizeof(sg), "%s%s", p.extra < 0 ? "-" : "+", pl);
+    textRight(F_B3, x + 700, y + 46, sg, p.extra < 0 ? P.no : P.yes, a);
+  }
+}
+
+static void drawExtras(const Screen &s) {
+  betsInStrip(s);
+  tipCard(s);
+  if (s.hasInter) interludeCard(s);
+  if (s.hasHot) hotseatCard(s);
+  else if (s.hasConfirm) confirmCard(s);
+  if (s.hasFlash && xLeft(flashBase) > 0) flashToast(s);
+}
+
 static void drawToast() {
   float p = prog(tToast, 0, 360);
   float out = clampf((int32_t)(NOW - tToast - 2800) / 240.f, 0, 1);
@@ -2909,6 +3146,7 @@ static void scene(const NetStatus &st) {
   pageY = 0;
   origin(0, 0);
   layerReset();
+  drawExtras(s);
   if (payVisible()) payCard(s);
   if (toast[0] && NOW - tToast < 3040) drawToast();
   else if (toast[0] && measuring) {  // gone: erase it
@@ -3275,6 +3513,17 @@ void uiSetJson(const String &body) {
   } else {
     payHiddenAt = 0;
   }
+  // Extras timing (ms left when the JSON was built, counted down here).
+  xAt = NOW;
+  if (n.hasHot && !c.hasHot) tHot = NOW;
+  if (n.hasConfirm && !c.hasConfirm) tConf = NOW;
+  if (n.hasInter && !c.hasInter) tInter = NOW;
+  if (n.hasFlash && (!c.hasFlash || strcmp(n.flashText, c.flashText) || strcmp(n.flashName, c.flashName))) tFlash = NOW;
+  hotBase = n.hotLeft;
+  confBase = n.confLeft;
+  interBase = n.interLeft;
+  flashBase = n.flashLeft;
+  if (first || n.xHash != c.xHash) fullDirty = true;
   strlcpy(lastQuestion, n.question, sizeof(lastQuestion));
   // Locking keeps the page where it is (same question, same graph); anything else starts at the top.
   bool keepPage = !first && c.scr == S_MARKET && n.scr == S_LOCKED && !questionChange;

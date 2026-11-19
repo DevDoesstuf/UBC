@@ -149,6 +149,13 @@ export interface KioskScreen extends HwKioskFields {
   standings?: { name: string; cents: number; pnl: number; rank: number; lead: boolean }[];
   /** A Solana Pay request drawn on top of any screen (lobby.boxPay). */
   pay?: KioskPay;
+  /** Box-only extras (optional; missing = nothing drawn). */
+  betsIn?: { n: number; of: number };
+  hotseat?: { name: string; mult: number; leftMs: number };
+  tip?: { label: string; text: string };
+  flash?: { kind: "join" | "bigwin" | "bigloss"; name: string; cents?: number; text: string; leftMs: number };
+  confirm?: { name: string; side: "YES" | "NO"; cents: number; leftMs: number };
+  interlude?: { kind: "standings"; leftMs: number };
 }
 
 export interface KioskChart {
@@ -232,9 +239,9 @@ export interface KioskScore {
  * #616D64 (4.9:1 on canvas, 5.3:1 on card, 4.5:1 on well; the firmware's built-in #6C7A70 is 4.07:1).
  */
 export const KIOSK_PALETTE = {
-  canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ink: "#10261C", ink2: "#3E5247",
-  muted: "#616D64", accent: "#12A150", accentDeep: "#0B7A3E", accentLight: "#7CCB4E", yes: "#1468FF",
-  no: "#FF6B00", hot: "#E5484D", gold: "#E8A33D",
+  canvas: "#000000", card: "#111111", well: "#1A1A1A", rule: "#262626", ink: "#E9DFC9", ink2: "#BDB4A2",
+  muted: "#8A8479", accent: "#E9DFC9", accentDeep: "#CFC3A8", accentLight: "#3DBE84", yes: "#3DBE84",
+  no: "#E5615A", hot: "#E5615A", gold: "#D9B36C",
 } as const;
 
 /** The firmware uses Latin-1 fonts: swap typographic characters, transliterate, drop what it cannot draw. */
