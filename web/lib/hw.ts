@@ -299,8 +299,8 @@ function tipOf(l: Lobby): string | null {
   const src = m.source as { rationale?: string } | undefined;
   const last = l.replay?.state.lastEvent?.text;
   const bits: string[] = [];
-  if (src?.rationale) bits.push(src.rationale);
-  else if (last) bits.push(`Last play: ${last}`);
+  if (src?.rationale) bits.push(src.rationale.replace(/[.\s]+$/, ""));
+  else if (last) bits.push(`Last play: ${last.replace(/[.\s]+$/, "")}`);
   if (typeof m.model === "number") bits.push(`Model: ${Math.round(m.model * 100)}% YES`);
   return bits.length ? bits.join(". ").slice(0, 160) : null;
 }
