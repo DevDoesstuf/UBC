@@ -43,7 +43,7 @@ import { bestCandidate, replayMs } from "./replay/run";
 import { buildScorecard } from "./scorecard";
 import {
   ApiError, createLobby, endSession, getKioskCode, getKioskLobby, getLobby, lockMarket, mutate, openMarket,
-  releaseKiosk, resolveMarket, usd,
+  releaseKiosk, resolveMarket, usd, hotseatAccept,
 } from "./lobby";
 import * as lobbyModule from "./lobby";
 import * as lmsr from "./lmsr";
@@ -52,6 +52,7 @@ import { friendlyLabel, type LabelTeam } from "./gemini";
 import { awayFirst } from "./matchup";
 import { losersOf, openValues, standings } from "./standings";
 import type { Game, Lobby } from "./types";
+import { hwKioskFields, type HwKioskFields } from "./hw";
 
 // ---------------------------------------------------------------- "Call it!" moments
 // The room slams these on the box when something happens on TV; each opens a quick market on that moment.
@@ -95,7 +96,7 @@ export interface KioskButton {
   style?: "primary" | "yes" | "no" | "plain";
 }
 
-export interface KioskScreen {
+export interface KioskScreen extends HwKioskFields {
   screen: "select" | "lobby" | "market" | "locked" | "result" | "ended" | "message";
   kiosk: string;
   title: string;
@@ -558,7 +559,9 @@ export function payOf(l: Lobby, now: number = Date.now()): KioskPay | undefined 
 function extras(l: Lobby | null): Partial<KioskScreen> {
   const base = extrasCore(l);
   const pay = l ? payOf(l) : undefined;
-  return pay ? { ...base, pay } : base;
+  // Hardware extras (lib/hw.ts): confirm, betsIn, flash, hotseat, tip, interlude. All optional, additive.
+  const hwf = hwKioskFields(l);
+  return pay ? { ...base, ...hwf, pay } : { ...base, ...hwf };
 }
 
 function extrasCore(l: Lobby | null): Partial<KioskScreen> {
@@ -783,6 +786,10 @@ export async function kioskTouch(kioskId: string, id: string, baseUrl: string): 
       await mutate(code, (l, now) => open(l, kind, now));
       break;
     }
+    case "hotseat":
+      if (arg !== "accept") throw new ApiError(400, "Unknown button");
+      await mutate(code, (l, now) => hotseatAccept(l, now));
+      break;
     default:
       throw new ApiError(400, "Unknown button");
   }
