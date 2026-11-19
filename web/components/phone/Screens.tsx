@@ -5,9 +5,10 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { Qr } from "@/components/Qr";
 import {
   Aurora, Avatar, Burst, GOLD_BURST, Icon, Kinetic, Mark, Roll, Wordmark, ordinal, useCoins, useFlip, useNewIds,
-  useReplayClass, usd, usdShort, signedUsd, withAlpha, type IconName,
+  useReplayClass, usd, usdShort, signedUsd, withAlpha, Sparkline, type IconName,
 } from "@/components/huddle";
 import { SIDE, SOLANA_ADDRESS, profitOf, ranked, scoreSides, type Lobby } from "./derive";
+import type { Trail, TrailEntry } from "./Trail";
 import { CodeTiles, Empty, InlineError, Money, SectionTitle, Sheet, cx, d } from "./ui";
 
 /** The server's lobby limit (lib/lobby.ts MAX_PLAYERS): a full lobby says so before anyone types a name. */
@@ -432,6 +433,7 @@ export function Leaderboard({ l, title = "Leaderboard" }: { l: Lobby; title?: st
   const list = useFlip<HTMLOListElement>(order);
   const fresh = useNewIds(rows.map((p) => p.id));
   const meId = l.me?.id;
+  const top = Math.max(0, ...rows.map((p) => p.worth));
   return (
     <section aria-labelledby="board-title">
       <SectionTitle id="board-title" count={rows.length}>
@@ -453,7 +455,7 @@ export function Leaderboard({ l, title = "Leaderboard" }: { l: Lobby; title?: st
                     {mine && <span className="ph-you">You</span>}
                     {lead && <Icon name="crown" size={16} className="ph-crown" title="Leading" />}
                   </div>
-                  <div className="ph-row-sub hd-tnum">{p.deposited > 0 ? `in for ${usd(p.deposited)}` : "not in yet"}</div>
+                  <span className="ph-row-bar" aria-hidden="true"><span className="hd-flood" style={{ transform: `scaleX(${top > 0 ? Math.max(0.03, p.worth / top) : 0})`, ...d(i * 60) }} /></span>
                 </div>
                 <span className="ph-row-right">
                   <Money cents={p.worth} className="ph-row-bal" duration={900} />
@@ -474,44 +476,90 @@ export function Leaderboard({ l, title = "Leaderboard" }: { l: Lobby; title?: st
 
 // ------------------------------------------------------------------ results + scorecard
 
-export function ResultsTab({ l }: { l: Lobby }) {
+export function ResultsTab({ l, trail = {} }: { l: Lobby; trail?: Trail }) {
+  const list = [...l.results].reverse();
+  const calls = [...l.results].map((r) => trail[r.text]).filter((t): t is TrailEntry => !!t && t.kind !== "none");
+  const won = calls.filter((t) => t.kind === "won").length;
+  const net = calls.reduce((a, t) => a + (t.net ?? 0), 0);
+  const players = l.players;
+  const who = (text: string) => players.find((p) => text.startsWith(p.name + " "));
   return (
     <div className="ph-stackgap">
+      {calls.length > 0 && (
+        <section className="ph-rsum hd-card hd-rise" aria-label="Your night">
+          <div className="ph-rsum-col">
+            <span className="hd-num ph-rsum-big">
+              <Roll text={`${won}/${calls.length}`} flash={false} duration={700} />
+            </span>
+            <span className="ph-k">called</span>
+          </div>
+          <div className="ph-rsum-dots" aria-hidden="true">
+            {[...l.results].map((r, i) => {
+              const t = trail[r.text];
+              const k = t?.kind ?? "none";
+              return <span key={`${r.text}-${i}`} className={cx("ph-rsum-dot hd-pop", k)} style={d(120 + i * 60)} />;
+            })}
+          </div>
+          <div className="ph-rsum-col end">
+            <span className={cx("hd-num ph-rsum-big", net > 0 ? "up" : net < 0 ? "down" : "")}>
+              <Money cents={net} signed flash={false} duration={900} />
+            </span>
+            <span className="ph-k">net</span>
+          </div>
+        </section>
+      )}
       <section aria-labelledby="res-title">
         <SectionTitle id="res-title" count={l.results.length}>
           Results
         </SectionTitle>
-        {l.results.length ? (
+        {list.length ? (
           <ul className="ph-results">
-            {[...l.results].reverse().map((r, i) => {
-              const mine = r.winners.find((w) => w.name === l.me?.name);
+            {list.map((r, i) => {
+              const t = trail[r.text];
+              const paid = r.winners.find((w) => w.name === l.me?.name)?.cents ?? 0;
+              const pnl = t && t.kind !== "none" ? t.net : paid > 0 ? paid : null;
+              const pts = t?.points.map((p, j) => ({ t: j, p })) ?? [];
               return (
-                <li key={`${r.text}-${i}`} className="ph-res hd-card hd-rise" style={d(i * 50)}>
+                <li key={`${r.text}-${i}`} className={cx("ph-res hd-card hd-rise", t?.kind)} style={d(i * 60)}>
                   <span className={cx("ph-res-tag", r.outcome)}>
-                    <Icon name="check" size={13} strokeWidth={3} /> {SIDE[r.outcome]}
+                    <span className="ph-res-tag-k">{SIDE[r.outcome]}</span>
                   </span>
                   <span className="ph-res-text">{r.text}</span>
-                  <span className="ph-res-meta">
-                    <span className="hd-tnum">{usd(r.volume)} traded</span>
-                    {mine && mine.cents > 0 && <span className="ph-res-mine hd-num">you got {usd(mine.cents)}</span>}
-                  </span>
+                  {pnl !== null && (
+                    <span className={cx("hd-num ph-res-pnl", pnl > 0 ? "up" : pnl < 0 ? "down" : "")}>
+                      <Icon name={t?.kind === "won" || (!t && pnl > 0) ? "check" : t?.kind === "lost" ? "x" : "refresh"} size={13} strokeWidth={3} />
+                      {signedUsd(pnl)}
+                    </span>
+                  )}
+                  {pts.length > 1 && (
+                    <Sparkline points={pts} className="ph-res-spark" dot={false} stroke={r.outcome === "yes" ? "var(--k-yes)" : "var(--k-no)"} fill={r.outcome === "yes" ? "rgba(20,104,255,0.10)" : "rgba(255,107,0,0.10)"} />
+                  )}
+                  {r.volume > 0 && <span className="ph-res-meta hd-tnum">{usd(r.volume)}</span>}
                 </li>
               );
             })}
           </ul>
         ) : (
-          <Empty>No results yet. Each question lands here once it settles.</Empty>
+          <Empty>No results yet.</Empty>
         )}
       </section>
       {l.scorecard && l.scorecard.n > 0 && <ScorecardBlock l={l} />}
-      <section aria-labelledby="act-title">
-        <SectionTitle id="act-title">Activity</SectionTitle>
-        <ul className="ph-activity">
-          {[...l.events].reverse().slice(0, 8).map((e) => (
-            <li key={e.id}>{e.text}</li>
-          ))}
-        </ul>
-      </section>
+      {l.events.length > 0 && (
+        <section aria-labelledby="act-title">
+          <SectionTitle id="act-title">Activity</SectionTitle>
+          <ul className="ph-activity">
+            {[...l.events].reverse().slice(0, 8).map((e, i) => {
+              const p = who(e.text);
+              return (
+                <li key={e.id} className="hd-rise" style={d(i * 40)}>
+                  {p ? <Avatar name={p.name} size="1.5rem" /> : <span className="ph-act-dot" aria-hidden="true"><Icon name="bolt" size={12} /></span>}
+                  <span>{e.text}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

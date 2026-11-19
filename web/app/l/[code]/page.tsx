@@ -5,6 +5,7 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "@/components/phone/phone.css";
+import { useTrail } from "@/components/phone/Trail";
 import { HttpError, api, loadToken, saveToken, useNow, usePoll, type LobbyData } from "@/components/client";
 import { Empty, InlineError, Loading } from "@/components/phone/ui";
 import { Icon, Kinetic, Mark, Wordmark, useCoins, usd } from "@/components/huddle";
@@ -58,6 +59,7 @@ export default function PhonePage() {
   }, [code]);
 
   const { data: l, error, refresh, lastOk } = usePoll(boot ? () => api<LobbyData>(`/api/lobby/${code}`, { token }) : null, 1000);
+  const trail = useTrail(l ?? null);
 
   const say = useCallback((text: string, kind: "ok" | "err" = "ok") => setToast((t) => ({ text, kind, n: (t?.n ?? 0) + 1 })), []);
   useEffect(() => {
@@ -402,7 +404,7 @@ export default function PhonePage() {
               </>
             ))}
           {tab === "board" && <Leaderboard l={l} />}
-          {tab === "results" && <ResultsTab l={l} />}
+          {tab === "results" && <ResultsTab l={l} trail={trail} />}
         </div>
       </main>
       <Dock
