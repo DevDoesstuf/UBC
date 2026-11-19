@@ -199,7 +199,7 @@ const post = (url: string, body: unknown, token?: string) =>
 test("Pay on the box: route sets lobby.boxPay with the exact shape and a spec Solana Pay URL", async () => {
   const { code, toks } = await lobbyWith(["Eve"]);
   const params = { params: Promise.resolve({ code }) };
-  assert.equal((await boxRoute.POST(post(`http://x/api/lobby/${code}/deposit/box`, { cents: 777 }, toks[0]), params)).status, 400, "listed amounts only");
+  assert.equal((await boxRoute.POST(post(`http://x/api/lobby/${code}/deposit/box`, { cents: 50 }, toks[0]), params)).status, 400, "under the $1 minimum");
   assert.equal((await boxRoute.POST(post(`http://x/api/lobby/${code}/deposit/box`, { cents: 500 }), params)).status, 401, "player token needed");
   const r = await boxRoute.POST(post(`http://x/api/lobby/${code}/deposit/box`, { cents: 500 }, toks[0]), params);
   assert.equal(r.status, 200);
