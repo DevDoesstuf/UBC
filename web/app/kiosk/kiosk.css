@@ -35,21 +35,21 @@
 /* Colours are the shared --k-* tokens (app/globals.css), the same values the firmware has built in. The fonts
    above are the same files as app/fonts, under fixed family names so text can be measured like the firmware. */
 .hk {
-  --canvas: var(--k-canvas);
-  --card: var(--k-card);
-  --well: var(--k-well);
-  --rule: var(--k-rule);
-  --ink: var(--k-ink);
-  --ink-2: var(--k-ink-2);
-  --muted: var(--k-ink-muted);
-  --accent: var(--k-green);
-  --deep: var(--k-green-deep);
-  --lime: var(--k-lime);
-  --yes: var(--k-yes);
-  --no: var(--k-no);
-  --hot: var(--k-hot);
-  --gold: var(--k-gold);
-  --grad: linear-gradient(90deg, #0b7a3e, #12a150 50%, #7ccb4e);
+  --canvas: #000000;
+  --card: #111111;
+  --well: #1a1a1a;
+  --rule: #262626;
+  --ink: #e9dfc9;
+  --ink-2: #bdb4a2;
+  --muted: #8a8479;
+  --accent: #e9dfc9;
+  --deep: #cfc3a8;
+  --lime: #3dbe84;
+  --yes: #3dbe84;
+  --no: #e5615a;
+  --hot: #e5615a;
+  --gold: #d9b36c;
+  --grad: linear-gradient(90deg, #cfc3a8, #e9dfc9 50%, #3dbe84);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-snap: cubic-bezier(0.85, 0, 0.15, 1);
   --spring: cubic-bezier(0.34, 1.3, 0.64, 1);
@@ -146,14 +146,14 @@
 .hk-scroll { position: absolute; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(16, 38, 28, 0.3) transparent; }
 /* edge fades (ui.cpp picker): "there is more" above once scrolled, below while more is hidden */
 .hk-edge { position: absolute; left: 0; right: 10px; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 160ms var(--ease-out); }
-.hk-edge.top { top: 0; height: 14px; background: linear-gradient(to bottom, var(--canvas), rgba(246, 243, 234, 0)); }
-.hk-edge.bottom { bottom: 0; height: 26px; background: linear-gradient(to top, var(--canvas), rgba(246, 243, 234, 0)); }
+.hk-edge.top { top: 0; height: 14px; background: linear-gradient(to bottom, var(--canvas), rgba(0, 0, 0, 0)); }
+.hk-edge.bottom { bottom: 0; height: 26px; background: linear-gradient(to top, var(--canvas), rgba(0, 0, 0, 0)); }
 .hk-edge.on { opacity: 1; }
 
 /* lobby */
 .hk-join { overflow: hidden; color: #fff; }
 .hk-code { display: flex; justify-content: center; gap: 8px; }
-.hk-code span { width: 50px; height: 62px; border-radius: 14px; background: #fff; color: var(--ink); font-size: 44px; display: grid; place-items: center; line-height: 1; }
+.hk-code span { width: 50px; height: 62px; border-radius: 14px; background: var(--well); border: 1px solid var(--rule); color: var(--ink); font-size: 44px; display: grid; place-items: center; line-height: 1; }
 .hk-row { border-radius: 16px; background: var(--card); }
 .hk-row.hk-lead { background: var(--ink); }
 .hk-empty { border: 2px dashed #cfc8b8; border-radius: 16px; }
@@ -161,14 +161,14 @@
 
 /* market */
 .hk-stage { border-radius: 30px; background: var(--card); overflow: hidden; }
-.hk-badge { height: 38px; padding: 0 16px 0 14px; border-radius: 19px; display: inline-flex; align-items: center; gap: 8px; color: #fff; font-size: 20px; }
+.hk-badge { height: 38px; padding: 0 16px 0 14px; border-radius: 19px; display: inline-flex; align-items: center; gap: 8px; color: #0a0a0a; font-size: 20px; }
 .hk-traded { font-size: 18px; color: var(--ink-2); white-space: nowrap; }
 .hk-traded .hk-num { font-size: 21px; color: var(--ink); }
 .hk-chip { padding: 0 14px; border-radius: 19px; background: var(--card); display: inline-flex; align-items: center; gap: 6px; }
 .hk-scorebug { background: var(--card); display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; white-space: nowrap; }
 .hk-scorebug b { font-size: 20px; }
 .hk-scorebug .hk-bar { width: 6px; height: 22px; border-radius: 3px; }
-.hk-scorebug .hk-score { min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--ink); color: #fff; font-size: 21px; display: grid; place-items: center; }
+.hk-scorebug .hk-score { min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--ink); color: #0a0a0a; font-size: 21px; display: grid; place-items: center; }
 .hk-scorebug .hk-clock { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; padding: 0 4px; }
 .hk-scorebug .hk-clock .hk-num { font-size: 21px; }
 .hk-scorebug small { font-size: 15px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px; }

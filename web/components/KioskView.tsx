@@ -11,10 +11,11 @@ import { avatarHash } from "@/lib/boxText";
 // ---------------------------------------------------------------- tokens + fonts (same as ui.cpp)
 
 const P = {
-  canvas: "#F6F3EA", card: "#FFFDF8", well: "#EEEAE0", rule: "#E2DDD0", ruleStrong: "#CFC8B8", ink: "#10261C",
-  ink2: "#3E5247", muted: "#616D64", accent: "#12A150", deep: "#0B7A3E", lime: "#7CCB4E", yes: "#1468FF",
-  yes600: "#0B57E6", no: "#FF6B00", no600: "#B84300", hot: "#E5484D", gold: "#E8A33D", white: "#FFFFFF",
-  accentTint: "#E3F2E7", yesTint: "#10261C", noTint: "#2B1513",
+  // Same as the firmware defaults (ui.cpp) and the palette lib/kiosk.ts sends: black, beige ink, muted green/red.
+  canvas: "#000000", card: "#111111", well: "#1A1A1A", rule: "#262626", ruleStrong: "#3A3A3A", ink: "#E9DFC9",
+  ink2: "#BDB4A2", muted: "#8A8479", accent: "#E9DFC9", deep: "#CFC3A8", lime: "#3DBE84", yes: "#3DBE84",
+  yes600: "#2E9C6B", no: "#E5615A", no600: "#C24A44", hot: "#E5615A", gold: "#D9B36C", white: "#0A0A0A",
+  accentTint: "#26231C", yesTint: "#10261C", noTint: "#2B1513",
 };
 const GRAD = `linear-gradient(90deg, ${P.deep}, ${P.accent} 50%, ${P.lime})`;
 /** The question badge: one even blend from beige to green across the whole pill (matches the firmware). */
@@ -488,14 +489,14 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
   return (
     <>
       <div className="hk-abs hk-slide-l hk-join" style={{ left: 12, top: 12, width: 292, height: 456, borderRadius: 30, background: GRAD }}>
-        <div className="hk-abs" style={{ left: 40, top: 22, width: 212, height: 212, borderRadius: 18, background: P.white, display: "grid", placeItems: "center" }}>
+        <div className="hk-abs" style={{ left: 40, top: 22, width: 212, height: 212, borderRadius: 18, background: P.ink, display: "grid", placeItems: "center" }}>
           {qr && (
             <svg width={scale * qr.size} height={scale * qr.size} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="Join QR code">
-              {qr.rows.flatMap((row, r) => [...row].map((c, col) => (c === "1" ? <rect key={`${r}-${col}`} x={col} y={r} width="1" height="1" fill={P.ink} /> : null)))}
+              {qr.rows.flatMap((row, r) => [...row].map((c, col) => (c === "1" ? <rect key={`${r}-${col}`} x={col} y={r} width="1" height="1" fill="#0A0A0A" /> : null)))}
             </svg>
           )}
         </div>
-        <T f="H3" x={146} y={264} w={280} align="center" color={P.white}>Tap your phone here</T>
+        <T f="H3" x={146} y={264} w={280} align="center" color={P.ink}>Tap your phone here</T>
         <T f="B2" x={146} y={288} w={280} align="center" color="rgba(255,255,255,.9)">or scan the code to join</T>
         <T f="B3" x={146} y={316} w={280} align="center" color="rgba(255,255,255,.86)">Party code</T>
         <div className="hk-abs hk-code" style={{ left: 0, top: 326, width: 292 }} aria-label={`Party code ${s.code}`}>
@@ -1382,10 +1383,10 @@ function PayCard({ pay, onTouch, pending }: { pay: NonNullable<KioskScreen["pay"
     <div className="hk-paywrap" role="dialog" aria-modal="true" aria-label={pay.paid ? "Payment received" : "Pay with Solana"}>
       <div className="hk-abs hk-card hk-lift hk-rise" style={{ left: 60, top: 40, width: 680, height: 400, borderRadius: 30, cursor: "default", ...d(60) }}>
         {!pay.paid ? (
-          <div className="hk-abs" style={{ left: 24, top: 24, width: 352, height: 352, borderRadius: 22, background: P.white, boxShadow: `inset 0 0 0 2px ${P.rule}`, display: "grid", placeItems: "center" }}>
+          <div className="hk-abs" style={{ left: 24, top: 24, width: 352, height: 352, borderRadius: 22, background: P.ink, boxShadow: `inset 0 0 0 2px ${P.rule}`, display: "grid", placeItems: "center" }}>
             {qr ? (
               <svg width={scale * qr.size} height={scale * qr.size} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="Solana Pay QR code">
-                {qr.rows.flatMap((row, r) => [...row].map((c, col) => (c === "1" ? <rect key={`${r}-${col}`} x={col} y={r} width="1" height="1" fill={P.ink} /> : null)))}
+                {qr.rows.flatMap((row, r) => [...row].map((c, col) => (c === "1" ? <rect key={`${r}-${col}`} x={col} y={r} width="1" height="1" fill="#0A0A0A" /> : null)))}
               </svg>
             ) : (
               <div style={{ textAlign: "center" }}>
