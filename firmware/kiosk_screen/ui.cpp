@@ -26,28 +26,29 @@ struct Palette {
 };
 static Palette P;
 static void defaultPalette() {
-  P.canvas = rgb(0xF6F3EA);
-  P.card = rgb(0xFFFDF8);
-  P.well = rgb(0xEEEAE0);
-  P.rule = rgb(0xE2DDD0);
-  P.ruleStrong = rgb(0xCFC8B8);
-  P.ink = rgb(0x10261C);
-  P.ink2 = rgb(0x3E5247);
-  P.muted = rgb(0x616D64);  // AA on canvas, card and well (the site sends the same in palette.muted)
-  P.accent = rgb(0x12A150);
-  P.deep = rgb(0x0B7A3E);
-  P.lime = rgb(0x7CCB4E);
-  P.yes = rgb(0x1468FF);
-  P.yes600 = rgb(0x0B57E6);
-  P.no = rgb(0xFF6B00);
-  P.no600 = rgb(0xB84300);
-  P.hot = rgb(0xE5484D);
-  P.gold = rgb(0xE8A33D);
-  P.white = rgb(0xFFFFFF);
-  P.accentTint = rgb(0xE3F2E7);
-  P.goldTint = rgb(0xFBEFD9);
-  P.yesTint = rgb(0xE8F0FF);
-  P.noTint = rgb(0xFFF0E5);
+  // Dark, calm look: black canvas, beige ink and highlights, muted green / red for YES / NO and win / lose.
+  P.canvas = rgb(0x000000);
+  P.card = rgb(0x111111);
+  P.well = rgb(0x1A1A1A);
+  P.rule = rgb(0x262626);
+  P.ruleStrong = rgb(0x3A3A3A);
+  P.ink = rgb(0xE9DFC9);
+  P.ink2 = rgb(0xBDB4A2);
+  P.muted = rgb(0x8A8479);  // AA on black, card and well
+  P.accent = rgb(0xE9DFC9);
+  P.deep = rgb(0xCFC3A8);
+  P.lime = rgb(0x3DBE84);
+  P.yes = rgb(0x3DBE84);
+  P.yes600 = rgb(0x2E9C6B);
+  P.no = rgb(0xE5615A);
+  P.no600 = rgb(0xC24A44);
+  P.hot = rgb(0xE5615A);
+  P.gold = rgb(0xD9B36C);
+  P.white = rgb(0x0A0A0A);  // text on a filled button: near-black on beige / green / red
+  P.accentTint = rgb(0x26231C);
+  P.goldTint = rgb(0x2A2418);
+  P.yesTint = rgb(0x10261C);
+  P.noTint = rgb(0x2B1513);
 }
 
 // ================================================================ screen model (parsed once per JSON)
@@ -1426,14 +1427,14 @@ static void drawSelect(const Screen &s, const NetStatus &st) {
 // ---------------------------------------------------------------- lobby
 
 static void drawQR(const Screen &s, int x, int y, int box) {
-  rrect(x, y, box, box, 18, P.white);
+  rrect(x, y, box, box, 18, P.ink);  // light quiet zone, dark modules (scanners want dark on light)
   if (!s.qrSize) return;
   int inner = box - 20;
   int scale = max(1, inner / s.qrSize);
   int ox = x + (box - scale * s.qrSize) / 2, oy = y + (box - scale * s.qrSize) / 2;
   for (int r = 0; r < s.qrSize; r++)
     for (int c = 0; c < s.qrSize; c++)
-      if (s.qr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.ink);
+      if (s.qr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.canvas);
 }
 
 static void personRow(const Person &p, int x, int y, int w, int h, uint32_t bornAt, bool lobby) {
@@ -1802,7 +1803,6 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
         x += text(F_B2, x, y, "Gemini ", P.ink2);
         snprintf(v, sizeof(v), "%d\xC2\xA2", s.gemini);
         x += text(F_N4, x, y + 1, v, P.ink);
-        if (!s.geminiLive) text(F_B3, x + 8, y, "(last seen)", P.muted);
       }
     } else {
       textFit(F_B2, x, y, LW, locked ? s.subtitle : "Buy YES or NO on your phone. A winning share pays $1", P.ink2);
@@ -1850,8 +1850,7 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
       // recent trades
       int y = 356;
       if (s.nTrades == 0) {
-        text(F_B3, RX, y + 20, "No trades yet.", P.muted);
-        text(F_B3, RX, y + 40, "Phones buy YES or NO.", P.muted);
+        text(F_B3, RX, y + 20, "No trades", P.muted);
       }
       for (int i = 0; i < min(3, s.nTrades); i++) {
         const TradeRow &t = s.trades[i];
@@ -2509,7 +2508,7 @@ static void listsSection(const Screen &s, int y, int h) {
     card(x, y, cw, h, 22);
     text(F_H3, x + 18, y + 36, side ? "Standings" : "Recent trades", P.ink);
     int n = side ? min(8, s.nStand) : min(8, s.nTrades);
-    if (n == 0) text(F_B2, x + 18, y + 80, side ? "No players yet." : "No trades yet. Phones buy YES or NO.", P.ink2);
+    if (n == 0) text(F_B2, x + 18, y + 80, side ? "No players" : "No trades", P.ink2);
     for (int i = 0; i < n; i++) {
       int ry = y + 54 + i * rowH;
       if (!side) {
@@ -2708,14 +2707,14 @@ static void payCard(const Screen &s) {
     fmtMoney(s.payCents, amt, sizeof(amt));
     bool expired = !s.payPaid && payLeft() <= 0;
     if (!s.payPaid) {
-      rrect(qx, qy, qb, qb, 22, P.white);
+      rrect(qx, qy, qb, qb, 22, P.ink);
       rrectStroke(qx, qy, qb, qb, 22, 2, P.rule);
       if (s.payQrSize) {
         int scale = max(1, (qb - 28) / s.payQrSize);
         int ox = qx + (qb - scale * s.payQrSize) / 2, oy = qy + (qb - scale * s.payQrSize) / 2;
         for (int r = 0; r < s.payQrSize; r++)
           for (int c = 0; c < s.payQrSize; c++)
-            if (s.payQr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.ink);
+            if (s.payQr[r][c >> 3] & (1 << (c & 7))) fill(ox + c * scale, oy + r * scale, scale, scale, P.canvas);
       } else {
         textCenter(F_B1, qcx, qcy - 6, "Pay from your phone", P.ink2);
         textCenter(F_B3, qcx, qcy + 20, "This request does not fit a QR", P.muted);
