@@ -1946,90 +1946,69 @@ static void peopleCard(int x, int y, int w, int h, const char *title, bool win, 
     return;
   }
   if (p < 1) {
-    layer(0, (int)((1 - eBack(p, 1.2f)) * 24), (uint8_t)(255 * clampf(p * 2.2f, 0, 1)));
+    layer(0, (int)((1 - eOut(p)) * 14), (uint8_t)(255 * clampf(p * 2.2f, 0, 1)));
     mark(x - 10, y - 10, w + 20, h + 40);
   }
-  card(x, y, w, h, 20);
-  iconArrow(x + 20, y + 21, 0.8f, win, win ? P.yes600 : P.no600);
-  text(F_B1, x + 34, y + 28, title, win ? P.yes600 : P.no600);
-  int listY = y + 38, listH = h - 44, rowH = 34;
+  text(F_B3, x + 4, y + 16, title, P.muted);
+  if (n > 0) {
+    char c[8];
+    snprintf(c, sizeof(c), "%d", n);
+    textRight(F_B3, x + w - 4, y + 16, c, P.muted);
+  }
+  int listY = y + 26, listH = h - 26, rowH = 36;
   float off = scrollArea(scrollIdx, x, listY, w, listH, n * rowH);
   pushClip(x, listY, w, listH);
-  if (n == 0) text(F_B2, x + 16, listY + 24, empty, P.ink2);
+  if (n == 0) text(F_B2, x + 4, listY + 26, empty, P.ink2);
   for (int i = 0; i < n; i++) {
     int ry = listY + i * rowH - (int)off;
     if (ry + rowH < listY || ry > listY + listH) continue;
     const Person &q = ps[i];
-    avatar(x + 28, ry + 16, 12, q.name, win ? 255 : 150);
+    avatar(x + 16, ry + 18, 12, q.name, win ? 255 : 140);
     char m[20], lab[28];
     if (win) {
       fmtMoney(q.has2 ? max<int32_t>(0, q.extra) : q.cents, m, sizeof(m), q.has2);
-      snprintf(lab, sizeof(lab), q.has2 ? "%s won" : "%s", m);
+      snprintf(lab, sizeof(lab), "%s%s", q.has2 ? "" : "+", m);
     } else {
       fmtMoney(q.cents, m, sizeof(m));
-      snprintf(lab, sizeof(lab), "%s lost", m);
+      snprintf(lab, sizeof(lab), "-%s", m);
     }
     int lw = textW(F_N4, lab);
-    textFit(F_B1, x + 48, ry + 23, w - 64 - lw - 8, q.name, win ? P.ink : P.ink2);
-    textRight(F_N4, x + w - 14, ry + 23, lab, win ? P.ink2 : P.muted);
-    // the glint across each winner's name
-    if (win) {
-      float g = prog(t0, delay + 400 + i * 180, 700);
-      if (g > 0 && g < 1) {
-        int gx = x + 40 + (int)((w - 60) * g);
-        for (int k = 0; k < 24; k++) fill(gx + k, ry + 2, 1, rowH - 6, P.white, (uint8_t)(120 * (1 - fabsf(k - 12.f) / 12.f)));
-        mark(x, ry, w, rowH);
-      }
-    }
+    textFit(F_B2, x + 36, ry + 24, w - 52 - lw - 8, q.name, win ? P.ink : P.ink2);
+    textRight(F_N4, x + w - 4, ry + 25, lab, win ? P.yes : P.muted);
+    fill(x + 4, ry + rowH - 1, w - 8, 1, P.rule);
   }
   popClip();
   if (scrolls[scrollIdx].maxOff > 0) {
     Scroller &sc = scrolls[scrollIdx];
     int barH = max(20, listH * listH / max(1, n * rowH));
     int barY = listY + (int)((listH - barH) * clampf(sc.off / max(1.f, sc.maxOff), 0, 1));
-    rrect(x + w - 8, barY, 4, barH, 2, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
-    if (NOW - sc.lastMove < 1500) mark(x + w - 10, listY, 10, listH);
+    rrect(x + w - 3, barY, 3, barH, 1, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
+    if (NOW - sc.lastMove < 1500) mark(x + w - 6, listY, 8, listH);
   }
   layerReset();
 }
 
+// Result: a calm reveal. The outcome word big in its colour with the final %, the question above it, winners and
+// losers as Kalshi-like list rows on the right, then Next / Call it! / End.
 static void drawResult(const Screen &s, const NetStatus &st) {
-  wordmark(20, 40);
   int rx = SCR_W - 16;
   topRight(s, rx, st);
-  if (s.hasScore) scorebug(s, rx, 10, 42);
+  if (s.hasScore) scorebug(s, rx, 10, 40);
   else codeChip(s, rx);
-
-  const int SX = 12, SY = 64, SW = 776, SH = 404;
   bool yes = s.result == 'Y';
   bool voided = !s.result;
-  uint16_t win = voided ? P.well : yes ? P.yes : P.no;
-  uint16_t on = voided ? P.ink : yes ? P.white : P.ink;
-  float zp = prog(tResult, 0, 480);
-  int z = (int)((1 - eBack(zp, 1.1f)) * 12);
-  card(SX + z, SY + z, SW - 2 * z, SH - 2 * z, 30);
-  // flood: from the winner's share of the split to the whole stage
-  float fp = prog(tResult, 150, 650);
-  float share = s.lockYes >= 0 ? s.lockYes / 100.f : (yes ? s.yes / 100.f : s.no / 100.f);
-  if (!yes) share = s.lockYes >= 0 ? 1 - s.lockYes / 100.f : share;
-  share = clampf(share, 0.05f, 0.95f);
-  float fw = share + (1 - share) * eBack(fp, 0.6f);
-  int floodW = (int)(SW * clampf(fw, 0, 1));
-  if (fp > 0) {
-    if (yes || voided) pushClip(SX, SY, floodW, SH);
-    else pushClip(SX + SW - floodW, SY, floodW, SH);
-    rrect(SX + z, SY + z, SW - 2 * z, SH - 2 * z, 30, win);
-    popClip();
-  }
-  if (fp < 1 || zp < 1) mark(0, SY - 16, SCR_W, SCR_H - SY + 16);
-  uint16_t txt = fp > 0.5f ? on : P.ink;
+  uint16_t oc = voided ? P.ink : yes ? P.yes : P.no;
+  iconCheck(26, 30, 0.8f, oc);
+  text(F_B2, 40, 36, voided ? "Voided" : "Resolved", P.ink2);
+  fill(16, 58, SCR_W - 32, 1, P.rule);
 
-  float tp = prog(tResult, 120, 300);
+  const int LX = 24, LW = 500;
+  float tp = prog(tResult, 80, 400);
+  if (tp < 1) mark(0, 60, SCR_W, 330);
   uint8_t ta = (uint8_t)(255 * tp);
-  text(F_B2, 36, 98, voided ? "Voided" : "Result", txt, ta);
   int starts[2], lens[2];
   bool cut;
-  int n = wrap(F_H3, s.question, 720, 2, starts, lens, &cut);
+  int n = wrap(F_H3, s.question, LW, 2, starts, lens, &cut);
   for (int i = 0; i < n; i++) {
     char buf[224];
     int l = min(lens[i], 200);
@@ -2038,48 +2017,59 @@ static void drawResult(const Screen &s, const NetStatus &st) {
     if (i == n - 1 && cut) {
       char tmp[224];
       snprintf(tmp, sizeof(tmp), "%s ...", buf);
-      fit(F_H3, tmp, 720, buf, sizeof(buf));
+      fit(F_H3, tmp, LW, buf, sizeof(buf));
     }
-    text(F_H3, 36, 128 + i * 28, buf, txt, (uint8_t)(ta * 0.92f));
+    text(F_H3, LX, 96 + i * 29, buf, P.ink, ta);
   }
-  // the winner word stamps in
-  float sp = prog(tResult, 380, 820);
+  // the outcome rises in (calm: a short ease, no overshoot)
+  float sp = prog(tResult, 300, 600);
   if (sp > 0) {
-    float e = eBack(sp, 2.2f);
-    int dy = (int)((1 - e) * -34);
-    uint8_t a = (uint8_t)(255 * clampf(sp * 2.2f, 0, 1));
-    layer(0, dy, a);
+    layer(0, (int)((1 - eOut(sp)) * 18), (uint8_t)(255 * clampf(sp * 2, 0, 1)));
     const char *word = voided ? "Refunded" : yes ? "YES" : "NO";
     const HFont &hf = voided ? F_H1 : F_HERO;
-    int hy = 262;
-    if (!voided) iconCheck(70, hy - 34, 2.6f, on);
-    text(hf, voided ? 36 : 112, voided ? 232 : hy, word, voided ? P.ink : on);
+    int hy = voided ? 236 : 252;
+    int ww = text(hf, LX - 4, hy, word, oc);
+    if (!voided) {
+      int fin = s.lockYes >= 0 ? s.lockYes : s.yes;
+      fin = (int)clampf(yes ? fin : 100 - fin, 0, 100);
+      char f[24];
+      snprintf(f, sizeof(f), "%d%%", fin);
+      text(F_N3, LX + ww + 14, hy - 40, f, P.ink);
+      text(F_B3, LX + ww + 14, hy - 16, "final chance", P.muted);
+    }
     layerReset();
-    if (sp < 1) mark(20, 150, 520, 130);
-  } else {
-    mark(20, 150, 520, 130);
   }
-  // summary on the right of the word
-  if (enter(tResult, 600, 3, {360, 180, 400, 80})) {
-    char m[20], l1[48];
+  if (sp < 1) mark(LX - 10, 150, 520, 130);
+  if (enter(tResult, 560, 3, {(int16_t)LX, 270, (int16_t)LW, 100})) {
+    char m[20], l1[64];
     if (s.volume >= 0) {
       fmtMoney(s.volume, m, sizeof(m));
-      snprintf(l1, sizeof(l1), "%s traded", m);
+      snprintf(l1, sizeof(l1), "%s traded  \xC2\xB7  %d %s", m, s.nWinners, s.nWinners == 1 ? "winner" : "winners");
     } else {
       strlcpy(l1, s.traded, sizeof(l1));
     }
-    textRight(F_N3, 760, 218, l1, on);
-    char l2[40];
-    snprintf(l2, sizeof(l2), "%d %s", s.nWinners, s.nWinners == 1 ? "winner" : "winners");
-    textRight(F_B1, 760, 248, s.nWinners || s.nLosers ? l2 : "Winning shares pay $1", on, 230);
+    text(F_B2, LX, 292, l1, P.ink2);
+    // the market's end state as a bar: the winning side's share
+    int fin = s.lockYes >= 0 ? s.lockYes : s.yes;
+    fin = (int)clampf(fin, 0, 100);
+    int bw = LW * fin / 100;
+    rrect(LX, 316, LW, 6, 3, voided ? P.rule : mix(P.canvas, P.no, 90));
+    if (bw > 0) rrect(LX, 316, max(6, bw), 6, 3, voided ? P.muted : mix(P.canvas, P.yes, yes ? 255 : 110));
+    text(F_B3, LX, 346, "Yes at lock", P.muted);
+    char pv[8];
+    snprintf(pv, sizeof(pv), "%d%%", fin);
+    textRight(F_B3, LX + LW, 346, pv, P.muted);
   }
   layerReset();
 
-  // who won what
-  int cy = 274, ch = 112, cw = (SW - 48 - 12) / 2;
+  // who won what (right rail)
+  const int RX = 556, RW = 224;
+  rrect(RX - 12, 70, RW + 24, 314, 18, P.card);
   if (s.hasWinners || !s.nLines) {
-    peopleCard(SX + 24, cy, cw, ch, "Called it", true, s.winners, s.nWinners, 0, tResult, 760, "Nobody. Brutal.");
-    peopleCard(SX + 24 + cw + 12, cy, cw, ch, "Cooked", false, s.losers, s.nLosers, 1, tResult, 840, "Clean sweep.");
+    int wn = s.nWinners, ln = s.nLosers;
+    int wh = ln ? 168 : 290;
+    peopleCard(RX, 80, RW, wh, "Called it", true, s.winners, wn, 0, tResult, 600, "Nobody. Brutal.");
+    if (ln || wn) peopleCard(RX, 80 + wh + 8, RW, 290 - wh - 8 + 6, "Cooked", false, s.losers, ln, 1, tResult, 680, "Clean sweep.");
   } else {  // old contract: plain lines
     Person tmp[MAX_LINES];
     int nn = 0;
@@ -2088,36 +2078,35 @@ static void drawResult(const Screen &s, const NetStatus &st) {
       strlcpy(tmp[nn].name, s.lines[i], sizeof(tmp[nn].name));
       nn++;
     }
-    peopleCard(SX + 24, cy, SW - 48, ch, "Called it", true, tmp, nn, 0, tResult, 760, "");
+    peopleCard(RX, 80, RW, 290, "Called it", true, tmp, nn, 0, tResult, 600, "");
   }
 
-  // buttons: Next (ink) | Call it! moments | End
+  // buttons: Next | Call it! moments | End
   const Btn *next = findBtn(s, "next");
   const Btn *end = findBtn(s, "end");
-  if (enter(tResult, 900, 0, {SX + 24, 396, SW - 48, 64})) {
-    int x = SX + 24, x1 = SX + SW - 24;
+  if (enter(tResult, 760, 3, {12, 396, SCR_W - 24, 64})) {
+    int x = 24, x1 = SCR_W - 24;
     bool calls = s.nCalls > 0;
     if (next) {
       Btn b = *next;
       b.style = voided ? B_BRAND : B_INK;
-      // With Call it! buttons beside it, Next shrinks to its label so the calls get the room.
       int w = calls ? min(230, textW(F_B1, b.label) + 62) : 230;
-      button(x, 396, w, 62, b, F_B1, 20);
-      x += w + 12;
+      button(x, 400, w, 56, b, F_B1, 28);
+      x += w + 10;
     }
     if (end) {
       Btn b = *end;
       b.style = next ? B_WHITE : B_INK;
       int w = calls ? min(120, textW(F_B1, b.label) + 44) : next ? 120 : 230;
-      button(x1 - w, 396, w, 62, b, F_B1, 20);
-      x1 -= w + 12;
+      button(x1 - w, 400, w, 56, b, F_B1, 28);
+      x1 -= w + 10;
     }
-    callRow(s.calls, s.nCalls, x, x1, 396, 62, 18);
+    callRow(s.calls, s.nCalls, x, x1, 400, 56, 28);
   }
   layerReset();
   if (!voided && s.nWinners > 0) {
-    uint16_t cols[5] = {P.gold, P.lime, P.white, P.accent, yes ? rgb(0x9CC2FF) : rgb(0xFFC08A)};
-    burst(tResult, 520, 240, 230, min(48, 18 + s.nWinners * 6), (int)strHash(s.question) & 0xFFFF, cols, 5);
+    uint16_t cols[3] = {P.gold, P.yes, P.ink};
+    burst(tResult, 520, 160, 200, min(24, 10 + s.nWinners * 3), (int)strHash(s.question) & 0xFFFF, cols, 3);
   }
 }
 
