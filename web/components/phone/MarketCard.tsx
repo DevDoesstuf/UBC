@@ -146,8 +146,16 @@ function SplitBlock({ l, m, settled }: { l: Lobby; m: Mkt; settled: boolean }) {
   const showPros = !settled && (m.model != null || !!gem);
   const atLock = m.priceAtLock;
   const winP = m.outcome === "yes" ? atLock : atLock != null ? 1 - atLock : null;
+  const tick = useReplayClass(pctText(p), "ph-hero-tick");
   return (
     <div>
+      {!settled && (
+        <p className={cx("ph-hero", tick)} data-testid="chance">
+          <Pct p={p} className="hd-num ph-hero-pct" duration={700} />
+          <span className="ph-hero-word">chance</span>
+        </p>
+      )}
+      {!settled && <PriceLine m={m} />}
       {showPros && (
         <SplitMarkers
           className="ph-markers"
@@ -183,7 +191,6 @@ function SplitBlock({ l, m, settled }: { l: Lobby; m: Mkt; settled: boolean }) {
           </span>
         )}
       </p>}
-      {!settled && <PriceLine m={m} />}
       {settled && m.outcome && (
         <p className="ph-settled-line">
           <span key={m.outcome} className={cx("hd-stamp ph-win-word", m.outcome)}>
@@ -220,7 +227,7 @@ function PriceLine({ m }: { m: Mkt }) {
           {diff === 0 ? "Flat" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)} pts`}
         </span>
       </p>
-      <Sparkline points={pts} className="ph-spark" stroke="var(--k-yes)" fill="rgba(20,104,255,0.12)" />
+      <Sparkline points={pts} className="ph-spark" stroke="var(--k-yes)" fill="rgba(31,214,127,0.14)" />
     </div>
   );
 }
