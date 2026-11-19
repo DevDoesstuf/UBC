@@ -1658,290 +1658,283 @@ static int32_t remainingMs() {
   return r < 0 ? 0 : r;
 }
 
-static void outcomeTile(const Screen &s, bool yes, int x, int y, int w, int h, uint32_t t0, int delay, bool locked) {
-  float p = prog(t0, delay, 820);
-  if (p <= 0) {
-    mark(x - 20, y - 20, w + 40, h + 40);
+// Kalshi-style market: a slim top bar, the question as a calm title, a huge "67% chance" over a clean YES price
+// chart (room solid, model dashed, Gemini a quiet second line), a right rail with a thin countdown and two slim
+// Yes / No price tiles, then recent trades (open) or the host's result buttons (locked).
+static RollState rHeroP;
+static Watch wHeroChart;
+
+// Thin countdown: "Closes in 12s" with a hairline progress bar (hot in the last 5 s).
+static void countdownBar(const Screen &s, int x, int y, int w, bool locked) {
+  int32_t rem = remainingMs(), tot = lockTotalMs;
+  bool manual = !locked && (!s.hasLock || tot <= 0);
+  bool urgent = !locked && !manual && rem <= 5000;
+  if (!locked && !manual) mark(x - 4, y - 24, w + 8, 40);
+  if (locked) {
+    iconLock(x + 7, y - 8, 0.7f, P.ink);
+    text(F_B2, x + 22, y - 2, "Trading closed", P.ink);
+    fill(x, y + 10, w, 3, P.ruleStrong);
     return;
   }
-  float e = eBack(p, 1.9f);
-  float sc = 0.6f + 0.4f * e;
-  int bw = (int)(w * sc), bh = (int)(h * sc);
-  int bx = x + (w - bw) / 2, by = y + (h - bh) / 2;
-  uint16_t bg = yes ? P.yes : P.no, fg = yes ? P.white : P.ink;
-  uint8_t a = (uint8_t)(255 * clampf(p * 2.5f, 0, 1));
-  // A kick when the price moves.
+  if (manual) {
+    text(F_B3, x, y - 2, "Open until the host locks", P.ink2);
+    fill(x, y + 10, w, 3, P.rule);
+    return;
+  }
+  text(F_B3, x, y - 2, "Closes in", P.ink2);
+  char t[12];
+  int secs = (int)((rem + 999) / 1000);
+  if (secs >= 60) snprintf(t, sizeof(t), "%d:%02d", secs / 60, secs % 60);
+  else snprintf(t, sizeof(t), "%ds", secs);
+  textRight(F_N4, x + w, y, t, urgent ? P.hot : P.ink);
+  float f = tot > 0 ? clampf(rem / (float)tot, 0, 1) : 0;
+  fill(x, y + 10, w, 3, P.rule);
+  int fw = (int)(w * f);
+  if (fw > 0) fill(x, y + 10, fw, 3, urgent ? P.hot : P.ink);
+}
+
+// Slim Yes / No tile: tinted, a hairline edge, "Yes" left, "67¢" right (digits roll on a move).
+static void priceTile(const Screen &s, bool yes, int x, int y, int w, int h, bool locked) {
+  uint16_t c = yes ? P.yes : P.no;
+  rrect(x, y, w, h, h / 2, yes ? P.yesTint : P.noTint);
+  rrectStroke(x, y, w, h, h / 2, 1, c, locked ? 70 : 150);
+  text(F_B1, x + 22, y + h / 2 + 7, yes ? "Yes" : "No", c);
   RollState &r = yes ? rYes : rNo;
-  float kick = r.t0 ? prog(r.t0, 0, 420) : 1;
-  if (kick < 1 && r.dir) {
-    int k = (int)(3 * (1 - eOut(kick)));
-    bx -= k;
-    by -= k;
-    bw += 2 * k;
-    bh += 2 * k;
-    mark(x - 8, y - 8, w + 16, h + 16);
-  }
-  shadow(bx, by, bw, bh, 22, a);
-  rrect(bx, by, bw, bh, 22, bg, a);
-  fill(bx + 10, by + 2, bw - 20, 2, P.white, a / 6);
-  if (p < 1) {
-    mark(x - 20, y - 20, w + 40, h + 40);
-    if (p < 0.35f) return;
-  }
-  uint8_t ta = (uint8_t)(255 * clampf((p - 0.35f) * 3, 0, 1));
-  text(F_H3, x + 18, y + 34, yes ? "Yes" : "No", fg, ta);
   char num[8];
-  int v = yes ? s.yes : s.no;
+  int v = (int)clampf(yes ? s.yes : s.no, 0, 100);
   snprintf(num, sizeof(num), "%d", v);
-  rollSet(r, num, (yes ? s.move : -s.move) > 0 ? 1 : (yes ? s.move : -s.move) < 0 ? -1 : r.dir);
-  int nw = rollDraw(r, F_N1, x + 16, y + 120, fg, fg, fg, 560, ta);
-  // cent sign (Latin-1 0xA2)
-  text(F_N3, x + 20 + nw, y + 66, "\xC2\xA2", fg, ta);
-  // direction arrow pops in for 1.1 s after a move
-  if (r.t0 && r.dir) {
-    float ap = prog(r.t0, 0, 1100);
-    if (ap < 1) {
-      float ae = eBack(clampf(ap * 3, 0, 1), 2.2f);
-      iconArrow(x + w - 28, y + 28, 1.1f * ae, r.dir > 0, fg, (uint8_t)(ta * (1 - eOut(ap) * 0.4f)));
-      mark(x + w - 50, y + 6, 44, 44);
-    }
+  int mv = yes ? s.move : -s.move;
+  rollSet(r, num, mv > 0 ? 1 : mv < 0 ? -1 : r.dir);
+  int cw = textW(F_N4, "\xC2\xA2");
+  int nw = textW(F_N3, num);
+  rollDraw(r, F_N3, x + w - 20 - cw - 2 - nw, y + h / 2 + 11, c, c, c, 560);
+  text(F_N4, x + w - 20 - cw, y + h / 2 + 11, "\xC2\xA2", c);
+  if (r.t0 && prog(r.t0, 0, 600) < 1) mark(x, y, w, h);
+  if (locked) rrect(x, y, w, h, h / 2, P.canvas, 110);
+}
+
+// The hero chart: room YES price over time (stepped, soft fill), Gemini thin and quiet, the model dashed.
+static void heroChart(const Screen &s, int x, int y, int w, int h, bool locked) {
+  const Chart &c = s.chart;
+  watch(wHeroChart, s.chartHash ^ (uint32_t)s.nHist * 977u, x - 6, y - 6, w + 12, h + 12);
+  int16_t vals[MAX_CHART];
+  int n = 0;
+  int span = 100;
+  if (c.has && c.n > 0) {
+    n = min((int)c.n, MAX_CHART);
+    for (int i = 0; i < n; i++) vals[i] = (int16_t)clampf(c.room[i], 0, 100);
+    span = (int)clampf(c.span, 5, 100);
+  } else {
+    n = min(s.nHist, MAX_CHART);
+    for (int i = 0; i < n; i++) vals[i] = (int16_t)clampf(s.hist[s.nHist - n + i], 0, 100);
   }
-  char pays[32], amt[16];
-  int cents = v < 1 ? 1 : v;
-  fmtMoney((int32_t)(10000 / cents), amt, sizeof(amt));
-  snprintf(pays, sizeof(pays), "$1 pays %s", amt);
-  text(F_B1, x + 18, y + h - 16, pays, fg, (uint8_t)(ta * 0.92f));
-  if (locked) rrect(bx, by, bw, bh, 22, P.white, 115);
+  const int px0 = x, px1 = x + w - 44, py0 = y + 24, py1 = y + h - 22;
+  auto PY = [&](int v) { return py1 - (v * (py1 - py0)) / 100; };
+  auto PX = [&](int i) { return n <= 1 ? px0 : px0 + (int)(((int32_t)(px1 - px0) * span * i) / (100 * (n - 1))); };
+  for (int v = 0; v <= 100; v += 25) {
+    int gy = PY(v);
+    for (int xx = px0; xx < px1; xx += 6) fill(xx, gy, 2, 1, v == 50 ? P.ruleStrong : P.rule);
+    char lab[8];
+    snprintf(lab, sizeof(lab), "%d%%", v);
+    text(F_B3, px1 + 8, gy + 5, lab, P.muted);
+  }
+  text(F_B3, px0, py1 + 18, c.has && c.x0[0] ? c.x0 : "Open", P.muted);
+  textRight(F_B3, px1, py1 + 18, locked ? "Locked" : c.has && c.x1[0] ? c.x1 : "Now", P.muted);
+  // legend (above the plot)
+  uint16_t lineC = locked ? mix(P.yes, P.muted, 110) : P.yes;
+  int lx = px0, ly = y + 6;
+  line(lx, ly, lx + 14, ly, 2.4f, lineC);
+  lx += 20;
+  lx += text(F_B3, lx, ly + 5, "Room", P.ink2) + 16;
+  if (c.has && c.model >= 0) {
+    line(lx, ly, lx + 4, ly, 1.4f, P.ink2);
+    line(lx + 9, ly, lx + 14, ly, 1.4f, P.ink2);
+    lx += 20;
+    lx += text(F_B3, lx, ly + 5, "Model", P.ink2) + 16;
+  }
+  if (c.has && c.hasGem) {
+    line(lx, ly, lx + 14, ly, 1.4f, P.ink2, 150);
+    lx += 20;
+    text(F_B3, lx, ly + 5, "Gemini", P.ink2);
+  }
+  if (locked) {  // frozen: a lock badge over the plot
+    float p = prog(tLocked, 0, 500);
+    int bw = textW(F_B3, "Locked") + 40, bx = px1 - bw, by = y - 7;
+    uint8_t a = (uint8_t)(255 * clampf(p * 2, 0, 1));
+    rrect(bx, by, bw, 26, 13, P.well, a);
+    rrectStroke(bx, by, bw, 26, 13, 1, P.ruleStrong, a);
+    iconLock(bx + 15, by + 12, 0.55f, P.ink, a);
+    text(F_B3, bx + 27, by + 18, "Locked", P.ink, a);
+    if (p < 1) mark(bx - 4, by - 4, bw + 8, 34);
+  }
+  if (n <= 0) {
+    textCenter(F_B2, (px0 + px1) / 2, (py0 + py1) / 2 + 6, "No trades yet", P.muted);
+    return;
+  }
+  float rp = prog(tQuestion, 200, 1100);
+  if (rp < 1) mark(x - 6, y - 6, w + 12, h + 12);
+  if (c.has && c.model >= 0) {
+    int my = PY((int)clampf(c.model, 0, 100));
+    uint8_t ma = (uint8_t)(170 * clampf(rp * 2, 0, 1));
+    for (int xx = px0; xx < px1; xx += 12) line(xx, my, min(xx + 6, px1), my, 1.4f, P.ink2, ma);
+  }
+  int endX = PX(n - 1);
+  int revealX = px0 - 4 + (int)((max(endX, px0 + 40) - px0 + 30) * eOut(rp));
+  pushClip(px0 - 6, py0 - 10, max(0, revealX - (px0 - 6)), py1 - py0 + 20);
+  int16_t xs[2 * MAX_CHART], ys[2 * MAX_CHART];
+  int k = 0;
+  for (int i = 0; i < n; i++) {
+    int px = PX(i), py = PY(vals[i]);
+    if (k > 0) {
+      xs[k] = px;
+      ys[k] = ys[k - 1];
+      k++;
+    }
+    xs[k] = px;
+    ys[k] = py;
+    k++;
+  }
+  if (k == 1) {
+    xs[1] = px0 + 40;
+    ys[1] = ys[0];
+    k = 2;
+  }
+  fillUnderLine(xs, ys, k, py1, mix(P.canvas, lineC, 26), 255);
+  if (c.has && c.hasGem)
+    for (int i = 1; i < n; i++)
+      if (c.gem[i - 1] >= 0 && c.gem[i] >= 0) line(PX(i - 1), PY(c.gem[i - 1]), PX(i), PY(c.gem[i]), 1.4f, P.ink2, 150);
+  for (int i = 0; i + 1 < k; i++) line(xs[i], ys[i], xs[i + 1], ys[i + 1], 2.6f, lineC);
+  popClip();
+  if (rp >= 1) {
+    float ex = xs[k - 1], ey = ys[k - 1];
+    if (!locked) {
+      float p = (NOW % 2000) / 2000.f;
+      if (p < 0.7f) circle(ex, ey, 4 + 8 * eOut(p / 0.7f), P.yes, (uint8_t)(80 * (1 - p / 0.7f)));
+      markAmbient((int)ex - 14, (int)ey - 14, 28, 28);
+    }
+    circle(ex, ey, 4.5f, lineC);
+  }
 }
 
 static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
-  // top bar: badge + volume | scorebug/code | Lock now
-  int bx = 16;
-  // Width budget: the left side (badge, volume, "traded") stops 12 px before the scorebug or code chip.
-  const Btn *lockPre = findBtn(s, "lock");
-  int limit = SCR_W - 16 - 26 - (lockPre && !locked ? textW(F_B1, lockPre->label) + 40 + 12 : 0);
-  if (s.hasScore) limit -= scorebugW(s);
-  else if (s.code[0]) {
-    char jb[24];
-    snprintf(jb, sizeof(jb), "Join %s", s.code);
-    limit -= textW(F_B1, jb) + 28;
+  // ---- compact top bar: question number + volume | score bug / code, Lock now, live dot
+  const Btn *lockB = findBtn(s, "lock");
+  int rx = SCR_W - 16;
+  topRight(s, rx, st);
+  if (lockB && !locked) {
+    Btn b = *lockB;
+    int w = textW(F_B2, b.label) + 32;
+    rx -= w;
+    button(rx, 12, w, 36, b, F_B2, 18);
+    rx -= 10;
   }
-  limit -= 12;
-  if (enter(tQuestion, 0, 1, {16, 10, 360, 40})) {
-    if (locked) {
-      int w = textW(F_B1, "Trading closed") + 52;
-      float p = prog(tLocked, 0, 820);
-      float e = p < 1 ? eBack(p, 2) : 1;
-      int hw = (int)(w * (0.6f + 0.4f * e));
-      rrect(bx, 12, hw, 38, 19, P.ink);
-      if (p > 0.3f) {
-        iconLock(bx + 22, 30, 0.85f, P.white);
-        text(F_B1, bx + 38, 38, "Trading closed", P.white);
-      }
-      if (p < 1) mark(bx - 4, 6, w * 5 / 4 + 10, 50);
-      bx += w + 12;
-    } else {
-      const char *badge = s.title[0] ? s.title : "Market open";
-      char shortBadge[40];
-      char vm[16] = "";
-      if (s.volume >= 0) fmtMoney(s.volume, vm, sizeof(vm));
-      int need = textW(F_B1, badge) + 52 + 12 + (s.volume >= 0 ? textW(F_N4, vm) + 6 + textW(F_B2, "traded") : textW(F_B2, s.traded));
-      if (bx + need > limit && !strncmp(badge, "Question ", 9)) {
-        snprintf(shortBadge, sizeof(shortBadge), "Q%s", badge + 9);  // "Question 10 of 12" -> "Q10 of 12"
-        badge = shortBadge;
-      }
-      int w = textW(F_B1, badge) + 52;
-      // one even blend, beige to green, across the whole pill (the 3-stop brand gradient bunched the green at the end)
-      rrectGrad(bx, 12, w, 38, 19, P.accent, mix(P.accent, P.lime, 128), P.lime);
-      iconBolt(bx + 22, 31, 0.9f, P.white);
-      text(F_B1, bx + 38, 38, badge, P.white);
-      bx += w + 12;
+  if (s.hasScore) {
+    scorebug(s, rx, 10, 40);
+    rx -= scorebugW(s) + 10;
+  } else if (s.code[0]) {
+    codeChip(s, rx);
+  }
+  if (enter(tQuestion, 0, 3, {16, 8, 400, 44})) {
+    int x = 20;
+    const char *badge = locked ? "Trading closed" : s.title[0] ? s.title : "Market open";
+    char sb[40];
+    if (!strncmp(badge, "Question ", 9)) {
+      snprintf(sb, sizeof(sb), "Q%s", badge + 9);
+      badge = sb;
     }
-    char vol[24];
-    if (s.volume >= 0) {
+    if (locked) iconLock(x + 5, 29, 0.6f, P.ink2);
+    else circle(x + 5, 30, 4, P.yes);
+    x += 16;
+    x += text(F_B2, x, 36, badge, P.ink2) + 14;
+    if (s.volume >= 0 && x + 90 < rx) {
       char m[16];
       fmtMoney(s.volume, m, sizeof(m));
       rollSet(rVol, m, 1);
-      int vw = textW(F_N4, m);
-      if (bx + vw <= limit) {  // the amount, then the word only when it fits too
-        int w = rollDraw(rVol, F_N4, bx, 38, P.ink, P.deep, P.ink, 560);
-        if (bx + w + 6 + textW(F_B2, "traded") <= limit) text(F_B2, bx + w + 6, 37, "traded", P.ink2);
-      }
-    } else if (bx < limit) {
-      strlcpy(vol, s.traded, sizeof(vol));
-      textFit(F_B2, bx, 37, limit - bx, vol, P.ink2);
+      int w = rollDraw(rVol, F_B2, x, 36, P.muted, P.ink, P.muted, 560);
+      if (x + w + 70 < rx) text(F_B2, x + w + 5, 36, "vol", P.muted);
+    } else if (s.volume < 0 && s.traded[0] && x + 60 < rx) {
+      textFit(F_B2, x, 36, rx - x - 10, s.traded, P.muted);
     }
   }
   layerReset();
-  int rx = SCR_W - 16;
-  topRight(s, rx, st);
-  const Btn *lockB = findBtn(s, "lock");
-  if (lockB && !locked) {
-    Btn b = *lockB;
-    int w = textW(F_B1, b.label) + 40;
-    rx -= w;
-    button(rx, 10, w, 42, b, F_B1, 21);
-    rx -= 12;
-  }
-  if (s.hasScore) scorebug(s, rx, 10, 42);
-  else codeChip(s, rx);
+  fill(16, 58, SCR_W - 32, 1, P.rule);
 
-  // stage
-  const int SX = 12, SY = 64, SW = 776, SH = 404;
-  float zp = prog(tQuestion, 0, 480);
-  int zoomIn = (int)((1 - eBack(zp, 1.1f)) * 14);
-  if (zp < 1) mark(0, SY - 20, SCR_W, SCR_H - SY + 20);
-  card(SX + zoomIn, SY + zoomIn, SW - 2 * zoomIn, SH - 2 * zoomIn, 30);
-  pushClip(SX, SY, SW, 7);
-  rrectGrad(SX + zoomIn, SY + zoomIn, SW - 2 * zoomIn, SH, 30, P.deep, P.accent, P.lime);
-  popClip();
-  // takeover sweep: a band of the brand gradient crossing the stage
-  float wp = prog(tQuestion, 60, 700);
-  if (wp > 0 && wp < 1) {
-    int bandW = 180, bx2 = SX - bandW + (int)((SW + bandW) * eOut(wp));
-    pushClip(SX, SY, SW, SH);
-    for (int i = 0; i < bandW; i++) {
-      float f = 1 - fabsf(i - bandW / 2.f) / (bandW / 2.f);
-      uint16_t c = mix(P.deep, P.lime, (uint8_t)(255 * i / bandW));
-      fill(bx2 + i, SY, 1, SH, c, (uint8_t)(140 * f * (1 - wp * 0.6f)));
-    }
-    popClip();
-    mark(SX, SY, SW, SH);
-  }
-  // locked: a green flash settles
-  if (locked) {
-    float fp = prog(tLocked, 0, 520);
-    if (fp < 1) {
-      rrect(SX, SY, SW, SH, 30, P.accentTint, (uint8_t)(180 * (1 - fp)));
-      mark(SX, SY, SW, SH);
-    }
-  }
-  bool urgent = !locked && s.hasLock && remainingMs() <= 5000 && lockTotalMs > 0;
-  if (urgent) {  // the stage edge pulses hot
-    int inSec = 1000 - (int)(remainingMs() % 1000);
-    float g = inSec < 700 ? 1 - inSec / 700.f : 0;
-    rrectStroke(SX, SY, SW, SH, 30, 3, P.hot, (uint8_t)(60 + 150 * g));
-    mark(SX - 2, SY - 2, SW + 4, SH + 4);
-  }
-
-  const int LX = 32, LW = 532;
-  // question: big if it fits in 2 lines
+  // ---- left: title, hero %, chart
+  const int LX = 24, LW = 508;
   int starts[3], lens[3];
   bool cut;
-  int nl = wrap(F_H1, s.question, LW, 2, starts, lens, &cut);
-  if (!cut && nl <= 2) kinetic(F_H1, LX, 116, LW, 2, 46, s.question, P.ink, tQuestion, 140, 45);
-  else kinetic(F_H2, LX, 106, LW, 3, 34, s.question, P.ink, tQuestion, 140, 45);
-
-  int ty = 196, th = 166, tw = (LW - 12) / 2;
-  outcomeTile(s, true, LX, ty, tw, th, tQuestion, 380, locked);
-  outcomeTile(s, false, LX + tw + 12, ty, tw, th, tQuestion, 460, locked);
-
-  // split bar (seam glides)
-  if (enter(tQuestion, 560, 3, {(int16_t)LX, 368, (int16_t)LW, 40})) {
-    float sp = prog(tSplit, 0, 700);
-    float frac = splitFrom + (splitTo - splitFrom) * eBack(sp, 0.8f);
-    if (sp < 1) mark(LX - 10, 360, LW + 20, 50);
-    splitBar(LX, 384, LW, 16, frac, s.model, s.gemini);
-    if (locked) rrect(LX, 384, LW, 16, 8, P.white, 115);
+  int nl = wrap(F_H3, s.question, LW, 2, starts, lens, &cut);
+  kinetic(F_H3, LX, 94, LW, 2, 29, s.question, P.ink, tQuestion, 80, 30);
+  int heroY = nl >= 2 ? 190 : 162;
+  if (enter(tQuestion, 200, 0, {(int16_t)LX, (int16_t)(heroY - 62), 380, 76})) {
+    char pv[8];
+    snprintf(pv, sizeof(pv), "%d%%", (int)clampf(s.yes, 0, 100));
+    rollSet(rHeroP, pv, s.move > 0 ? 1 : s.move < 0 ? -1 : rHeroP.dir);
+    int nw = rollDraw(rHeroP, F_N2, LX - 2, heroY, locked ? P.ink2 : P.ink, P.yes, P.no, 700);
+    if (rHeroP.t0 && prog(rHeroP.t0, 0, 1200) < 1) mark(LX - 4, heroY - 60, nw + 12, 76);
+    int cx = LX + nw + 10;
+    text(F_B1, cx, heroY - 2, "chance", P.ink2);
+    int diff = s.nHist > 0 ? s.yes - s.hist[0] : 0;
+    if (diff) {
+      char d[16];
+      snprintf(d, sizeof(d), "%d", diff > 0 ? diff : -diff);
+      uint16_t dc = diff > 0 ? P.yes : P.no;
+      int ax = cx + textW(F_B1, "chance") + 16;
+      iconArrow(ax + 5, heroY - 9, 0.6f, diff > 0, dc);
+      text(F_B2, ax + 14, heroY - 2, d, dc);
+    }
   }
   layerReset();
-  // Room / Model / Gemini
-  if (enter(tQuestion, 640, 3, {(int16_t)LX, 412, (int16_t)LW, 40})) {
-    int x = LX, y = 440;
-    if (s.model >= 0 || s.gemini >= 0) {
-      char v[8];
-      x += text(F_B2, x, y, "Room ", P.ink2);
-      snprintf(v, sizeof(v), "%d\xC2\xA2", s.yes);
-      x += text(F_N4, x, y + 1, v, P.deep) + 22;
-      if (s.model >= 0) {
-        tri(x, y - 13, x + 12, y - 13, x + 6, y - 3, P.ink);
-        x += 18;
-        x += text(F_B2, x, y, "Model ", P.ink2);
-        snprintf(v, sizeof(v), "%d\xC2\xA2", s.model);
-        x += text(F_N4, x, y + 1, v, P.ink) + 22;
-      }
-      if (s.gemini >= 0) {
-        tri(x, y - 13, x + 12, y - 13, x + 6, y - 3, P.ink);
-        tri(x + 3, y - 11.5f, x + 9, y - 11.5f, x + 6, y - 6.5f, P.card);
-        x += 18;
-        x += text(F_B2, x, y, "Gemini ", P.ink2);
-        snprintf(v, sizeof(v), "%d\xC2\xA2", s.gemini);
-        x += text(F_N4, x, y + 1, v, P.ink);
+  int chY = heroY + 20, chH = 446 - chY;
+  if (enter(tQuestion, 260, 3, {(int16_t)(LX - 6), (int16_t)(chY - 10), (int16_t)(LW + 12), (int16_t)(chH + 16)}, 600)) heroChart(s, LX, chY, LW, chH, locked);
+  layerReset();
+
+  // ---- right rail
+  const int RX = 556, RW = 224;
+  if (enter(tQuestion, 160, 3, {(int16_t)(RX - 12), 66, (int16_t)(RW + 24), 400})) {
+    rrect(RX - 12, 70, RW + 24, 382, 18, P.card);
+    countdownBar(s, RX + 4, 104, RW - 8, locked);
+    priceTile(s, true, RX, 132, RW, 58, locked);
+    priceTile(s, false, RX, 200, RW, 58, locked);
+    if (locked) {
+      const Btn *y = findBtn(s, "resolve:yes");
+      const Btn *n = findBtn(s, "resolve:no");
+      if (y || n) text(F_B3, RX + 4, 292, "Settle it", P.muted);
+      if (y) button(RX, 304, RW, 48, *y, F_B2, 24);
+      if (n) button(RX, 362, RW, 48, *n, F_B2, 24);
+      if (!y && !n) {
+        text(F_B3, RX + 4, 300, "Watch the play.", P.ink2);
+        text(F_B3, RX + 4, 322, "The result comes in by itself.", P.muted);
       }
     } else {
-      textFit(F_B2, x, y, LW, locked ? s.subtitle : "Buy YES or NO on your phone. A winning share pays $1", P.ink2);
-    }
-  }
-  layerReset();
-
-  // right column: ring, then chart + trades (open) or result buttons (locked)
-  const int RX = 584, RW = 188, CX = RX + RW / 2;
-  float rp = prog(tQuestion, 240, 820);
-  if (rp > 0) {
-    if (rp < 1) {
-      layer(0, (int)((1 - eBack(rp, 1.8f)) * 16), (uint8_t)(255 * clampf(rp * 2.5f, 0, 1)));
-      mark(RX - 10, SY + 10, RW + 20, 220);
-    }
-    int32_t tot = lockTotalMs;
-    bool manual = !locked && (!s.hasLock || tot <= 0);
-    lockRing(CX, 172, 76, remainingMs(), tot, locked, manual);
-    layerReset();
-  } else {
-    mark(RX - 10, SY + 10, RW + 20, 220);
-  }
-  if (locked) {
-    const Btn *y = findBtn(s, "resolve:yes");
-    const Btn *n = findBtn(s, "resolve:no");
-    if (enter(tLocked, 200, 0, {(int16_t)RX, 268, (int16_t)RW, 180})) {
-      if (y) button(RX, 280, RW, 70, *y, F_B1, 20);
-      if (n) button(RX, 362, RW, 70, *n, F_B1, 20);
-      if (!y && !n) {
-        textCenter(F_B2, CX, 300, "Watch the play.", P.ink2);
-        textCenter(F_B2, CX, 324, "The result comes", P.ink2);
-        textCenter(F_B2, CX, 348, "in by itself.", P.ink2);
-      }
-    }
-    layerReset();
-  } else {
-    if (enter(tQuestion, 700, 0, {(int16_t)RX, 262, (int16_t)RW, 190})) {
-      int diff = s.nHist > 0 ? s.yes - s.hist[0] : 0;
-      text(F_B3, RX, 276, "Yes price", P.ink2);
-      char d[16];
-      if (diff == 0) strlcpy(d, "Flat", sizeof(d));
-      else snprintf(d, sizeof(d), "%s%d pts", diff > 0 ? "+" : "", diff);
-      textRight(F_N4, RX + RW, 277, d, diff > 0 ? P.yes600 : diff < 0 ? P.no600 : P.muted);
-      sparkline(RX, 286, RW, 54, s.hist, s.nHist, P.yes, mix(P.card, P.yes, 34));
-      // recent trades
-      int y = 356;
-      if (s.nTrades == 0) {
-        text(F_B3, RX, y + 20, "No trades", P.muted);
-      }
+      text(F_B3, RX + 4, 290, "Recent trades", P.muted);
+      int y = 300;
+      if (s.nTrades == 0) text(F_B3, RX + 4, y + 22, "No trades yet", P.muted);
       for (int i = 0; i < min(3, s.nTrades); i++) {
         const TradeRow &t = s.trades[i];
         char key[48];
         snprintf(key, sizeof(key), "%s%d%d%d", t.name, t.cents, t.yes, s.nHist);
         uint32_t born = i == 0 ? seenAt(seenTrades, strHash(key), NOW - tQuestion < 400) : 0;
-        float sl = born ? prog(born, 0, 480) : 1;
+        float sl = born ? prog(born, 0, 420) : 1;
         if (sl < 1) {
-          layer((int)((1 - eBack(sl, 1.2f)) * 40), 0, (uint8_t)(255 * clampf(sl * 2, 0, 1)));
-          mark(RX - 4, y + i * 34 - 4, RW + 50, 34);
+          layer((int)((1 - eOut(sl)) * 24), 0, (uint8_t)(255 * clampf(sl * 2, 0, 1)));
+          mark(RX - 4, y + i * 32 - 2, RW + 30, 32);
         }
-        int ry = y + i * 34;
-        avatar(RX + 12, ry + 14, 11, t.name);
+        int ry = y + i * 32;
+        avatar(RX + 14, ry + 14, 10, t.name);
         char nm[24];
-        fit(F_B3, t.name, 70, nm, sizeof(nm));
-        text(F_B3, RX + 30, ry + 19, nm, P.ink);
-        int ax = RX + 30 + textW(F_B3, nm) + 8;
-        iconArrow(ax + 5, ry + 13, 0.6f, t.yes, t.yes ? P.yes600 : P.no600);
-        text(F_B3, ax + 13, ry + 19, t.yes ? "Yes" : "No", t.yes ? P.yes600 : P.no600);
+        fit(F_B3, t.name, 86, nm, sizeof(nm));
+        text(F_B3, RX + 32, ry + 19, nm, P.ink);
+        text(F_B3, RX + 124, ry + 19, t.yes ? "Yes" : "No", t.yes ? P.yes : P.no);
         char m[16];
         fmtMoney(t.cents, m, sizeof(m));
-        textRight(F_N4, RX + RW, ry + 20, m, P.ink);
+        textRight(F_B3, RX + RW - 4, ry + 19, m, P.ink2);
+        if (i < min(3, s.nTrades) - 1) fill(RX + 4, ry + 30, RW - 8, 1, P.rule);
         layerReset();
       }
     }
-    layerReset();
   }
+  layerReset();
 }
 
 // ---------------------------------------------------------------- result
@@ -1953,90 +1946,69 @@ static void peopleCard(int x, int y, int w, int h, const char *title, bool win, 
     return;
   }
   if (p < 1) {
-    layer(0, (int)((1 - eBack(p, 1.2f)) * 24), (uint8_t)(255 * clampf(p * 2.2f, 0, 1)));
+    layer(0, (int)((1 - eOut(p)) * 14), (uint8_t)(255 * clampf(p * 2.2f, 0, 1)));
     mark(x - 10, y - 10, w + 20, h + 40);
   }
-  card(x, y, w, h, 20);
-  iconArrow(x + 20, y + 21, 0.8f, win, win ? P.yes600 : P.no600);
-  text(F_B1, x + 34, y + 28, title, win ? P.yes600 : P.no600);
-  int listY = y + 38, listH = h - 44, rowH = 34;
+  text(F_B3, x + 4, y + 16, title, P.muted);
+  if (n > 0) {
+    char c[8];
+    snprintf(c, sizeof(c), "%d", n);
+    textRight(F_B3, x + w - 4, y + 16, c, P.muted);
+  }
+  int listY = y + 26, listH = h - 26, rowH = 36;
   float off = scrollArea(scrollIdx, x, listY, w, listH, n * rowH);
   pushClip(x, listY, w, listH);
-  if (n == 0) text(F_B2, x + 16, listY + 24, empty, P.ink2);
+  if (n == 0) text(F_B2, x + 4, listY + 26, empty, P.ink2);
   for (int i = 0; i < n; i++) {
     int ry = listY + i * rowH - (int)off;
     if (ry + rowH < listY || ry > listY + listH) continue;
     const Person &q = ps[i];
-    avatar(x + 28, ry + 16, 12, q.name, win ? 255 : 150);
+    avatar(x + 16, ry + 18, 12, q.name, win ? 255 : 140);
     char m[20], lab[28];
     if (win) {
       fmtMoney(q.has2 ? max<int32_t>(0, q.extra) : q.cents, m, sizeof(m), q.has2);
-      snprintf(lab, sizeof(lab), q.has2 ? "%s won" : "%s", m);
+      snprintf(lab, sizeof(lab), "%s%s", q.has2 ? "" : "+", m);
     } else {
       fmtMoney(q.cents, m, sizeof(m));
-      snprintf(lab, sizeof(lab), "%s lost", m);
+      snprintf(lab, sizeof(lab), "-%s", m);
     }
     int lw = textW(F_N4, lab);
-    textFit(F_B1, x + 48, ry + 23, w - 64 - lw - 8, q.name, win ? P.ink : P.ink2);
-    textRight(F_N4, x + w - 14, ry + 23, lab, win ? P.ink2 : P.muted);
-    // the glint across each winner's name
-    if (win) {
-      float g = prog(t0, delay + 400 + i * 180, 700);
-      if (g > 0 && g < 1) {
-        int gx = x + 40 + (int)((w - 60) * g);
-        for (int k = 0; k < 24; k++) fill(gx + k, ry + 2, 1, rowH - 6, P.white, (uint8_t)(120 * (1 - fabsf(k - 12.f) / 12.f)));
-        mark(x, ry, w, rowH);
-      }
-    }
+    textFit(F_B2, x + 36, ry + 24, w - 52 - lw - 8, q.name, win ? P.ink : P.ink2);
+    textRight(F_N4, x + w - 4, ry + 25, lab, win ? P.yes : P.muted);
+    fill(x + 4, ry + rowH - 1, w - 8, 1, P.rule);
   }
   popClip();
   if (scrolls[scrollIdx].maxOff > 0) {
     Scroller &sc = scrolls[scrollIdx];
     int barH = max(20, listH * listH / max(1, n * rowH));
     int barY = listY + (int)((listH - barH) * clampf(sc.off / max(1.f, sc.maxOff), 0, 1));
-    rrect(x + w - 8, barY, 4, barH, 2, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
-    if (NOW - sc.lastMove < 1500) mark(x + w - 10, listY, 10, listH);
+    rrect(x + w - 3, barY, 3, barH, 1, P.ink, NOW - sc.lastMove < 1200 ? 110 : 40);
+    if (NOW - sc.lastMove < 1500) mark(x + w - 6, listY, 8, listH);
   }
   layerReset();
 }
 
+// Result: a calm reveal. The outcome word big in its colour with the final %, the question above it, winners and
+// losers as Kalshi-like list rows on the right, then Next / Call it! / End.
 static void drawResult(const Screen &s, const NetStatus &st) {
-  wordmark(20, 40);
   int rx = SCR_W - 16;
   topRight(s, rx, st);
-  if (s.hasScore) scorebug(s, rx, 10, 42);
+  if (s.hasScore) scorebug(s, rx, 10, 40);
   else codeChip(s, rx);
-
-  const int SX = 12, SY = 64, SW = 776, SH = 404;
   bool yes = s.result == 'Y';
   bool voided = !s.result;
-  uint16_t win = voided ? P.well : yes ? P.yes : P.no;
-  uint16_t on = voided ? P.ink : yes ? P.white : P.ink;
-  float zp = prog(tResult, 0, 480);
-  int z = (int)((1 - eBack(zp, 1.1f)) * 12);
-  card(SX + z, SY + z, SW - 2 * z, SH - 2 * z, 30);
-  // flood: from the winner's share of the split to the whole stage
-  float fp = prog(tResult, 150, 650);
-  float share = s.lockYes >= 0 ? s.lockYes / 100.f : (yes ? s.yes / 100.f : s.no / 100.f);
-  if (!yes) share = s.lockYes >= 0 ? 1 - s.lockYes / 100.f : share;
-  share = clampf(share, 0.05f, 0.95f);
-  float fw = share + (1 - share) * eBack(fp, 0.6f);
-  int floodW = (int)(SW * clampf(fw, 0, 1));
-  if (fp > 0) {
-    if (yes || voided) pushClip(SX, SY, floodW, SH);
-    else pushClip(SX + SW - floodW, SY, floodW, SH);
-    rrect(SX + z, SY + z, SW - 2 * z, SH - 2 * z, 30, win);
-    popClip();
-  }
-  if (fp < 1 || zp < 1) mark(0, SY - 16, SCR_W, SCR_H - SY + 16);
-  uint16_t txt = fp > 0.5f ? on : P.ink;
+  uint16_t oc = voided ? P.ink : yes ? P.yes : P.no;
+  iconCheck(26, 30, 0.8f, oc);
+  text(F_B2, 40, 36, voided ? "Voided" : "Resolved", P.ink2);
+  fill(16, 58, SCR_W - 32, 1, P.rule);
 
-  float tp = prog(tResult, 120, 300);
+  const int LX = 24, LW = 500;
+  float tp = prog(tResult, 80, 400);
+  if (tp < 1) mark(0, 60, SCR_W, 330);
   uint8_t ta = (uint8_t)(255 * tp);
-  text(F_B2, 36, 98, voided ? "Voided" : "Result", txt, ta);
   int starts[2], lens[2];
   bool cut;
-  int n = wrap(F_H3, s.question, 720, 2, starts, lens, &cut);
+  int n = wrap(F_H3, s.question, LW, 2, starts, lens, &cut);
   for (int i = 0; i < n; i++) {
     char buf[224];
     int l = min(lens[i], 200);
@@ -2045,48 +2017,59 @@ static void drawResult(const Screen &s, const NetStatus &st) {
     if (i == n - 1 && cut) {
       char tmp[224];
       snprintf(tmp, sizeof(tmp), "%s ...", buf);
-      fit(F_H3, tmp, 720, buf, sizeof(buf));
+      fit(F_H3, tmp, LW, buf, sizeof(buf));
     }
-    text(F_H3, 36, 128 + i * 28, buf, txt, (uint8_t)(ta * 0.92f));
+    text(F_H3, LX, 96 + i * 29, buf, P.ink, ta);
   }
-  // the winner word stamps in
-  float sp = prog(tResult, 380, 820);
+  // the outcome rises in (calm: a short ease, no overshoot)
+  float sp = prog(tResult, 300, 600);
   if (sp > 0) {
-    float e = eBack(sp, 2.2f);
-    int dy = (int)((1 - e) * -34);
-    uint8_t a = (uint8_t)(255 * clampf(sp * 2.2f, 0, 1));
-    layer(0, dy, a);
+    layer(0, (int)((1 - eOut(sp)) * 18), (uint8_t)(255 * clampf(sp * 2, 0, 1)));
     const char *word = voided ? "Refunded" : yes ? "YES" : "NO";
     const HFont &hf = voided ? F_H1 : F_HERO;
-    int hy = 262;
-    if (!voided) iconCheck(70, hy - 34, 2.6f, on);
-    text(hf, voided ? 36 : 112, voided ? 232 : hy, word, voided ? P.ink : on);
+    int hy = voided ? 236 : 252;
+    int ww = text(hf, LX - 4, hy, word, oc);
+    if (!voided) {
+      int fin = s.lockYes >= 0 ? s.lockYes : s.yes;
+      fin = (int)clampf(yes ? fin : 100 - fin, 0, 100);
+      char f[24];
+      snprintf(f, sizeof(f), "%d%%", fin);
+      text(F_N3, LX + ww + 14, hy - 40, f, P.ink);
+      text(F_B3, LX + ww + 14, hy - 16, "final chance", P.muted);
+    }
     layerReset();
-    if (sp < 1) mark(20, 150, 520, 130);
-  } else {
-    mark(20, 150, 520, 130);
   }
-  // summary on the right of the word
-  if (enter(tResult, 600, 3, {360, 180, 400, 80})) {
-    char m[20], l1[48];
+  if (sp < 1) mark(LX - 10, 150, 520, 130);
+  if (enter(tResult, 560, 3, {(int16_t)LX, 270, (int16_t)LW, 100})) {
+    char m[20], l1[64];
     if (s.volume >= 0) {
       fmtMoney(s.volume, m, sizeof(m));
-      snprintf(l1, sizeof(l1), "%s traded", m);
+      snprintf(l1, sizeof(l1), "%s traded  \xC2\xB7  %d %s", m, s.nWinners, s.nWinners == 1 ? "winner" : "winners");
     } else {
       strlcpy(l1, s.traded, sizeof(l1));
     }
-    textRight(F_N3, 760, 218, l1, on);
-    char l2[40];
-    snprintf(l2, sizeof(l2), "%d %s", s.nWinners, s.nWinners == 1 ? "winner" : "winners");
-    textRight(F_B1, 760, 248, s.nWinners || s.nLosers ? l2 : "Winning shares pay $1", on, 230);
+    text(F_B2, LX, 292, l1, P.ink2);
+    // the market's end state as a bar: the winning side's share
+    int fin = s.lockYes >= 0 ? s.lockYes : s.yes;
+    fin = (int)clampf(fin, 0, 100);
+    int bw = LW * fin / 100;
+    rrect(LX, 316, LW, 6, 3, voided ? P.rule : mix(P.canvas, P.no, 90));
+    if (bw > 0) rrect(LX, 316, max(6, bw), 6, 3, voided ? P.muted : mix(P.canvas, P.yes, yes ? 255 : 110));
+    text(F_B3, LX, 346, "Yes at lock", P.muted);
+    char pv[8];
+    snprintf(pv, sizeof(pv), "%d%%", fin);
+    textRight(F_B3, LX + LW, 346, pv, P.muted);
   }
   layerReset();
 
-  // who won what
-  int cy = 274, ch = 112, cw = (SW - 48 - 12) / 2;
+  // who won what (right rail)
+  const int RX = 556, RW = 224;
+  rrect(RX - 12, 70, RW + 24, 314, 18, P.card);
   if (s.hasWinners || !s.nLines) {
-    peopleCard(SX + 24, cy, cw, ch, "Called it", true, s.winners, s.nWinners, 0, tResult, 760, "Nobody. Brutal.");
-    peopleCard(SX + 24 + cw + 12, cy, cw, ch, "Cooked", false, s.losers, s.nLosers, 1, tResult, 840, "Clean sweep.");
+    int wn = s.nWinners, ln = s.nLosers;
+    int wh = ln ? 168 : 290;
+    peopleCard(RX, 80, RW, wh, "Called it", true, s.winners, wn, 0, tResult, 600, "Nobody. Brutal.");
+    if (ln || wn) peopleCard(RX, 80 + wh + 8, RW, 290 - wh - 8 + 6, "Cooked", false, s.losers, ln, 1, tResult, 680, "Clean sweep.");
   } else {  // old contract: plain lines
     Person tmp[MAX_LINES];
     int nn = 0;
@@ -2095,36 +2078,35 @@ static void drawResult(const Screen &s, const NetStatus &st) {
       strlcpy(tmp[nn].name, s.lines[i], sizeof(tmp[nn].name));
       nn++;
     }
-    peopleCard(SX + 24, cy, SW - 48, ch, "Called it", true, tmp, nn, 0, tResult, 760, "");
+    peopleCard(RX, 80, RW, 290, "Called it", true, tmp, nn, 0, tResult, 600, "");
   }
 
-  // buttons: Next (ink) | Call it! moments | End
+  // buttons: Next | Call it! moments | End
   const Btn *next = findBtn(s, "next");
   const Btn *end = findBtn(s, "end");
-  if (enter(tResult, 900, 0, {SX + 24, 396, SW - 48, 64})) {
-    int x = SX + 24, x1 = SX + SW - 24;
+  if (enter(tResult, 760, 3, {12, 396, SCR_W - 24, 64})) {
+    int x = 24, x1 = SCR_W - 24;
     bool calls = s.nCalls > 0;
     if (next) {
       Btn b = *next;
       b.style = voided ? B_BRAND : B_INK;
-      // With Call it! buttons beside it, Next shrinks to its label so the calls get the room.
       int w = calls ? min(230, textW(F_B1, b.label) + 62) : 230;
-      button(x, 396, w, 62, b, F_B1, 20);
-      x += w + 12;
+      button(x, 400, w, 56, b, F_B1, 28);
+      x += w + 10;
     }
     if (end) {
       Btn b = *end;
       b.style = next ? B_WHITE : B_INK;
       int w = calls ? min(120, textW(F_B1, b.label) + 44) : next ? 120 : 230;
-      button(x1 - w, 396, w, 62, b, F_B1, 20);
-      x1 -= w + 12;
+      button(x1 - w, 400, w, 56, b, F_B1, 28);
+      x1 -= w + 10;
     }
-    callRow(s.calls, s.nCalls, x, x1, 396, 62, 18);
+    callRow(s.calls, s.nCalls, x, x1, 400, 56, 28);
   }
   layerReset();
   if (!voided && s.nWinners > 0) {
-    uint16_t cols[5] = {P.gold, P.lime, P.white, P.accent, yes ? rgb(0x9CC2FF) : rgb(0xFFC08A)};
-    burst(tResult, 520, 240, 230, min(48, 18 + s.nWinners * 6), (int)strHash(s.question) & 0xFFFF, cols, 5);
+    uint16_t cols[3] = {P.gold, P.yes, P.ink};
+    burst(tResult, 520, 160, 200, min(24, 10 + s.nWinners * 3), (int)strHash(s.question) & 0xFFFF, cols, 3);
   }
 }
 
@@ -2930,30 +2912,31 @@ static int32_t xLeft(int32_t base) {
   return r < 0 ? 0 : r;
 }
 
-// "3 of 5 in": one dot per player, filled for those who have bet (bottom left of the market view).
+// "3 of 5 in": a thin row of avatar dots under the chart, filled for those who have bet.
 static void betsInStrip(const Screen &s) {
   if (s.betsOf <= 0 || (s.scr != S_MARKET && s.scr != S_LOCKED)) return;
-  const int x = 24, y = 462;
-  overlay(x - 4, y - 14, 400, 28);
-  char b[24];
-  snprintf(b, sizeof(b), "%d of %d in", s.betsN, s.betsOf);
-  text(F_B3, x, y + 5, b, s.betsN >= s.betsOf ? P.yes : P.ink2);
-  int dx = x + textW(F_B3, b) + 14, n = min((int)s.betsOf, 12);
+  const int x = 24, y = 464;
+  overlay(x - 4, y - 12, 420, 24);
+  int n = min((int)s.betsOf, 14), bn = (int)clampf(s.betsN, 0, s.betsOf);
   for (int i = 0; i < n; i++) {
-    if (i < s.betsN) circle(dx + i * 16 + 5, y, 5, P.yes);
-    else ring(dx + i * 16 + 5, y, 5, 1.5f, P.ruleStrong);
+    if (i < bn) circle(x + i * 14 + 5, y, 5, P.yes);
+    else ring(x + i * 14 + 5, y, 4.5f, 1.2f, P.ruleStrong);
   }
+  char b[24];
+  snprintf(b, sizeof(b), "%d of %d in", bn, (int)s.betsOf);
+  text(F_B3, x + n * 14 + 8, y + 5, b, bn >= s.betsOf ? P.yes : P.muted);
 }
 
-// "Inside info": a small gold-edged card only the box shows.
+// "Inside info": a small subtle chip at the foot of the right rail.
 static void tipCard(const Screen &s) {
   if (!s.hasTip || (s.scr != S_MARKET && s.scr != S_LOCKED)) return;
-  const int x = 500, y = 398, w = 284, h = 52;
+  const int x = 556, y = 414, w = 224, h = 30;
   overlay(x, y, w, h);
-  rrect(x, y, w, h, 12, P.card);
-  rrectStroke(x, y, w, h, 12, 1, P.gold);
-  text(F_B3, x + 12, y + 20, s.tipLabel[0] ? s.tipLabel : "Inside info", P.gold);
-  textFit(F_B3, x + 12, y + 40, w - 24, s.tipText, P.ink);
+  rrect(x, y, w, h, 15, P.goldTint);
+  circle(x + 14, y + h / 2, 3.5f, P.gold);
+  const char *lab = s.tipLabel[0] ? s.tipLabel : "Inside info";
+  int lw = text(F_B3, x + 24, y + 20, lab, P.gold);
+  textFit(F_B3, x + 30 + lw, y + 20, w - 40 - lw, s.tipText, P.ink2);
 }
 
 static void countdownRing(int cx, int cy, int r, int32_t left, int32_t total, uint16_t c) {

@@ -345,6 +345,40 @@
 .hk .hk-card, .hk .hk-card:hover { background: var(--card); }
 .hk .hk-card.hk-off, .hk .hk-card.hk-off:hover { background: var(--well); }
 
+/* ---- Kalshi-style market / locked / result (mirrors ui.cpp drawMarket / drawResult) */
+.hk-topline { display: flex; align-items: center; gap: 10px; font-size: 18px; color: var(--ink2, #BDB4A2); white-space: nowrap; }
+.hk-muted { color: var(--muted); }
+.hk-ink2 { color: var(--ink2, #BDB4A2); }
+.hk-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--yes); display: inline-block; }
+.hk-hr { height: 1px; background: var(--rule); }
+.hk-legend { display: flex; gap: 16px; font: 15px "HK Atkinson", system-ui, sans-serif; color: var(--ink2, #BDB4A2); white-space: nowrap; }
+.hk-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.hk-legend i { display: inline-block; width: 14px; height: 2.4px; border-radius: 2px; }
+.hk-legend i.hk-dash { background: repeating-linear-gradient(90deg, var(--ink2, #BDB4A2) 0 5px, transparent 5px 9px); height: 1.5px; }
+.hk-axis { font: 15px "HK Atkinson", system-ui, sans-serif; fill: var(--muted); }
+.hk-lockbadge { display: flex; align-items: center; gap: 14px; height: 26px; padding: 0 12px 0 16px; border-radius: 13px; background: var(--well); box-shadow: inset 0 0 0 1px #3a3a3a; font: 15px "HK Atkinson", system-ui, sans-serif; color: var(--ink); }
+.hk-lockbadge > * { position: relative !important; left: 0 !important; top: 0 !important; }
+.hk-ptile { border: 1px solid; box-sizing: border-box; }
+.hk-ptile.hk-dim { opacity: 0.55; }
+.hk-cd { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; font-size: 15px; row-gap: 8px; }
+.hk-cd b { font-size: 21px; }
+.hk-cd-bar { flex-basis: 100%; height: 3px; background: var(--rule); position: relative; }
+.hk-cd-bar i { position: absolute; left: 0; top: 0; bottom: 0; transition: width 0.9s linear; }
+.hk-trow { border-bottom: 1px solid var(--rule); font-size: 15px; }
+.hk-trow .hk-name { max-width: 86px; }
+.hk-trow b { font-size: 15px; }
+.hk-tipchip { display: flex; align-items: center; gap: 6px; border-radius: 15px; background: #2a2418; padding: 0 10px; font: 15px "HK Atkinson", system-ui, sans-serif; white-space: nowrap; overflow: hidden; }
+.hk-tipchip i { width: 7px; height: 7px; border-radius: 99px; background: var(--gold); flex: none; }
+.hk-tipchip b { color: var(--gold); font-weight: 400; }
+.hk-tipchip span { color: var(--ink2, #BDB4A2); overflow: hidden; text-overflow: ellipsis; }
+.hk-bets { display: flex; align-items: center; gap: 4px; font-size: 15px; }
+.hk-bets i { width: 10px; height: 10px; border-radius: 99px; box-shadow: inset 0 0 0 1.2px #3a3a3a; }
+.hk-bets i.on { background: var(--yes); box-shadow: none; }
+.hk-bets span { margin-left: 6px; }
+.hk-prow { border-bottom: 1px solid var(--rule); }
+.hk-endbar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--no) 35%, transparent); overflow: hidden; }
+.hk-endbar i { display: block; height: 100%; border-radius: 3px; }
+
 @media (prefers-reduced-motion: reduce) {
   .hk *, .hk *::before, .hk *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
   .hk-burst, .hk-sweep, .hk-shine::after, .hk-ping { display: none; }
