@@ -108,7 +108,7 @@ export function Sparkline({ lines, className = "", minRange = 20, axis = true }:
             return (
               <g key={l.id}>
                 <path className="tv-line-fill" d={`${d} V 100 H 0 Z`} fill={`url(#g${gid})`} />
-                <path className="tv-line-room" d={d} pathLength={1} vectorEffect="non-scaling-stroke" />
+                <path className="tv-line-room" d={d} vectorEffect="non-scaling-stroke" />
               </g>
             );
           })}

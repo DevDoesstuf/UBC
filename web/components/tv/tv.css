@@ -290,11 +290,12 @@ body:has(.tvk) { background: #000; overflow: hidden; }
 .tvk .tv-spark-tick { position: absolute; left: 0; right: -2.5rem; height: 0; border-top: 1px solid var(--rule); }
 .tvk .tv-spark-tick b { position: absolute; right: 0; top: 0; transform: translateY(-50%); font-weight: 500; font-size: 0.8125rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--card); padding-left: 0.375rem; }
 .tvk .tv-chart.compact .tv-spark-tick { right: 0; }
-.tvk .tv-line-room { fill: none; stroke: var(--yes); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; animation: tv-draw 1.4s var(--e-out); }
+.tvk .tv-line-room { fill: none; stroke: var(--yes); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.tvk .tv-spark-svg { animation: tv-draw 1.4s var(--e-out); }
 .tvk .tv-line-fill { animation: tv-fill 1.6s var(--e-out); }
 .tvk .tv-line-model { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 6 6; opacity: 0.8; animation: tv-fill 1.2s var(--e-out) 300ms backwards; }
 .tvk .tv-line-gem { fill: none; stroke: var(--muted); stroke-width: 1.75; stroke-linejoin: round; opacity: 0.75; animation: tv-fill 1.2s var(--e-out) 500ms backwards; }
-@keyframes tv-draw { from { stroke-dashoffset: 1; } }
+@keyframes tv-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes tv-fill { from { opacity: 0; } }
 .tvk .tv-spark-dot { position: absolute; right: 0; width: 0.75rem; height: 0.75rem; border-radius: 999px; transform: translate(50%, -50%); }
 .tvk .tv-spark-dot.room { background: var(--yes); box-shadow: 0 0 0 3px var(--card), 0 0 1rem rgba(31, 214, 127, 0.6); }
@@ -561,7 +562,7 @@ body:has(.tvk) { background: #000; overflow: hidden; }
   .tvk .tv-soundbtn { transition: none !important; }
   .tvk .tv-soundbtn:hover { transform: none; }
   .tvk .tv-in, .tvk .tile-kick-a, .tvk .tile-kick-b, .tvk .tv-ribbon, .tvk .tv-trade-pulse, .tvk .tv-count-num,
-  .tvk .tv-line-room, .tvk .tv-line-fill, .tvk .tv-line-model, .tvk .tv-line-gem, .tvk .tv-spark-ping,
+  .tvk .tv-spark-svg, .tvk .tv-line-fill, .tvk .tv-line-model, .tvk .tv-line-gem, .tvk .tv-spark-ping,
   .tvk .tv-row-bar, .tvk .tv-reveal-wash, .tvk .tv-bar-fill, .tvk .tv-pill, .tvk .tv-pill::after,
   .tvk .live-dot::after, .tvk .tv-capbar-ping {
     animation: none !important;
