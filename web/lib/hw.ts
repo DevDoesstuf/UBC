@@ -10,7 +10,7 @@ export const CONFIRM_MS = 20_000;
 export const JOIN_FLASH_MS = 3000;
 export const RESULT_FLASH_MS = 4500;
 export const HOTSEAT_MS = 5000;
-export const HOTSEAT_MIN_LEFT_MS = 8000;
+export const HOTSEAT_MIN_LEFT_MS = 4000;
 export const HOTSEAT_EVERY = 3;
 export const INTERLUDE_MS = 6000;
 export const INTERLUDE_EVERY = 3;
@@ -248,13 +248,9 @@ export function tickHw(l: Lobby, now: number, dryRun: boolean): boolean {
   const lastAt = s?.hotseatAtResult;
   if (lastAt != null && asked - lastAt < HOTSEAT_EVERY) return false;
   const seed = hashSeed(`${l.code}|hot|${m.questionId}`);
-  // Random but deterministic: roughly one in two eligible questions, fired somewhere in the first part of the window.
-  if (seed % 2 !== 0) {
-    if (!dryRun) (l.hw ??= {}).hotseatSkip = m.questionId;
-    return false;
-  }
-  const span = Math.max(0, m.lockAt - m.openedAt - HOTSEAT_MIN_LEFT_MS - HOTSEAT_MS - 2000);
-  const fireAt = m.openedAt + 2000 + (span ? (seed >>> 3) % span : 0);
+  // Every HOTSEAT_EVERY questions, fired early in the window so it always fits before the lock.
+  const span = Math.max(0, m.lockAt - m.openedAt - HOTSEAT_MIN_LEFT_MS - HOTSEAT_MS - 3000);
+  const fireAt = m.openedAt + 3000 + (span ? (seed >>> 3) % Math.min(span, 3000) : 0);
   if (now < fireAt) return false;
   const holders = l.order.filter((id) => stakeOf(m, id) > 0);
   if (!holders.length) return false; // keep checking until someone bets or it is too late
