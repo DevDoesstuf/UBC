@@ -10,13 +10,11 @@ import {
   Burst,
   Icon,
   Kinetic,
-  LockRing,
   Mark,
   MarkerShape,
   Pct,
   Roll,
   SplitBar,
-  SplitMarkers,
   delay,
   useFlip,
   useNewIds,
@@ -157,118 +155,101 @@ function payoutPerDollar(m: M, side: "yes" | "no"): string {
   return per ? payoutText(1 / per) : payoutText((side === "yes" ? m.yesCents : m.noCents) / 100);
 }
 
-function OutcomeTile({ m, side, locked, won, d }: { m: M; side: "yes" | "no"; locked: boolean; won?: boolean; d: number }) {
+/** Slim Yes / No pill (tinted, like the box): side, price, and what $1 pays (or the pot / open offers). */
+function OutcomePill({ m, side, locked, d }: { m: M; side: "yes" | "no"; locked: boolean; d: number }) {
   const cents = side === "yes" ? m.yesCents : m.noCents;
   const kick = useReplayClass(cents, "tile-kick");
   const pool = m.pool;
-  const offers = (m.offers ?? []).filter((o) => o.open);
+  const offers = (m.offers ?? []).filter((o) => o.open && o.side === side).length;
   const line =
     m.mode === "pool" && pool
       ? `${money(side === "yes" ? pool.yesCents : pool.noCents)} in the pot`
       : m.mode === "h2h"
-        ? `${offers.filter((o) => o.side === side).length} open ${offers.filter((o) => o.side === side).length === 1 ? "offer" : "offers"}`
+        ? `${offers} open ${offers === 1 ? "offer" : "offers"}`
         : payoutPerDollar(m, side);
   return (
-    <div className="hd-pop tv-tile-wrap" style={delay(d)}>
-      <div className={`tv-tile ${side} on-fill ${kick}`}>
-        <span className="tv-tile-label">
-          {won && <Icon name="check" strokeWidth={3} />}
-          {SIDE_LABEL[side]}
-        </span>
-        <span className="hd-num tv-tile-price">
-          <Pct p={cents / 100} arrow />
-        </span>
-        <span className="tv-tile-line">{line}</span>
-        {locked && <span className="lock-veil" aria-hidden="true" />}
+    <div className="tv-pill-wrap tv-in" style={delay(d)}>
+      <div className={`tv-opill ${side} ${kick} ${locked ? "locked" : ""}`}>
+        <span className="tv-opill-side">{SIDE_LABEL[side]}</span>
+        <span className="hd-num tv-opill-price"><Pct p={cents / 100} flash={false} /></span>
+        <span className="tv-opill-line">{line}</span>
+        {locked && <Icon name="lock" />}
       </div>
     </div>
   );
 }
 
+/** The thin countdown bar under the market (transform only), with the seconds left beside it. */
+export function Countdown({ clock, locked }: { clock: Clock; locked: boolean }) {
+  const urgent = clock.state === "urgent";
+  return (
+    <div className={`tv-count ${urgent ? "urgent" : ""} ${locked ? "locked" : ""}`} role="timer" aria-label={locked ? "Trading locked" : `${clock.lockIn} seconds to lock`}>
+      <span className="tv-count-track"><span className="tv-count-fill" style={{ transform: `scaleX(${locked ? 0 : clock.fraction})` }} /></span>
+      <span className="hd-num tv-count-num">{locked ? <><Icon name="lock" /> Locked</> : `${secsText(clock.lockIn)}`}</span>
+      {!locked && <span className="tv-count-k">{urgent ? "Last call" : "to lock"}</span>}
+    </div>
+  );
+}
+
 /**
- * takeover: a market opens. The stage zooms in, a brand band sweeps across it, the badge pops, the question
- * is kinetic, the tiles pop in 80 ms apart, the split and the pros fade up. `compact` is the side-column
- * version next to a playing clip.
+ * takeover: a market opens. The stage zooms in, the badge pops, the question is kinetic, the hero "% chance"
+ * rolls in over the live chart (which draws on), the pills rise 80 ms apart and the countdown bar runs down.
+ * Every price change rolls the hero, tweens the chart and pulses the stage. `compact` is the side-column
+ * version next to a playing clip (`chart` replaces the big chart there).
  */
 export function MarketStage({ l, m, clock, compact = false, chart }: { l: L; m: M; clock: Clock; compact?: boolean; chart?: ReactNode }) {
   const locked = l.phase !== "open";
   const flash = useReplayClass(locked, "flash");
+  const pulse = useReplayClass(m.history.length, "tv-pulse");
   const moment = momentLabel(l, m);
   const urgent = clock.state === "urgent";
-  const ringSize = compact ? "6.75rem" : "10.5rem";
+  const start = (m.history.length ? m.history : [m.yesCents])[0];
+  const diff = m.yesCents - start;
   return (
     <section className={`hd-zoom tv-stage-card tv-market ${compact ? "compact" : ""} ${locked ? "is-locked" : ""}`} aria-label="Market">
       {moment && <span className="tv-ribbon" aria-hidden="true" />}
-      <div className="hd-wipe" aria-hidden="true" />
       {urgent && <span className="urgent-edge" aria-hidden="true" />}
+      {pulse && <span key={pulse} className="tv-trade-pulse" aria-hidden="true" />}
       {flash && locked && <div key={flash} className="hd-flashout tv-lockflash" aria-hidden="true" />}
-      <div className="tv-market-main">
-        <p className="tv-market-meta">
-          {locked ? (
-            <span key="locked" className="hd-pop tv-badge ink"><Icon name="lock" /> Locked, watch the play</span>
-          ) : moment ? (
-            <span key="moment" className="hd-pop tv-badge brand"><Icon name="bolt" strokeWidth={2.4} /> {moment} called</span>
-          ) : (
-            <span key="open" className="hd-pop tv-badge live"><span className="live-dot" aria-hidden="true" /> Live question</span>
-          )}
-          <span className="hd-fade" style={delay(200)}>
-            {/* Replay games ask as the plays come (and calls add more): no fixed total, same as the phone. */}
-            Question {m.qIndex + 1}{l.game?.kind !== "replay" && l.questionCount > m.qIndex ? ` of ${l.questionCount}` : ""}
-          </span>
-          {!compact && <span className="hd-fade" style={delay(240)}>{MODE_LABEL[m.mode]}</span>}
-          <span className="hd-fade tnum" style={delay(260)}>
-            <Roll text={money(m.volume)} value={m.volume} flash={false} /> traded
+      <p className="tv-market-meta">
+        {locked ? (
+          <span key="locked" className="hd-pop tv-badge ink"><Icon name="lock" /> Locked, watch the play</span>
+        ) : moment ? (
+          <span key="moment" className="hd-pop tv-badge brand"><Icon name="bolt" strokeWidth={2.4} /> {moment} called</span>
+        ) : (
+          <span key="open" className="hd-pop tv-badge live"><span className="live-dot" aria-hidden="true" /> Live</span>
+        )}
+        <span className="tv-in" style={delay(120)}>
+          Question {m.qIndex + 1}{l.game?.kind !== "replay" && l.questionCount > m.qIndex ? ` of ${l.questionCount}` : ""}
+        </span>
+        {!compact && <span className="tv-in" style={delay(160)}>{MODE_LABEL[m.mode]}</span>}
+        <span className="tv-in tnum" style={delay(200)}>
+          <Roll text={money(m.volume)} value={m.volume} flash={false} /> traded
+        </span>
+      </p>
+      <h1 className="tvq tv-question"><Kinetic text={m.text} delay={120} stagger={40} /></h1>
+      <div className="tv-hero tv-in" style={delay(300)}>
+        <p className="tv-hero-num">
+          <span className="hd-num tv-hero-pct"><Pct p={m.yesCents / 100} flash={false} /></span>
+          <span className="tv-hero-k">chance{compact ? "" : " of Yes"}</span>
+          <span className={`hd-num tv-hero-diff ${diff > 0 ? "up" : diff < 0 ? "down" : ""}`}>
+            {diff !== 0 && <Icon name={diff > 0 ? "up" : "down"} />}
+            {diff === 0 ? "Flat" : `${Math.abs(diff)}`}
           </span>
         </p>
-        <h1 className="tvq tv-question">
-          <Kinetic text={m.text} delay={140} stagger={45} />
-        </h1>
-        <div className="tv-market-bottom">
-          <div className="tv-tiles">
-            <OutcomeTile m={m} side="yes" locked={locked} d={380} />
-            <OutcomeTile m={m} side="no" locked={locked} d={460} />
-          </div>
-          <div className="hd-fade" style={delay(560)}>
-            <SplitMarkers
-              className="tv-split-markers"
-              markers={[
-                { id: "model", label: "Model", p: m.model, shape: "solid" },
-                { id: "gemini", label: "Gemini", p: m.gemini?.prob ?? null, shape: "hollow" },
-              ]}
-            />
-            <SplitBar parts={yesNo(m.yesCents / 100)} className="tv-split" />
-          </div>
-          {compact ? (
-            <div className="hd-fade tv-compact-row" style={delay(640)}>
-              <LockRing fraction={clock.fraction} label={secsText(clock.lockIn)} state={clock.state} size={ringSize} compact />
-              <div className="tv-compact-right">
-                {chart}
-                <ProsLegend m={m} compact />
-              </div>
-            </div>
-          ) : (
-            <div className="hd-fade" style={delay(640)}>
-              <ProsLegend m={m} />
-            </div>
-          )}
-        </div>
+        {!compact && <ProsLegend m={m} />}
       </div>
-      {!compact && (
-        <div className="tv-market-ring">
-          <div className="hd-pop" style={delay(240)}>
-            <LockRing
-              fraction={clock.fraction}
-              label={secsText(clock.lockIn)}
-              state={clock.state}
-              size={ringSize}
-              caption={urgent ? <span className="tv-lastcall">Last call</span> : <span>to lock</span>}
-            />
-          </div>
-          <p className="hd-rise tv-ring-note" style={delay(420)}>
-            {locked ? "No more trades" : urgent ? "Get your last trades in" : "Trade on your phone"}
-          </p>
-        </div>
-      )}
+      <div className="tv-market-chart tv-in" style={delay(420)}>
+        {chart ?? <PriceChart m={m} bare />}
+      </div>
+      <div className="tv-pills">
+        <OutcomePill m={m} side="yes" locked={locked} d={520} />
+        <OutcomePill m={m} side="no" locked={locked} d={600} />
+      </div>
+      <div className="tv-in" style={delay(680)}>
+        <Countdown clock={clock} locked={locked} />
+      </div>
+      {compact && <ProsLegend m={m} compact />}
     </section>
   );
 }
@@ -301,8 +282,12 @@ function serverTrail(m: M): { room: number[]; gemini: number[] } | null {
   return { room, gemini };
 }
 
-/** price-draw: the room's YES price since the market opened, against Gemini when it prices the same question. */
-export function PriceChart({ m, compact = false, className = "" }: { m: M; compact?: boolean; className?: string }) {
+/**
+ * price-draw: the room's YES price since the market opened (smooth line, soft fill), the model as a dashed
+ * level and Gemini as a subtle line when it prices the same question. `bare` is the big chart inside the
+ * market stage (the hero above it says the numbers), otherwise a head and a foot say them.
+ */
+export function PriceChart({ m, compact = false, bare = false, className = "" }: { m: M; compact?: boolean; bare?: boolean; className?: string }) {
   const hist = m.history.length ? m.history : [m.yesCents];
   const gem = m.gemini ? Math.round(m.gemini.prob * 100) : null;
   const local = useGeminiTrail(`${m.qIndex}:${m.openedAt}`, hist.length, gem);
@@ -313,29 +298,42 @@ export function PriceChart({ m, compact = false, className = "" }: { m: M; compa
   const roomPts = server ? server.room : hist;
   const start = hist[0];
   const diff = m.yesCents - start;
-  const lines: Line[] = [{ id: "room", points: roomPts, stroke: "var(--green)", fill: "rgba(18,161,80,0.12)" }];
-  if (trail) lines.push({ id: "gemini", points: trail, stroke: "var(--ink)", dash: true });
+  const lines: Line[] = [{ id: "room", points: roomPts, tone: "room" }];
+  if (trail) lines.push({ id: "gemini", points: trail, tone: "gemini" });
+  if (typeof m.model === "number") lines.push({ id: "model", points: [Math.round(m.model * 100)], tone: "model" });
   const moves = hist.length - 1;
   const u = "%";
+  const key = (
+    <span className="tv-chart-key">
+      <span><i className="room" aria-hidden="true" />Room</span>
+      {typeof m.model === "number" && <span><i className="model" aria-hidden="true" />Model</span>}
+      {trail && <span><i className="gem" aria-hidden="true" />Gemini{m.gemini && !m.gemini.live ? " (last seen)" : ""}</span>}
+    </span>
+  );
+  if (bare) {
+    return (
+      <div className={`tv-chart bare ${className}`}>
+        <Sparkline key={`${m.qIndex}:${m.openedAt}`} lines={lines} className="tv-chart-plot" />
+        <p className="tv-chart-foot">
+          {key}
+          <span>Opened {start}{u} · {moves > 0 ? `${moves} ${moves === 1 ? "trade" : "trades"}` : "No trades yet"}</span>
+        </p>
+      </div>
+    );
+  }
   return (
     <div className={`tv-chart ${compact ? "compact" : ""} ${className}`}>
       <p className="tv-chart-head">
-        <span>{trail ? "Room vs Gemini, Yes price" : m.mode === "pool" ? "Yes share of the pot" : m.mode === "h2h" ? "Yes odds from matched offers" : "Yes price"}</span>
+        <span>{trail ? "Room vs Gemini" : m.mode === "pool" ? "Yes share of the pot" : m.mode === "h2h" ? "Yes odds from matched offers" : "Yes price"}</span>
         <span className={`hd-num tv-chart-diff ${diff > 0 ? "up" : diff < 0 ? "down" : ""}`}>
           {diff !== 0 && <Icon name={diff > 0 ? "up" : "down"} />}
-          {diff === 0 ? "Flat" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)} pts`}
+          {diff === 0 ? "Flat" : `${diff > 0 ? "+" : "\u2212"}${Math.abs(diff)} pts`}
         </span>
       </p>
-      <Sparkline lines={lines} className="tv-chart-plot" />
+      <Sparkline key={`${m.qIndex}:${m.openedAt}`} lines={lines} className="tv-chart-plot" axis={!compact} />
       {!compact && (
         <p className="tv-chart-foot">
-          <span>Opened {start}{u}</span>
-          {trail && (
-            <span className="tv-chart-key">
-              <i className="room" aria-hidden="true" />Room {m.yesCents}{u}
-              <i className="gem" aria-hidden="true" />Gemini {gem}{u}{m.gemini && !m.gemini.live ? " (last seen)" : ""}
-            </span>
-          )}
+          {key}
           <span>{moves > 0 ? `${moves} ${moves === 1 ? "trade" : "trades"}` : "No trades yet"}</span>
         </p>
       )}
@@ -405,12 +403,22 @@ export function ResultReveal({ m, compact = false }: { m: M; compact?: boolean }
         <div className="hd-fade tv-reveal-fill void" aria-hidden="true" />
       ) : (
         <div
-          className={`hd-flood tv-reveal-fill hd-tone-${outcome}`}
-          style={{ ["--from" as string]: String(winShare), ["--origin" as string]: outcome === "yes" ? "left" : "right", ["--d" as string]: "150ms" } as CSSProperties}
+          className={`tv-reveal-fill tv-reveal-wash ${outcome}`}
+          style={{ ["--from" as string]: String(winShare) } as CSSProperties}
           aria-hidden="true"
         />
       )}
-      {bits > 0 && <Burst seed={m.qIndex + m.openedAt % 97 + 3} count={compact ? Math.min(28, bits) : bits} x={compact ? "50%" : "30%"} y="38%" spread={compact ? 10 : 18} delay={520} />}
+      {bits > 0 && (
+        <Burst
+          seed={m.qIndex + m.openedAt % 97 + 3}
+          count={compact ? Math.min(28, bits) : bits}
+          x={compact ? "50%" : "30%"}
+          y="42%"
+          spread={compact ? 10 : 18}
+          delay={520}
+          colours={outcome === "yes" ? ["#1FD67F", "#17B067", "#D9B36C", "#E9DFC9"] : ["#FF5148", "#D93A33", "#D9B36C", "#E9DFC9"]}
+        />
+      )}
       <div className="tv-reveal-body">
         <p className="hd-fade tv-reveal-kicker">{voided ? "Voided" : `Result · question ${m.qIndex + 1}`}</p>
         <p className="tvq hd-fade tv-reveal-q">{m.text}</p>
@@ -550,7 +558,7 @@ export function LobbyStage({ l }: { l: L }) {
           <p className="hd-rise tv-card tv-stat" style={delay(420)}>
             <span className="tv-stat-k"><span className="tv-golddot" aria-hidden="true" /> In the pot</span>
             <span className="hd-num tv-stat-v"><Roll text={money(pot)} value={pot} arrow duration={900} /></span>
-            {fresh.size > 0 && <Burst key={fresh.size} seed={fresh.size} count={14} spread={7} x="72%" y="55%" colours={["#E8A33D", "#F2C94C", "#12A150", "#7CCB4E"]} />}
+            {fresh.size > 0 && <Burst key={fresh.size} seed={fresh.size} count={14} spread={7} x="72%" y="55%" colours={["#D9B36C", "#E9DFC9", "#1FD67F", "#17B067"]} />}
           </p>
           <p className="hd-rise tv-card tv-stat" style={delay(500)}>
             <span className="tv-stat-k">{players.length === 1 ? "Player" : "Players"}</span>
@@ -590,12 +598,14 @@ export function LobbyStage({ l }: { l: L }) {
 export function Leaderboard({ players, max = 5 }: { players: Player[]; max?: number }) {
   const rows = ranked(players).slice(0, max);
   const list = useFlip<HTMLOListElement>(rows.map((p) => p.id).join(","));
+  const top = Math.max(0, ...rows.map((p) => worth(p)));
   return (
     <section className="hd-rise tv-card tv-board" aria-labelledby="tv-board-h" style={delay(200)}>
       <h2 id="tv-board-h" className="tv-card-title"><Icon name="trophy" /> Leaderboard</h2>
       <ol ref={list}>
-        {rows.map((p) => (
-          <li key={p.id} data-flip={p.id} className={p.lead ? "lead" : ""}>
+        {rows.map((p, i) => (
+          <li key={p.id} data-flip={p.id} className={`tv-in ${p.lead ? "lead" : ""}`} style={{ ...delay(260 + i * 70), ["--w" as string]: String(top > 0 ? Math.max(0.04, worth(p) / top) : 0) } as CSSProperties}>
+            <span className="tv-row-bar" aria-hidden="true" />
             <span className={`tv-rank hd-num ${p.lead ? "gold" : ""}`}>{p.rank}</span>
             <Avatar name={p.name} size="1.9rem" />
             <span className="grow">{p.name}</span>
