@@ -690,7 +690,7 @@ function HeroChart({ s, x, y, w, h, locked }: { s: KioskScreen; x: number; y: nu
         <text x={px1} y={py1 + 18} className="hk-axis" textAnchor="end">{locked ? "Locked" : c?.x1 || "Now"}</text>
         {n === 0 && <text x={(px0 + px1) / 2} y={(py0 + py1) / 2 + 6} className="hk-axis" textAnchor="middle">No trades yet</text>}
         {model !== null && <line x1={px0} x2={px1} y1={PY(model)} y2={PY(model)} stroke={P.ink2} strokeWidth="1.4" strokeDasharray="6 6" opacity="0.66" />}
-        {n > 0 && <path d={`${path} V${py1} H${px0} Z`} fill={lineC} opacity="0.1" stroke="none" />}
+        {n >= 2 && endX - px0 >= 80 && <path d={`${path} V${py1} H${px0} Z`} fill={lineC} opacity="0.1" stroke="none" />}
         {gpath && <path d={gpath} fill="none" stroke={P.ink2} strokeWidth="1.4" opacity="0.6" className="hk-draw" pathLength={1} />}
         {n > 0 && <path key={n} d={path} fill="none" stroke={lineC} strokeWidth="2.6" className="hk-draw" pathLength={1} />}
         {n > 0 && <circle cx={endX} cy={PY(vals[n - 1])} r="4.5" fill={lineC} />}
@@ -1354,7 +1354,7 @@ function Page({ s, children, onTouch, pending }: { s: KioskScreen; children: Rea
       {y < 60 && (
         <button type="button" className="hk-moretab hk-body hk-w600" style={{ opacity: 1 - y / 60 }} onClick={more}>
           {L.chartH ? "Odds graph" : "More"}
-          <svg width="10" height="9" viewBox="-7 -6 14 12" aria-hidden="true"><path d="M0 6 L-7 -5 L7 -5 Z" fill="#fff" /></svg>
+          <svg width="10" height="9" viewBox="-7 -6 14 12" aria-hidden="true"><path d="M0 6 L-7 -5 L7 -5 Z" fill="currentColor" /></svg>
         </button>
       )}
       {y > 150 && <PageHeader s={s} k={Math.min(1, (y - 150) / 40)} rem={rem} onTop={top} />}

@@ -247,7 +247,8 @@
 .hk-pagescroll::-webkit-scrollbar { display: none; }
 .hk-snapat { position: absolute; left: 0; width: 1px; height: 1px; scroll-snap-align: start; pointer-events: none; }
 .hk-pagebar { position: absolute; right: 3px; width: 4px; border-radius: 2px; background: var(--ink); pointer-events: none; transition: opacity 300ms var(--ease-out); z-index: 3; }
-.hk-moretab { position: absolute; left: 50%; top: 460px; height: 40px; transform: translateX(-50%); padding: 0 14px 18px 16px; border-radius: 14px 14px 0 0; background: var(--ink); color: #fff; font-size: 15px; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; z-index: 3; }
+/* slim pill in the bottom-right corner, clear of the bets-in row (mirrors the box) */
+.hk-moretab { position: absolute; right: 20px; top: 457px; height: 22px; padding: 0 10px 0 12px; border-radius: 11px; border: 1px solid var(--rule-strong, #3a3a3a); background: var(--well); color: var(--ink-2); font-size: 14px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; z-index: 3; }
 .hk-moretab svg { animation: hk-bob 1.6s ease-in-out infinite; }
 .hk-pagehead { position: absolute; left: 0; top: 0; width: 800px; height: 58px; padding: 0 18px 0 16px; display: flex; align-items: center; gap: 12px; background: var(--canvas); color: var(--ink); cursor: pointer; text-align: left; box-shadow: 0 1px 0 var(--rule), 0 3px 6px -2px rgba(16, 38, 28, 0.12); z-index: 4; transition: opacity 120ms linear; }
 .hk-pagehead .hk-badge { flex: none; }
@@ -383,3 +384,17 @@
   .hk *, .hk *::before, .hk *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
   .hk-burst, .hk-sweep, .hk-shine::after, .hk-ping { display: none; }
 }
+
+/* ---- Kalshi-style picker, lobby, ended and overlays (mirrors firmware drawGameCard / drawLobby / drawEnded) ---- */
+.hk .hk-card { border-radius: 16px; background: #111; box-shadow: inset 0 0 0 1px #262626; }
+.hk .hk-card.hk-off { background: #000; }
+.hk .hk-card .hk-ribbon { display: none; }
+.hk .hk-card .hk-swatch { width: 11px; height: 11px; border-radius: 99px; margin-top: 8px; }
+.hk .hk-btn { box-shadow: none; }
+.hk .hk-btn.hk-plain, .hk .hk-btn.hk-call { box-shadow: inset 0 0 0 1px #3a3a3a; background: #111; color: var(--ink); }
+.hk .hk-join { background: none !important; color: var(--ink); }
+.hk .hk-code span { background: #111; color: var(--ink); box-shadow: inset 0 0 0 1px #3a3a3a; border-radius: 12px; width: 46px; }
+.hk .hk-row { background: none; border-radius: 0; box-shadow: inset 0 -1px 0 #262626; }
+.hk .hk-row.hk-lead { background: #2a2418; border-radius: 12px; box-shadow: none; }
+.hk .hk-row.hk-lead * { color: var(--ink) !important; }
+.hk .hk-empty { border: 0; }
