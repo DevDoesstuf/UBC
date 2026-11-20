@@ -46,7 +46,7 @@ import { bestCandidate, replayMs } from "./replay/run";
 import { buildScorecard } from "./scorecard";
 import {
   ApiError, createLobby, endSession, getKioskCode, getKioskLobby, getLobby, lockMarket, mutate, openMarket,
-  releaseKiosk, resolveMarket, usd, hotseatAccept, parseMoney, setMoney,
+  releaseKiosk, resolveMarket, usd, hotseatAccept, parseMoney, setMoney, askMode, lobbyMode, parseMode, setMode,
 } from "./lobby";
 import { lobbyMoneyMode, moneyLocked, MONEY_OFFERED } from "./money";
 import * as lobbyModule from "./lobby";
@@ -55,7 +55,7 @@ import { boxName, boxSafe } from "./boxText";
 import { friendlyLabel, type LabelTeam } from "./gemini";
 import { awayFirst } from "./matchup";
 import { losersOf, openValues, standings } from "./standings";
-import type { Game, Lobby } from "./types";
+import type { Game, Lobby, MarketMode } from "./types";
 import { hwKioskFields, type HwKioskFields } from "./hw";
 
 // ---------------------------------------------------------------- "Call it!" moments
@@ -590,10 +590,27 @@ function lobbyButtons(l: Lobby, calls: KioskButton[]): KioskButton[] {
   return [{ id: "start", label: `Start question ${l.qIndex + 1}`, style: "yes" }, ...extra, { id: "cancel", label: "Cancel", style: "plain" }];
 }
 
-/** The lobby's "Call it!" row with the money switch first (at most 4). */
+/** The lobby's "Call it!" row with the mode and money switches first (at most 4). */
 function lobbyCalls(l: Lobby, calls: { id: string; label: string; enabled: boolean }[]): { id: string; label: string; enabled: boolean }[] {
   const money = moneyButton(l);
-  return (money ? [{ id: money.id, label: money.label, enabled: true }, ...calls] : calls).slice(0, 4);
+  const mode = l.phase === "lobby" ? [{ id: "mode:pick", label: k(`Mode: ${lobbyMode(l) === "mirror" ? "Gemini" : lobbyMode(l) === "h2h" ? "1 v 1" : MODE_LABEL[lobbyMode(l)]}`).slice(0, 16), enabled: true }] : [];
+  return [...mode, ...(money ? [{ id: money.id, label: money.label, enabled: true }] : []), ...calls].slice(0, 4);
+}
+
+/** Box labels for the trading modes (Latin-1, at most 16 characters). */
+export const MODE_LABEL: Record<MarketMode, string> = { pool: "Pool", market: "Market", mirror: "Gemini odds", h2h: "Head to head" };
+/** The order the box offers them in; the first is the suggested one. */
+export const MODE_CHOICES: MarketMode[] = ["pool", "market", "mirror", "h2h"];
+const MODE_PICK_TEXT = "Pool: one pot, winners split it.  Market: prices move with every bet.  Gemini odds: bet at Gemini's live prices.  Head to head: dare a friend.";
+
+/** One line under the question on the box, per mode. */
+function modeLine(m: { mode?: MarketMode }): string {
+  switch (m.mode) {
+    case "pool": return "Pool: everyone's stake goes in one pot and the winners split it";
+    case "mirror": return "Gemini odds: you get Gemini's live price. A winning share pays $1";
+    case "h2h": return "Head to head: post an offer on your phone or take a friend's";
+    default: return "Buy YES or NO on your phone. A winning share pays $1";
+  }
 }
 
 /** v2 additions per screen. */
@@ -684,6 +701,11 @@ export function forFlashedBox(s: KioskScreen, l: Lobby | null, now: number = Dat
     // The overlay fields stay: newer firmware draws its own overlay on top of this message.
     return { ...s, screen: "message", color, title: k(title).slice(0, 60), subtitle: k(subtitle).slice(0, 150), buttons, legacyOf: s.screen };
   };
+  // Right after a game is picked: how this room wants to bet. Four big buttons on the message screen.
+  if (l.modePicked === false && l.phase === "lobby") {
+    const pick = msg("How do you want to play?", MODE_PICK_TEXT, MODE_CHOICES.map((c, i) => ({ id: `mode:${c}`, label: MODE_LABEL[c], style: i === 0 ? "yes" : "plain" })));
+    return { ...pick, palette: { ...KIOSK_PALETTE } };
+  }
   if (s.hotseat) {
     return msg(`Hot seat: ${s.hotseat.name}!`, "Tap below in the next five seconds to double your stake", [{ id: "hotseat:accept", label: "Tap to double", style: "yes" }], "amber");
   }
@@ -765,8 +787,8 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
     if (l.phase === "open") {
       return {
         ...base, screen: "market", color: "green",
-        title: String(m.questionId).startsWith("moment") ? "Called it!" : l.replay ? `Question ${m.qIndex + 1}` : `Question ${m.qIndex + 1} of ${total}`,
-        subtitle: "Buy YES or NO on your phone. A winning share pays $1",
+        title: k(`${String(m.questionId).startsWith("moment") ? "Called it!" : l.replay ? `Question ${m.qIndex + 1}` : `Question ${m.qIndex + 1} of ${total}`}${(m.mode ?? "market") !== "market" ? `  ·  ${MODE_LABEL[m.mode ?? "market"]}` : ""}`),
+        subtitle: modeLine(m),
         lockIn: Math.max(0, Math.ceil((m.lockAt - Date.now()) / 1000)),
         buttons: [{ id: "lock", label: "Lock now", style: "plain" }],
       };
@@ -795,7 +817,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
     return {
       screen: "result", kiosk: kioskId, color: m.outcome === "yes" ? "green" : "gray", footer: footerL,
       title: m.outcome === "yes" ? "It was YES" : "It was NO",
-      subtitle: `${winners.length ? `${winners.length} ${winners.length === 1 ? "winner" : "winners"}` : "No winners"}  ·  ${usd(m.volume)} traded  ·  winning shares pay $1`,
+      subtitle: `${winners.length ? `${winners.length} ${winners.length === 1 ? "winner" : "winners"}` : "No winners"}  ·  ${usd(m.volume)} ${m.mode === "pool" ? "in the pot  ·  winners split it" : m.mode === "h2h" ? "matched" : "traded  ·  winning shares pay $1"}`,
       result: m.outcome === "yes" ? "YES" : "NO",
       question: k(m.text),
       lines: winners.length
@@ -829,7 +851,7 @@ export async function kioskTouch(kioskId: string, id: string, baseUrl: string): 
   if (action === "game") {
     const current = code ? await getLobby(code) : null;
     if (current && current.phase !== "ended") throw new ApiError(400, "A game is already running");
-    await createLobby(kioskId, arg);
+    await createLobby(kioskId, arg, null, { askMode: true });
     return kioskScreen(kioskId, baseUrl);
   }
   if (!code) throw new ApiError(400, "Pick a game first");
@@ -874,6 +896,17 @@ export async function kioskTouch(kioskId: string, id: string, baseUrl: string): 
       const want = parseMoney(arg);
       if (!want) throw new ApiError(400, "Unknown button");
       await mutate(code, (l) => setMoney(l, want));
+      break;
+    }
+    case "mode": {
+      // The "How do you want to play?" screen (mode:pool / market / mirror / h2h) and the lobby's Mode button (mode:pick).
+      if (arg === "pick") {
+        await mutate(code, (l) => askMode(l));
+        break;
+      }
+      const want = parseMode(arg);
+      if (!want) throw new ApiError(400, "Unknown button");
+      await mutate(code, (l) => setMode(l, want));
       break;
     }
     case "hotseat":

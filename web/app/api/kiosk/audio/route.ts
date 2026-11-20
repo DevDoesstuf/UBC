@@ -13,8 +13,9 @@
 // Ordering, skipping stale items when the speaker falls behind, and pre-warming: lib/speaker.ts.
 import { after as afterResponse } from "next/server";
 import { baseUrl, handle, json } from "@/lib/http";
-import { getKioskLobby, normKiosk, personaOf } from "@/lib/lobby";
+import { getKioskLobby, normKiosk, personaOf, sportOf, voiceOf } from "@/lib/lobby";
 import { nextForSpeaker, speakerQueue, voiceToPrewarm } from "@/lib/speaker";
+import { getGame } from "@/lib/games";
 import { prewarm, ttsAvailable } from "@/lib/tts";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
     // The speaker waits on this answer: never on a Gemini quote (the lobby's timers still run).
     const l = await getKioskLobby(kiosk, { gemini: false });
     const voice = !!l && (await ttsAvailable());
-    const items = speakerQueue(l, baseUrl(req), voice);
+    const items = speakerQueue(l, baseUrl(req), voice, l ? sportOf(getGame(l.gameId)) : null);
     const now = Date.now();
     const { reply, item } = nextForSpeaker(items, after, now);
     // While the speaker plays this item, synthesize the next voice line so it is cached when the speaker asks.
@@ -37,7 +38,7 @@ export async function GET(req: Request) {
       const persona = personaOf(l);
       if (cap) {
         try {
-          afterResponse(() => prewarm(cap.say || cap.text, persona, "wav"));
+          afterResponse(() => prewarm(cap.say || cap.text, persona, "wav", voiceOf(l)));
         } catch {
           /* outside a request (tests): skip the pre-warm */
         }

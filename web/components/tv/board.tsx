@@ -33,7 +33,7 @@ export type Player = L["players"][number];
 export type Score = NonNullable<NonNullable<L["game"]>["score"]>;
 export type Card = NonNullable<L["scorecard"]>;
 
-const MODE_LABEL = { market: "Market", pool: "Pool", h2h: "Head to head" } as const;
+const MODE_LABEL = { market: "Market", pool: "Pool", h2h: "Head to head", mirror: "Gemini odds" } as const;
 
 export const joinHost = (url: string) => url.replace(/^https?:\/\//, "");
 

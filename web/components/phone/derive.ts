@@ -1,6 +1,6 @@
 // Pure helpers for the phone: what to show, derived from the lobby view. No fetching, no React.
 import type { LobbyData } from "@/components/client";
-import { sharesForSpend } from "@/lib/lmsr";
+import { priceYes, sharesForSpend } from "@/lib/lmsr";
 import { poolPotential, takerStakeFor } from "@/lib/modes";
 import { awayFirst, inOrder } from "@/lib/matchup";
 import { standings, worthOf as worth } from "@/lib/standings";
@@ -9,12 +9,12 @@ export type Side = "yes" | "no";
 export type Lobby = LobbyData;
 export type Mkt = NonNullable<LobbyData["market"]>;
 export type Me = NonNullable<LobbyData["me"]>;
-export type MarketMode = "market" | "pool" | "h2h";
+export type MarketMode = "market" | "pool" | "h2h" | "mirror";
 
 export const SIDE: Record<Side, string> = { yes: "Yes", no: "No" };
 export const other = (s: Side): Side => (s === "yes" ? "no" : "yes");
 
-export const modeOf = (m: Mkt | null | undefined): MarketMode => (m?.mode === "pool" || m?.mode === "h2h" ? m.mode : "market");
+export const modeOf = (m: Mkt | null | undefined): MarketMode => (m?.mode === "pool" || m?.mode === "h2h" || m?.mode === "mirror" ? m.mode : "market");
 
 /** Money tied up in the running question (spent, not yet paid back). */
 export function inPlay(l: Lobby): number {
@@ -54,6 +54,12 @@ export function stakeReturn(m: Mkt, side: Side, cents: number): number | null {
   if (mode === "pool") {
     const pool = m.pool ?? { yesCents: 0, noCents: 0 };
     return poolPotential({ yes: pool.yesCents, no: pool.noCents }, side, cents);
+  }
+  if (mode === "mirror") {
+    // Gemini odds: fixed price right now (the server never prices a side under 3 cents).
+    const py = priceYes(m.yesShares, m.noShares, m.b);
+    const price = Math.max(0.03, side === "yes" ? py : 1 - py);
+    return Number.isFinite(price) ? Math.floor(cents / price) : null;
   }
   if (mode === "market") {
     const shares = sharesForSpend(side, cents / 100, m.yesShares, m.noShares, m.b);

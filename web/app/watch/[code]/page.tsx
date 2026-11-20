@@ -29,8 +29,9 @@ import {
   type Player,
   type Ranked,
 } from "@/components/tv/board";
-import { Aurora, Icon, Kinetic, Mark, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
+import { Aurora, BrandLoader, Icon, Kinetic, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
 import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
+import { soundFile } from "@/lib/speaker";
 
 /** "#003594" + alpha -> rgba(); unknown colours fall back to the brand green. */
 const hexA = (hex: string | undefined, a: number) =>
@@ -108,7 +109,7 @@ export default function WatchPage() {
     const newCaption = cap && cap.id > (lastCaption.current ?? 0) ? cap : null;
     if (cap) lastCaption.current = Math.max(lastCaption.current ?? 0, cap.id);
     if (!sound) return;
-    for (const e of fresh) if (e.sound) new Audio(`/sounds/${e.sound}.wav`).play().catch(() => {});
+    for (const e of fresh) if (e.sound) new Audio(`/sounds/${soundFile(e.sound, l.game?.sport)}`).play().catch(() => {});
     if (newCaption) {
       const t = setTimeout(() => say({ id: newCaption.id, text: newCaption.text }), fresh.some((e) => e.sound) ? 700 : 0);
       return () => clearTimeout(t);
@@ -141,11 +142,13 @@ export default function WatchPage() {
     return (
       <div className="tvk tvk-state">
         <Aurora />
-        <div className="tvk-state-body" role="status">
-          <Mark size="5rem" lit={3} spin={!error} className="tv-state-mark" />
-          <h1 className="tvq"><Kinetic text={head} /></h1>
-          {error && <p>{notFound ? "Pick a game on the box first, then open this page again." : `${error.message}. Trying again every second.`}</p>}
-        </div>
+        <BrandLoader
+          size="lg"
+          spin={!error}
+          className="tvk-state-body"
+          label={<Kinetic text={head} />}
+          detail={error ? (notFound ? "Pick a game on the box first, then open this page again." : `${error.message}. Trying again every second.`) : null}
+        />
       </div>
     );
   }

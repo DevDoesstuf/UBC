@@ -13,7 +13,7 @@ export { Icon, type IconName } from "./Icon";
 export { Roll, Pct, DirArrow } from "./Roll";
 export { SplitBar, SplitMarkers, MarkerShape, toneFor, type SplitPart, type Tone } from "./Split";
 export { LockRing, type LockState } from "./LockRing";
-export { Mark, Wordmark, MARK_LIT } from "./Mark";
+export { Mark, Wordmark, BrandLoader, markSvg, MARK_BODIES, MARK_HEADS, MARK_GREEN, MARK_LIT } from "./Mark";
 export {
   Kinetic, Burst, Aurora, Avatar, avatarColour, Sparkline, useSeries, useCoins, withAlpha,
   AURORA_DEFAULT, BURST_COLOURS, GOLD_BURST, type AuroraBlob, type SeriesPoint,

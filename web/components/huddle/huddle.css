@@ -61,7 +61,40 @@
   letter-spacing: -0.04em;
   color: var(--k-ink);
 }
-.hd-wordmark svg { color: var(--k-rule-strong); }
+.hd-wordmark svg { flex: none; }
+
+/* The mark (Mark.tsx): green via --hd-mark; spin turns it round its centre (20, 20 of the 40 box). */
+.hd-mark { display: inline-block; flex: none; overflow: visible; }
+.hd-mark-spin { transform-box: view-box; transform-origin: 50% 50%; animation: hd-mark-spin 2.4s linear infinite; }
+@keyframes hd-mark-spin { to { transform: rotate(360deg); } }
+@keyframes hd-mark-pulse { 50% { opacity: 0.55; transform: scale(0.92); } }
+
+/* BrandLoader: every loading / connecting state. Sized by font-size on the root. */
+.hd-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--k-ink);
+  --hd-loader-mark: 4.5rem;
+  --hd-loader-word: 2rem;
+}
+.hd-loader-sm { --hd-loader-mark: 2.75rem; --hd-loader-word: 1.375rem; }
+.hd-loader-lg { --hd-loader-mark: 9rem; --hd-loader-word: 3.75rem; }
+.hd-loader-mark { display: block; font-size: var(--hd-loader-mark); }
+.hd-loader-word {
+  margin-top: calc(var(--hd-loader-word) * 0.42);
+  font-family: var(--k-font-head);
+  font-size: var(--hd-loader-word);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+.hd-loader-label { margin-top: calc(var(--hd-loader-word) * 0.5); max-width: 32ch; font-size: calc(var(--hd-loader-word) * 0.5); color: var(--k-ink-2); text-wrap: balance; }
+.hd-loader-detail { margin-top: 0.4em; max-width: 36ch; font-size: calc(var(--hd-loader-word) * 0.44); color: var(--k-ink-muted); text-wrap: pretty; }
+/* A whole screen that is only loading (the loading.tsx files under app). */
+.hd-loader-page { box-sizing: border-box; display: grid; place-items: center; min-height: 100dvh; padding: 24px 16px; background: var(--k-canvas); }
 
 .hd-avatar {
   display: inline-flex;
@@ -602,6 +635,8 @@
   .hd-aurora > i {
     animation: none !important;
   }
+  /* The loading mark does not turn: it breathes. */
+  .hd-mark-spin { animation: hd-mark-pulse 2.4s ease-in-out infinite; }
   /* Colour still changes on a price move (with the arrow), just without the fade. */
   .hd-flash-up-a, .hd-flash-up-b, .hd-flash-down-a, .hd-flash-down-b {
     animation-timing-function: steps(1, end) !important;

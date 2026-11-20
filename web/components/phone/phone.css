@@ -66,7 +66,7 @@ html:has(.ph-screen) {
 .ph-hint { margin: 8px 0 0; font-size: 0.9375rem; color: var(--k-ink-muted); text-wrap: pretty; }
 .ph-icon-btn { min-height: 44px; width: 44px; padding: 0; flex: none; }
 .ph-btn-sm { min-height: 44px; font-size: 1rem; }
-.ph-btn-mark { color: rgba(0, 0, 0, 0.45); }
+.ph-btn-mark { --hd-mark: rgba(0, 0, 0, 0.55); }
 
 /* ---------------------------------------------------------------- brand, loading, errors */
 
@@ -74,11 +74,12 @@ html:has(.ph-screen) {
 .ph-brand-link { text-decoration: none; color: inherit; border-radius: var(--k-r-chip); }
 .ph-wordmark { font-size: 1.375rem; }
 .ph-wordmark-lg { font-size: 1.625rem; }
+.ph-wordmark-sm { font-size: 1.125rem; }
+.ph-wordmark-xs { font-size: 0.9375rem; }
+.ph-sheet-brand { display: flex; width: max-content; margin: 0 0 2px; opacity: 0.85; }
 .ph-code-plain { font-size: 1.25rem; letter-spacing: 0.12em; color: var(--k-ink-muted); }
 
-.ph-loading { display: flex; align-items: center; gap: 12px; color: var(--k-ink-2); }
-.ph-loading-mark { color: var(--k-rule-strong); flex: none; }
-.ph-loading-slow { display: block; font-size: 0.9375rem; color: var(--k-ink-muted); }
+.ph-loading { width: 100%; }
 
 .ph-error {
   display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; padding: 12px 14px;
@@ -155,7 +156,9 @@ html:has(.ph-screen) {
 
 .ph-top { position: sticky; top: 0; z-index: 30; background: var(--k-canvas); padding-top: env(safe-area-inset-top); box-shadow: 0 1px 0 var(--k-rule); }
 .ph-top-in { max-width: 36rem; margin: 0 auto; padding: 0 16px; }
-.ph-top-row { display: flex; align-items: center; gap: 10px; padding-top: 10px; }
+.ph-top-brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; }
+.ph-top-brand .ph-codechip { height: 28px; padding: 0 10px; font-size: 0.9375rem; box-shadow: none; }
+.ph-top-row { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
 .ph-bug {
   display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; min-height: 44px;
   padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--k-card); box-shadow: var(--k-shadow-lift);

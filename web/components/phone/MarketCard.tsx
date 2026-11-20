@@ -22,7 +22,7 @@ export interface Actions {
   addMoney(): void;
 }
 
-const MODE_LABEL: Record<MarketMode, string> = { market: "Market", pool: "Pool", h2h: "Head-to-head" };
+const MODE_LABEL: Record<MarketMode, string> = { market: "Market", pool: "Pool", h2h: "Head-to-head", mirror: "Gemini odds" };
 const ODDS = [1.5, 2, 3];
 
 /** Fire coins from the element that was tapped to the split bar (the pot). */
@@ -579,7 +579,7 @@ function Position({ l, m }: { l: Lobby; m: Mkt }) {
   for (const side of ["yes", "no"] as const) {
     const amt = pos[side];
     if (amt <= 0) continue;
-    if (mode === "market") {
+    if (mode === "market" || mode === "mirror") {
       rows.push({
         side,
         text: (
@@ -615,7 +615,7 @@ function Position({ l, m }: { l: Lobby; m: Mkt }) {
           {r.pays && <span className="ph-pos-pays">{r.pays}</span>}
         </div>
       ))}
-      {mode === "market" && <p className="ph-pos-cost">Cost so far <span className="hd-tnum">{usd(pos.spent)}</span></p>}
+      {(mode === "market" || mode === "mirror") && <p className="ph-pos-cost">Cost so far <span className="hd-tnum">{usd(pos.spent)}</span></p>}
     </div>
   );
 }

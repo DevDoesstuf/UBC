@@ -100,6 +100,12 @@ function addEvent(l: Lobby, kind: LobbyEvent["kind"], text: string, sound?: Lobb
 
 // ---------------------------------------------------------------- captions
 
+/** The game's own announcer voice (an ElevenLabs voice id from games.json), or null for the persona's voice. */
+export function voiceOf(l: Lobby): string | null {
+  const v = getGame(l.gameId)?.voice;
+  return typeof v === "string" && /^[A-Za-z0-9]{10,40}$/.test(v) ? v : null;
+}
+
 export function personaOf(l: Lobby): Persona {
   const g = getGame(l.gameId);
   if (g?.persona) return g.persona;
@@ -184,8 +190,19 @@ function refreshMarketGemini(l: Lobby, now: number = Date.now()): void {
   const ref = k.event && k.contract ? refForContract(l.gemini ?? null, k.event, k.contract, teams) : refForHint(l.gemini ?? null, k.hint, k.yesTeam, teams);
   if (ref) {
     m.gemini = ref;
+    // Gemini-odds mode: the room trades at Gemini's price, so the price on every screen follows Gemini.
+    if (modeOf(m) === "mirror") {
+      const before = yesPrice(m);
+      setDisplayPrice(m, mirrorClamp(ref.prob));
+      if (lmsr.toCents(yesPrice(m)) !== lmsr.toCents(before)) pushHistory(m, before);
+    }
     noteTrail(m, now);
   }
+}
+
+/** Gemini-odds mode never prices a side below 3 cents (a $1 stake can win at most about $33). */
+function mirrorClamp(p: number): number {
+  return Math.min(0.97, Math.max(0.03, p));
 }
 
 /** The replayed real game's Gemini track for this game, if it has one (Gemini's real prices, by replay time). */
@@ -223,6 +240,12 @@ function markOpen(l: Lobby, now: number): void {
   const m = l.market;
   if (!m) return;
   refreshMarketGemini(l, now);
+  if (modeOf(m) === "mirror") {
+    // Opens at Gemini's price (the model's when this question has no Gemini market): one clean first point.
+    setDisplayPrice(m, mirrorClamp(m.gemini?.prob ?? m.model ?? 0.5));
+    m.history = [yesPrice(m)];
+    m.lastMove = 0;
+  }
   m.geminiAtOpen = m.gemini?.prob ?? null;
   noteTrail(m, now, true);
 }
@@ -505,7 +528,7 @@ export async function releaseKiosk(kioskId: string, code: string): Promise<void>
   if ((await kvGet(kioskKey(kioskId))) === code) await kvDel(kioskKey(kioskId));
 }
 
-export async function createLobby(kioskId: string, gameId: string, mode?: MarketMode | null): Promise<Lobby> {
+export async function createLobby(kioskId: string, gameId: string, mode?: MarketMode | null, opts: { askMode?: boolean } = {}): Promise<Lobby> {
   const game = getGame(gameId);
   if (!game) throw new ApiError(404, "Unknown game");
   if (!game.live || game.questions.length === 0) throw new ApiError(400, `${game.title} is coming soon`);
@@ -522,6 +545,7 @@ export async function createLobby(kioskId: string, gameId: string, mode?: Market
       players: {}, order: [], market: null, results: [], events: [], eventSeq: 0,
       deposits: {}, withdrawals: [], housePnl: 0, money: "demo",
       mode: mode ?? game.mode ?? "market", captions: [], scoreEntries: [], gemini,
+      ...(opts.askMode && !mode ? { modePicked: false } : {}),
     };
     if (isReplay(game) && game.replay) {
       l.replay = newRun(game.replay, game.questions.length);
@@ -582,6 +606,13 @@ export function setMode(l: Lobby, mode: MarketMode): void {
   if (l.phase === "open" || l.phase === "locked") throw new ApiError(400, "Change the mode between questions");
   if (l.phase === "ended") throw new ApiError(400, "This session has ended");
   l.mode = mode;
+  l.modePicked = true;
+}
+
+/** The box's "How do you want to play?" screen again (the lobby's Mode button). */
+export function askMode(l: Lobby): void {
+  if (l.phase !== "lobby" && l.phase !== "result") throw new ApiError(400, "Change the mode between questions");
+  l.modePicked = false;
 }
 
 /** Money is in: the lobby's money choice can't change any more. */
@@ -895,7 +926,12 @@ export function buy(l: Lobby, p: Player, side: Side, cents: number, now: number)
   const before = yesPrice(m);
   const volumeBefore = m.volume;
   let shares: number;
-  if (modeOf(m) === "pool") {
+  if (modeOf(m) === "mirror") {
+    // Fixed odds at Gemini's price right now; the price only moves when Gemini's does.
+    const py = yesPrice(m);
+    const price = side === "yes" ? py : 1 - py;
+    shares = cents / 100 / Math.max(0.03, price);
+  } else if (modeOf(m) === "pool") {
     const pool = (m.pool ??= { yes: 0, no: 0 });
     const st = ((m.stakes ??= {})[p.id] ??= { yes: 0, no: 0 });
     pool[side] += cents;

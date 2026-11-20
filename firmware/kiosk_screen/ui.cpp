@@ -856,24 +856,70 @@ static void iconCrown(float cx, float cy, float s, uint16_t c, uint8_t a = 255) 
   tri(cx + 11 * s, cy + 3 * s, cx + 11 * s, cy - 8 * s, cx + 3 * s, cy + 3 * s, c, a);
 }
 
-// The Huddle mark: the box's LED ring from above, 12 pixels; lit ones walk the green brand gradient.
-static void markLogo(float cx, float cy, float R, int lit, bool spin, uint8_t a = 255) {
-  static const uint32_t LIT[12] = {0x0B7A3E, 0x0E8743, 0x109448, 0x12A150, 0x2BAA4F, 0x43B24F, 0x5BBB4E, 0x7CCB4E,
-                                   0x9BCF45, 0xBFC93F, 0xD9B43C, 0xE8A33D};
-  int step = spin ? (int)((NOW / 90) % 12) : 0;
-  for (int i = 0; i < 12; i++) {
-    float ang = (i / 12.f) * 6.2831853f - 1.5707963f;
-    int k = (i - step + 12) % 12;
-    bool on = spin ? k < 3 : i < lit;
-    float r = on ? R * 0.25f : R * 0.17f;
-    uint16_t c = on ? rgb(LIT[spin ? 3 + k * 2 : (lit == 1 ? 3 : i)]) : P.ruleStrong;
-    circle(cx + R * cosf(ang), cy + R * sinf(ang), r, c, a);
+// The Huddle mark: three people in a ring, 120 degrees apart, turning round the centre (the web draws the same
+// shape from components/huddle/Mark.tsx). Each person is a head and a swoosh body that wraps under the head, runs
+// along the rim and tapers into the next person. There is no polygon fill, so it is painted in layers on a known
+// background `bg` (default: the canvas): the green rim, each body's shoulders round its head, then the gaps round
+// the heads and the three spiral cuts in the background colour, then the heads. Nothing is painted outside the
+// mark's own circle (1.25 R), so neighbours are safe. R keeps the old LED ring's size: the heads reach 1.25 R.
+// spin turns it clockwise by the clock (one turn in 2.4 s). `lit` is ignored (the old ring lit pixels).
+static void markArc(float cx, float cy, float r, float a0, float a1, float t, uint16_t c) {
+  const int n = 14;
+  float px = cx + r * cosf(a0), py = cy + r * sinf(a0);
+  for (int i = 1; i <= n; i++) {
+    float a = a0 + (a1 - a0) * i / n, x = cx + r * cosf(a), y = cy + r * sinf(a);
+    line(px, py, x, y, t, c);
+    px = x;
+    py = y;
   }
+}
+static void markLogo(float cx, float cy, float R, int lit, bool spin, uint8_t a = 255, int bg = -1) {
+  (void)lit;
+  // Mark units: head-centre distance 1; heads (radius 0.30) reach 1.30 = 1.25 R.
+  const float RO = 1.08f, RI = 0.64f, HEAD = 0.30f, HALO = 0.375f, BODY = 0.50f, GAP = 0.10f;
+  // One spiral cut, in the frame of the head it runs into (that head on +x, angles clockwise on screen):
+  // from outside the rim, in to the hole (a circle arc, sampled).
+  static const float CUT[9][2] = {{-0.018f, -1.160f}, {0.117f, -1.116f}, {0.242f, -1.046f}, {0.350f, -0.953f}, {0.437f, -0.840f},
+                                  {0.500f, -0.712f}, {0.537f, -0.574f}, {0.545f, -0.432f}, {0.525f, -0.291f}};
+  const float TAU = 6.2831853f;
+  uint16_t back = bg < 0 ? P.canvas : (uint16_t)bg;
+  uint16_t green = a >= 255 ? P.lime : mix(back, P.lime, a);
+  float u = R * 1.25f / 1.30f;
+  float rot = spin ? (NOW % 2400) / 2400.f * TAU : 0;
+  float hx[3], hy[3], th[3];
+  for (int k = 0; k < 3; k++) {
+    th[k] = 1.5707963f + k * TAU / 3 + rot;  // head 0 at the bottom
+    hx[k] = cx + u * cosf(th[k]);
+    hy[k] = cy + u * sinf(th[k]);
+  }
+  ring(cx, cy, u * (RO + RI) / 2, u * (RO - RI), green);  // the rim
+  for (int k = 0; k < 3; k++)  // shoulders: the part of each body that bulges into the hole, under the head
+    markArc(hx[k], hy[k], u * (HALO + BODY) / 2, th[k] + 1.75f, th[k] + TAU - 1.75f, u * (BODY - HALO), green);
+  for (int k = 0; k < 3; k++) {
+    // the gap round the head (only the part over the rim and shoulders, so nothing outside the mark is painted)
+    markArc(hx[k], hy[k], u * (HEAD + HALO) / 2, th[k] + 1.35f, th[k] + TAU - 1.35f, u * (HALO - HEAD) + 0.6f, back);
+    // the spiral cut that ends this person's rim swoosh and the previous person's tail
+    float c = cosf(th[k]), sn = sinf(th[k]);
+    for (int i = 0; i < 8; i++) {
+      float x0 = CUT[i][0], y0 = CUT[i][1], x1 = CUT[i + 1][0], y1 = CUT[i + 1][1];
+      line(cx + u * (x0 * c - y0 * sn), cy + u * (x0 * sn + y0 * c), cx + u * (x1 * c - y1 * sn), cy + u * (x1 * sn + y1 * c), u * GAP, back);
+    }
+  }
+  for (int k = 0; k < 3; k++) circle(hx[k], hy[k], u * HEAD, green);
 }
 
 static void wordmark(int x, int baseline, int lit = 1) {
   markLogo(x + 13, baseline - 9, 11, lit, false);
   text(F_H3, x + 32, baseline, "huddle", P.ink);
+}
+
+// The brand at the start of a top line (market, locked, result, ended): a small mark, "huddle" and a thin
+// divider. `y` is the line's baseline; returns where the rest of the line starts.
+static int miniBrand(int x, int y) {
+  markLogo(x + 11, y - 7, 8.8f, 0, false);
+  int w = 26 + text(F_H3, x + 26, y + 2, "huddle", P.ink);
+  fill(x + w + 10, y - 18, 1, 24, P.ruleStrong);
+  return x + w + 22;
 }
 
 static void liveDot(int cx, int cy, bool fresh) {
@@ -1538,6 +1584,7 @@ static void drawLobby(const Screen &s, const NetStatus &st) {
     char url[96];
     fit(F_B3, s.joinUrl, qb, url, sizeof(url));
     textCenter(F_B3, qx + qb / 2, 460, url, P.muted);
+    wordmark(qx + qb / 2 - (32 + textW(F_H3, "huddle")) / 2, 428);
   }
   layerReset();
 
@@ -1814,7 +1861,7 @@ static void drawMarket(const Screen &s, const NetStatus &st, bool locked) {
     codeChip(s, rx);
   }
   if (enter(tQuestion, 0, 3, {16, 8, 400, 44})) {
-    int x = 20;
+    int x = miniBrand(20, 36);
     const char *badge = locked ? "Trading closed" : s.title[0] ? s.title : "Market open";
     char sb[40];
     if (!strncmp(badge, "Question ", 9)) {
@@ -1977,8 +2024,9 @@ static void drawResult(const Screen &s, const NetStatus &st) {
   bool yes = s.result == 'Y';
   bool voided = !s.result;
   uint16_t oc = voided ? P.ink : yes ? P.yes : P.no;
-  iconCheck(26, 30, 0.8f, oc);
-  text(F_B2, 40, 36, voided ? "Voided" : "Resolved", P.ink2);
+  int bx = miniBrand(20, 36);
+  iconCheck(bx + 6, 30, 0.8f, oc);
+  text(F_B2, bx + 20, 36, voided ? "Voided" : "Resolved", P.ink2);
   fill(16, 58, SCR_W - 32, 1, P.rule);
 
   const int LX = 24, LW = 500;
@@ -2096,10 +2144,11 @@ static void drawResult(const Screen &s, const NetStatus &st) {
 // a New game pill.
 static void drawEnded(const Screen &s, const NetStatus &st) {
   const char *ttl = s.title[0] ? s.title : "Session over";
-  text(F_H3, 24, 42, ttl, P.ink);
+  int bx = miniBrand(20, 40);
+  text(F_H3, bx, 42, ttl, P.ink);
   int rx = SCR_W - 16;
   topRight(s, rx, st);
-  int tx = 24 + textW(F_H3, ttl) + 14;
+  int tx = bx + textW(F_H3, ttl) + 14;
   textFit(F_B3, tx, 41, rx - tx - 8, s.subtitle, P.muted);
   fill(16, 58, SCR_W - 32, 1, P.rule);
 
@@ -2843,10 +2892,10 @@ static void drawMessage(const Screen &s, const NetStatus &st) {
 
 static void drawConnection(const NetStatus &st, bool hadScreen) {
   fill(0, 0, SCR_W, SCR_H, P.canvas);
-  markLogo(612, 240, 110, 0, true);
-  textCenter(F_H3, 612, 248, "huddle", P.ink);
-  markAmbient(470, 100, 290, 290);
-  wordmark(32, 60);
+  // The mark turning, "huddle" under it (same as the web's BrandLoader and KioskConnecting).
+  markLogo(612, 206, 92, 0, true);
+  textCenter(F_H1, 612, 392, "huddle", P.ink);
+  markAmbient(490, 84, 244, 244);
   char t[48];
   snprintf(t, sizeof(t), "Box %s", KIOSK_ID);
   text(F_H1, 32, 140, hadScreen ? "Reconnecting..." : "Getting ready", P.ink);
@@ -3127,7 +3176,7 @@ static void scene(const NetStatus &st) {
     int w = textW(F_B1, msg) + 64, x = (SCR_W - w) / 2;
     overlay(x - 4, 4, w + 8, 52);
     rrect(x, 8, w, 44, 22, P.ink);
-    markLogo(x + 24, 30, 9, 0, true);
+    markLogo(x + 24, 30, 9, 0, true, 255, P.ink);
     text(F_B1, x + 44, 37, msg, P.white);
     markAmbient(x, 8, w, 44);
   }
@@ -3580,8 +3629,8 @@ void uiBootScreen(const char *line) {
   NOW = millis();
   clip({0, 0, SCR_W, SCR_H});
   fill(0, 0, SCR_W, SCR_H, P.canvas);
-  markLogo(400, 200, 46, 12, false);
-  textCenter(F_H1, 400, 300, "huddle", P.ink);
-  textCenter(F_B2, 400, 332, line, P.muted);
+  markLogo(400, 186, 46, 0, true);  // turned by the clock: each boot step shows it a little further round
+  textCenter(F_H1, 400, 306, "huddle", P.ink);
+  textCenter(F_B2, 400, 338, line, P.muted);
   present({0, 0, SCR_W, SCR_H});
 }

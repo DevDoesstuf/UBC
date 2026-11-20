@@ -31,12 +31,25 @@ export interface SpeakerItem {
   ttl: number;
 }
 
-export function speakerQueue(l: Lobby | null, base: string, voice: boolean): SpeakerItem[] {
+/** Sounds that have a version per sport (public/sounds/<sound>-<sport>.wav): the whistle, the drums, the buzzer. */
+const SPORT_SOUNDS: Partial<Record<SoundName, string[]>> = {
+  start: ["soccer", "nfl", "nba"],
+  lock: ["soccer", "nfl", "nba"],
+  siren: ["soccer", "nfl", "nba"],
+  cheer: ["soccer", "nfl", "nba"],
+};
+
+/** The file for `sound` in a game of `sport`, e.g. soundFile("start", "soccer") = "start-soccer.wav" (the kickoff whistle). */
+export function soundFile(sound: SoundName, sport?: string | null): string {
+  return sport && SPORT_SOUNDS[sound]?.includes(sport) ? `${sound}-${sport}.wav` : `${sound}.wav`;
+}
+
+export function speakerQueue(l: Lobby | null, base: string, voice: boolean, sport?: string | null): SpeakerItem[] {
   if (!l) return [];
   const items: SpeakerItem[] = [];
   for (const e of l.events ?? []) {
     if (!e.sound) continue;
-    items.push({ id: e.id, url: `${base}/sounds/${e.sound}.wav`, text: e.text, kind: "sound", sound: e.sound, ttl: e.sound === "lastcall" ? LASTCALL_TTL_MS : SOUND_TTL_MS });
+    items.push({ id: e.id, url: `${base}/sounds/${soundFile(e.sound, sport)}`, text: e.text, kind: "sound", sound: e.sound, ttl: e.sound === "lastcall" ? LASTCALL_TTL_MS : SOUND_TTL_MS });
   }
   if (voice) {
     for (const c of l.captions ?? []) {

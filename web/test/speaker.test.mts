@@ -303,7 +303,8 @@ test("a game on the speaker: sound effect then the announcer, in id order; last 
     assert.equal(after, boot.id, "ends at the latest id");
     // Every caption comes right after the sound effect of its event.
     const kinds = heard.map((h) => (h.kind === "sound" ? h.url.split("/").pop()!.replace(".wav", "") : "voice"));
-    assert.deepEqual(kinds, ["tap", "join", "voice", "coin", "start", "voice", "lastcall", "lock", "voice", "start", "voice", "lock", "voice", "lose", "voice"], kinds.join(" "));
+    // A football game: the drumline opens a question and the referee's whistle locks it (no whoosh, no clunk).
+    assert.deepEqual(kinds, ["tap", "join", "voice", "coin", "start-nfl", "voice", "lastcall", "lock-nfl", "voice", "start-nfl", "voice", "lock-nfl", "voice", "lose", "voice"], kinds.join(" "));
     for (const h of heard.filter((x) => x.kind === "voice")) {
       assert.match(h.url, /\/api\/tts\?code=[A-Z]{4}&id=\d+&format=wav$/);
       assert.ok(!/\d|%|\$|https?:/.test(h.text), `spoken text has no digits or symbols: ${h.text}`);

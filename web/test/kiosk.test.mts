@@ -62,6 +62,7 @@ test("kiosk: names the box can draw, avatar hash on the box-safe name, quarters 
 test("kiosk v2: lobby roster, pot, calls; market timing, trades, model; result winners/losers; ended board", async () => {
   const kiosk = "902";
   await kioskTouch(kiosk, "game:football", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const code = (await lobby.getKioskCode(kiosk))!;
   const tokens: string[] = [];
   for (const name of ["Sam", "Priya", "Leo"]) {
@@ -77,7 +78,8 @@ test("kiosk v2: lobby roster, pot, calls; market timing, trades, model; result w
   assert.equal(typeof s.players![0], "string");
   assert.deepEqual(s.roster!.map((p) => [p.name, p.cents, p.deposited]), [["Sam", 1000, 1000], ["Priya", 1000, 1000], ["Leo", 1000, 1000]]);
   assert.equal(s.pot, 3000);
-  assert.ok(s.calls!.length >= 2 && s.calls!.every((c) => c.id.startsWith("moment:") && c.enabled));
+  assert.equal(s.calls![0].id, "mode:pick");
+  assert.ok(s.calls!.length >= 3 && s.calls!.slice(1).every((c) => c.id.startsWith("moment:") && c.enabled));
   assert.ok(s.buttons.filter((b) => b.id.startsWith("moment:")).length <= 2, "old firmware keeps its 2-moment budget");
 
   s = await kioskTouch(kiosk, "start", "http://x");
@@ -112,6 +114,7 @@ test("kiosk v2: lobby roster, pot, calls; market timing, trades, model; result w
 test("money: a server without Solana shows no money button; the box still reports demo money", async () => {
   const kiosk = "977";
   await kioskTouch(kiosk, "game:football", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const s = await kioskScreen(kiosk, "http://x");
   assert.equal(s.screen, "lobby");
   assert.ok(!s.buttons.some((b) => b.id.startsWith("money:")), JSON.stringify(s.buttons));

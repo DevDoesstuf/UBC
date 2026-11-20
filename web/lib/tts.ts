@@ -158,7 +158,7 @@ const inflight = new Map<string, Promise<Synth>>();
 export const WAV_TIMEOUT_MS = 8000;
 
 /** MP3 (or, with format "wav", 22 kHz mono WAV) bytes for a line, from the cache or ElevenLabs. Throws TtsError. */
-export async function synthesize(rawText: string, persona: Persona, opts: { fetch?: typeof fetch; timeoutMs?: number; format?: AudioFormat } = {}): Promise<Synth> {
+export async function synthesize(rawText: string, persona: Persona, opts: { fetch?: typeof fetch; timeoutMs?: number; format?: AudioFormat; voiceId?: string | null } = {}): Promise<Synth> {
   const format: AudioFormat = opts.format === "wav" ? "wav" : "mp3";
   const contentType = format === "wav" ? "audio/wav" : "audio/mpeg";
   const key = (process.env.ELEVENLABS_API_KEY || "").trim();
@@ -166,7 +166,8 @@ export async function synthesize(rawText: string, persona: Persona, opts: { fetc
   const text = speakable(rawText);
   if (!text) throw new TtsError(400, "Nothing to say");
   const v = VOICES[persona];
-  const voiceId = (process.env[v.env] || "").trim() || v.id;
+  // A game can bring its own voice (games.json "voice", e.g. the Spanish-accented caller for Portugal v Spain).
+  const voiceId = (opts.voiceId || "").trim() || (process.env[v.env] || "").trim() || v.id;
   const modelId = (process.env.ELEVENLABS_TTS_MODEL || "").trim() || DEFAULT_TTS_MODEL;
   const id = audioId(voiceId, modelId, v.settings, text, format);
   const cacheKey = `tts:${id}`;
@@ -185,9 +186,9 @@ export async function synthesize(rawText: string, persona: Persona, opts: { fetc
 }
 
 /** Synthesizes a line into the cache ahead of time (the speaker asks for it a moment later). Never throws. */
-export async function prewarm(text: string, persona: Persona, format: AudioFormat = "wav"): Promise<void> {
+export async function prewarm(text: string, persona: Persona, format: AudioFormat = "wav", voiceId?: string | null): Promise<void> {
   if (!(await ttsAvailable())) return;
-  await synthesize(text, persona, { format }).catch(() => undefined);
+  await synthesize(text, persona, { format, voiceId }).catch(() => undefined);
 }
 
 async function callElevenLabs(o: {

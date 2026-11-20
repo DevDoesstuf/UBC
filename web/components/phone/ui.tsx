@@ -2,7 +2,7 @@
 // Small phone building blocks: sheet, inline error, code tiles, loading, empty state, money.
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Icon, Kinetic, Mark, Roll, signedUsd, usd } from "@/components/huddle";
+import { BrandLoader, Icon, Kinetic, Mark, Roll, Wordmark, signedUsd, usd } from "@/components/huddle";
 
 export const d = (ms: number) => ({ ["--d" as string]: `${ms}ms` }) as CSSProperties;
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -25,22 +25,14 @@ export function Money({
   return <Roll text={text} value={cents} label={text} className={`hd-num ${className}`} flash={flash} duration={duration} />;
 }
 
-/** The ring spinning with three lit pixels + a line that says what is happening. */
+/** The brand loader (the mark turning, "huddle" under it) + a line that says what is happening. */
 export function Loading({ children }: { children?: ReactNode }) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setSlow(true), 4000);
     return () => clearTimeout(t);
   }, []);
-  return (
-    <div className="ph-loading" role="status">
-      <Mark size="2rem" spin lit={3} className="ph-loading-mark" />
-      <span>
-        {children}
-        {slow && <span className="ph-loading-slow">Still connecting. This page keeps trying by itself.</span>}
-      </span>
-    </div>
-  );
+  return <BrandLoader label={children} detail={slow ? "Waking up the engine. This page keeps trying by itself." : null} className="ph-loading" />;
 }
 
 /** What happened and what to do, on a hot-50 field with a hot ring and an icon. */
@@ -140,6 +132,7 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
       <div className="ph-scrim hd-fade" onClick={onClose} aria-hidden="true" />
       <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="ph-sheet">
         <div className="ph-sheet-handle" aria-hidden="true" />
+        <Wordmark className="ph-wordmark-xs ph-sheet-brand" />
         <div className="ph-sheet-head">
           <Kinetic as="h2" id={titleId} text={title} className="hd-q ph-sheet-title" stagger={40} />
           <button className="hd-btn hd-btn-quiet ph-icon-btn" onClick={onClose} aria-label="Close">

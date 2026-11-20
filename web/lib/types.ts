@@ -7,9 +7,13 @@ import type { ReplayRun } from "./replay/run";
 import type { GeminiHint } from "./replay/types";
 export type { Side, Persona, GeminiRef, ScoreEntry, MatchedPair };
 
-/** How a question is traded. market = LMSR (default), pool = pari-mutuel pot, h2h = offers between players. */
-export type MarketMode = "market" | "pool" | "h2h";
-export const MARKET_MODES: MarketMode[] = ["market", "pool", "h2h"];
+/**
+ * How a question is traded. market = LMSR (house market maker, default), pool = pari-mutuel pot (winners split
+ * everything staked), h2h = offers between players, mirror = friends bet at Gemini Prediction Markets' live price
+ * (fixed odds at the moment you buy; a winning share pays $1).
+ */
+export type MarketMode = "market" | "pool" | "h2h" | "mirror";
+export const MARKET_MODES: MarketMode[] = ["market", "pool", "h2h", "mirror"];
 
 /** Lobby phases. The kiosk screen, phone page and watch page are all views of this one field. */
 export type Phase = "lobby" | "open" | "locked" | "result" | "ended";
@@ -49,6 +53,8 @@ export interface Game {
   mode?: MarketMode;
   /** Announcer persona for captions (nfl | soccer | calm). */
   persona?: Persona;
+  /** ElevenLabs voice id for this game's announcer (else the persona's voice). */
+  voice?: string;
   /** Gemini Prediction Markets mapping for the game. */
   gemini?: GeminiGameConfig;
   /** Sport, for "Call it" moments (default: the replay's sport, else from the persona). */
@@ -241,6 +247,8 @@ export interface Lobby {
   money?: "demo" | "solana";
   /** Trading mode for new questions (missing = the game's default, else market). */
   mode?: MarketMode;
+  /** false while the box asks "How do you want to play?" (a game picked on the box); missing = already chosen. */
+  modePicked?: boolean;
   /** Announcer lines, newest last (about 10 kept). */
   captions?: Caption[];
   /** Resolved questions for the room / model / Gemini scorecard. */

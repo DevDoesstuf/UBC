@@ -36,6 +36,7 @@ function checkChart(c: NonNullable<Awaited<ReturnType<typeof kioskScreen>>["char
 test("pages: market, locked and result carry the odds graph, the odds board and standings; v1 fields stay", async () => {
   const kiosk = "931";
   await kioskTouch(kiosk, "game:nfl-sf-dal", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const code = (await lobby.getKioskCode(kiosk))!;
   const tokens: string[] = [];
   for (const name of ["Sam", "Priya", "Zoë"]) {
@@ -79,6 +80,7 @@ test("pages: market, locked and result carry the odds graph, the odds board and 
 test("pages: locked and result (a clip game the host settles)", async () => {
   const kiosk = "935";
   await kioskTouch(kiosk, "game:football", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const code = (await lobby.getKioskCode(kiosk))!;
   const tokens: string[] = [];
   for (const name of ["Sam", "Priya"]) {
@@ -122,6 +124,7 @@ test("pages: locked and result (a clip game the host settles)", async () => {
 test("pages: Gemini rows carry the real price history once the replay clock runs", async () => {
   const kiosk = "932";
   await kioskTouch(kiosk, "game:nfl-sf-dal", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const code = (await lobby.getKioskCode(kiosk))!;
   await kioskTouch(kiosk, "start", "http://x");
   const l = structuredClone((await lobby.getLobby(code))!);
@@ -144,6 +147,7 @@ test("pages: chart sampling is capped, older markets without a trail still draw"
   assert.equal(d[59], 199);
   const kiosk = "933";
   await kioskTouch(kiosk, "game:football", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const code = (await lobby.getKioskCode(kiosk))!;
   await kioskTouch(kiosk, "start", "http://x");
   const l = structuredClone((await lobby.getLobby(code))!);
@@ -161,6 +165,7 @@ test("pages: chart sampling is capped, older markets without a trail still draw"
 test("pay: the Solana Pay card while lobby.boxPay is live, ECC L QR, paid state, pay:close clears it", async () => {
   const kiosk = "934";
   await kioskTouch(kiosk, "game:football", "http://x");
+  await kioskTouch(kiosk, "mode:market", "http://x");
   const code = (await lobby.getKioskCode(kiosk))!;
   let s = await kioskScreen(kiosk, "http://x");
   assert.equal(s.pay, undefined, "no card without a request");

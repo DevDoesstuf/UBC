@@ -11,8 +11,8 @@ export type Persona = "nfl" | "soccer" | "calm";
 export type CaptionEvent =
   | { type: "join"; name: string }
   | { type: "deposit"; name: string; cents: number }
-  | { type: "start"; call?: string | null; text: string; yesPct: number; modelPct?: number | null; gemini?: { label: string; pct: number } | null; lockIn?: number; mode?: "market" | "pool" | "h2h" }
-  | { type: "lock"; yesPct: number; mode?: "market" | "pool" | "h2h" }
+  | { type: "start"; call?: string | null; text: string; yesPct: number; modelPct?: number | null; gemini?: { label: string; pct: number } | null; lockIn?: number; mode?: "market" | "pool" | "h2h" | "mirror" }
+  | { type: "lock"; yesPct: number; mode?: "market" | "pool" | "h2h" | "mirror" }
   | { type: "result"; outcome: "yes" | "no"; winners: { name: string; cents: number }[]; atLockPct?: number | null }
   | { type: "void"; reason?: string | null }
   | { type: "trade"; name: string; side: "yes" | "no"; cents: number; yesPctAfter?: number | null }
@@ -94,11 +94,12 @@ function variants(ev: CaptionEvent, p: Persona): string[] {
       const facts: string[] = [];
       if (h2h) facts.push("Make an offer or take one.");
       else if (pool) facts.push(model ? `The model says ${model}. Winners split the pot.` : "Winners split the pot.");
+      else if (ev.mode === "mirror") facts.push(gem ? "You trade at Gemini's price." : model ? `No Gemini market on this one, so the model's ${model}.` : "");
       else if (model) facts.push(`The model opens YES at ${model}.`);
       if (gem) facts.push(gem);
       // A called moment leads with the call: "Penalty called! Will Ronaldo score this penalty? ..."
-      if (ev.call) return [[ev.call, q, ...facts, closer[p]].join(" ")];
-      return head[p].map((h) => [h, ...facts, closer[p]].join(" "));
+      if (ev.call) return [[ev.call, q, ...facts.filter(Boolean), closer[p]].join(" ")];
+      return head[p].map((h) => [h, ...facts.filter(Boolean), closer[p]].join(" "));
     }
     case "lock": {
       const at = ev.mode === "h2h" || ev.mode === "pool" ? "" : ` YES closed at ${pct(ev.yesPct)}.`;

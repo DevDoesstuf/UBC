@@ -106,7 +106,6 @@ body:has(.tvk) { background: #000; overflow: hidden; }
 .tvk .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tvk .tv-empty { color: var(--muted); font-size: 1.0625rem; }
 .tvk .hd-wordmark { color: var(--ink); }
-.tvk .hd-wordmark svg, .tvk .tv-state-mark, .tvk .tv-idle-mark { color: var(--rule-strong); }
 .tvk .hd-avatar { box-shadow: 0 0 0 2px var(--card); }
 
 /* entrance: rise + fade, staggered with --d (the kit's delay()) */
@@ -117,6 +116,8 @@ body:has(.tvk) { background: #000; overflow: hidden; }
 .tvk-state-body { display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; max-width: 40rem; padding: 0 1rem; }
 .tvk-state-body h1 { font-size: 2.5rem; line-height: 1.05; }
 .tvk-state-body p { font-size: 1.25rem; color: var(--ink-2); }
+.tvk-state-body.hd-loader { gap: 0; max-width: 48rem; }
+.tvk .hd-loader-label { color: var(--ink); font-family: var(--k-font-head); font-weight: 700; letter-spacing: -0.02em; }
 
 /* the ambient glow behind everything stays faint on black */
 .tvk .hd-aurora { opacity: 0.9; }

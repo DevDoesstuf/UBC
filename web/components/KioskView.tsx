@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import type { KioskButton, KioskCard, KioskScreen } from "@/lib/kiosk";
 import { avatarHash } from "@/lib/boxText";
+import { MARK_BODIES, MARK_HEADS } from "@/components/huddle/Mark";
 
 // ---------------------------------------------------------------- tokens + fonts (same as ui.cpp)
 
@@ -118,17 +119,30 @@ function Avatar({ name, cx, cy, r, dim = false }: { name: string; cx: number; cy
   );
 }
 
-const LIT = ["#0B7A3E", "#0E8743", "#109448", "#12A150", "#2BAA4F", "#43B24F", "#5BBB4E", "#7CCB4E", "#9BCF45", "#BFC93F", "#D9B43C", "#E8A33D"];
-/** The Huddle mark: the box's LED ring from above. */
-function Mark({ cx, cy, R, lit = 1, spin = false }: { cx: number; cy: number; R: number; lit?: number; spin?: boolean }) {
+/**
+ * The Huddle mark (components/huddle/Mark.tsx): three people in a ring. Same size as the firmware's markLogo:
+ * the heads reach 1.25 R from the centre. `spin` turns it smoothly (the firmware turns it by the clock).
+ */
+function Mark({ cx, cy, R, spin = false }: { cx: number; cy: number; R: number; lit?: number; spin?: boolean }) {
+  const k = (1.25 * R) / 19.5;
   return (
-    <svg className={`hk-abs ${spin ? "hk-spin" : ""}`} style={{ left: r2(cx - R * 1.3), top: r2(cy - R * 1.3) }} width={r2(R * 2.6)} height={r2(R * 2.6)} viewBox={`${r2(-R * 1.3)} ${r2(-R * 1.3)} ${r2(R * 2.6)} ${r2(R * 2.6)}`} aria-hidden="true">
-      {Array.from({ length: 12 }, (_, i) => {
-        const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
-        const on = spin ? i < 3 : i < lit;
-        return <circle key={i} cx={r2(R * Math.cos(a))} cy={r2(R * Math.sin(a))} r={r2(on ? R * 0.25 : R * 0.17)} fill={on ? LIT[spin ? 3 + i * 2 : lit === 1 ? 3 : i] : P.ruleStrong} />;
-      })}
+    <svg className={`hk-abs ${spin ? "hk-mark-spin" : ""}`} style={{ left: r2(cx - 20 * k), top: r2(cy - 20 * k) }} width={r2(40 * k)} height={r2(40 * k)} viewBox="0 0 40 40" fill={P.lime} aria-hidden="true">
+      <path d={MARK_BODIES} />
+      {MARK_HEADS.map(([x, y, r]) => <circle key={`${x},${y}`} cx={x} cy={y} r={r} />)}
     </svg>
+  );
+}
+
+/** "huddle" small, inline at the start of a top line (market, locked, result). */
+function MiniBrand() {
+  return (
+    <span className="hk-mini" translate="no">
+      <svg width="22" height="22" viewBox="0 0 40 40" fill={P.lime} aria-hidden="true">
+        <path d={MARK_BODIES} />
+        {MARK_HEADS.map(([x, y, r]) => <circle key={`${x},${y}`} cx={x} cy={y} r={r} />)}
+      </svg>
+      <span className="hk-head hk-w800">huddle</span>
+    </span>
   );
 }
 
@@ -507,6 +521,8 @@ function Lobby({ s, onTouch, pending, fresh }: Ctx) {
           ))}
         </div>
         <T f="B3" x={146} y={420} w={270} align="center" color="rgba(255,255,255,.86)">{s.joinUrl}</T>
+        <Mark cx={105} cy={447} R={11} />
+        <T f="H3" x={124} y={456} color={P.ink}>huddle</T>
       </div>
 
       <Kinetic f="H2" x={x0} y={46} w={w - 40} lines={1} lh={34} text={s.game?.title || s.title} delay={120} />
@@ -747,6 +763,7 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
   return (
     <div key={q} className="hk-fill">
       <div className="hk-abs hk-fade hk-topline" style={{ left: 20, top: 16 }}>
+        <MiniBrand />
         {locked ? <Lock cx={5} cy={13} s={0.6} color={P.ink2} /> : <i className="hk-dot" />}
         <span className="hk-body">{title}</span>
         {s.volume !== undefined ? <span className="hk-body hk-muted">{money(s.volume)} vol</span> : s.traded ? <span className="hk-body hk-muted">{s.traded}</span> : null}
@@ -866,6 +883,7 @@ function Result({ s, onTouch, pending, fresh }: Ctx) {
   return (
     <div key={s.question} className="hk-fill">
       <div className="hk-abs hk-topline" style={{ left: 20, top: 16 }}>
+        <MiniBrand />
         <span style={{ color: oc }}>✓</span><span className="hk-body hk-ink2">{voided ? "Voided" : "Resolved"}</span>
       </div>
       <LiveDot cx={776} cy={30} fresh={fresh} />
@@ -1486,12 +1504,11 @@ export function KioskView({ s, pressed, error, stale, onTouch }: {
 export function KioskConnecting() {
   return (
     <div className="hk" role="status" aria-label="Connecting">
-      <Wordmark x={32} y={60} />
       <T f="H1" x={32} y={140}>Getting ready</T>
       <T f="B1" x={32} y={224}>Reaching the site...</T>
       <T f="B3" x={32} y={354} color={P.muted}>A hosted site can take 30 s to wake up.</T>
-      <Mark cx={612} cy={240} R={110} spin />
-      <T f="H3" x={612} y={248} w={200} align="center">huddle</T>
+      <Mark cx={612} cy={206} R={92} spin />
+      <T f="H1" x={612} y={392} w={300} align="center">huddle</T>
     </div>
   );
 }

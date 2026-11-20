@@ -5,7 +5,7 @@
 // then reads the caption with the browser's Web Speech.
 // 502/504 when ElevenLabs fails: also fall back to Web Speech.
 import { handle, json } from "@/lib/http";
-import { ApiError, getLobby, personaOf } from "@/lib/lobby";
+import { ApiError, getLobby, personaOf, voiceOf } from "@/lib/lobby";
 import { MAX_TTS_CHARS, TtsError, asPersona, synthesize, ttsEnabled, ttsKeyRejected } from "@/lib/tts";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +18,7 @@ export async function GET(req: Request) {
     const q = new URL(req.url).searchParams;
     let text = (q.get("text") || "").trim();
     let persona = asPersona(q.get("persona"));
+    let voiceId: string | null = null;
     const code = q.get("code");
     if (code) {
       const l = await getLobby(code);
@@ -30,12 +31,15 @@ export async function GET(req: Request) {
       if (!cap) throw new ApiError(404, idParam ? "No caption with that id (it may have rolled off)" : "No caption yet");
       // The spoken version (short, numbers in words); older lobbies only have the screen text.
       text = cap.say || cap.text;
-      if (!q.get("persona")) persona = personaOf(l);
+      if (!q.get("persona")) {
+        persona = personaOf(l);
+        voiceId = voiceOf(l);
+      }
     }
     if (!text) throw new ApiError(400, "Pass text or code+id");
     if (text.length > MAX_TTS_CHARS) throw new ApiError(400, `Keep it under ${MAX_TTS_CHARS} characters`);
     try {
-      const { audio, cached, id, contentType } = await synthesize(text, persona, { format: q.get("format") === "wav" ? "wav" : "mp3" });
+      const { audio, cached, id, contentType } = await synthesize(text, persona, { format: q.get("format") === "wav" ? "wav" : "mp3", voiceId });
       return new Response(Buffer.from(audio), {
         status: 200,
         headers: {

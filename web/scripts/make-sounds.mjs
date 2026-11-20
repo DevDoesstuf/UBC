@@ -40,13 +40,28 @@ const API_BASE = ((process.env.ELEVENLABS_BASE_URL || "").trim() || "https://api
 const SOUNDS = [
   { name: "join", keep: true, prompt: "Short bright friendly two-note notification chime, clean, no reverb tail", seconds: 0.8, max: 0.6, synth: join },
   { name: "tap", keep: true, prompt: "Single soft UI tap click pop, very short", seconds: 0.5, max: 0.2, synth: tap },
-  { name: "start", prompt: "Fast airy whoosh swoosh, sports broadcast transition, rising", seconds: 1, max: 0.9, synth: whoosh },
+  // No whooshes or crowd noise: on the box's small speaker they come out as wind. Every sound is tonal and short,
+  // and the game's sport picks its own version (start-soccer.wav, ...; lib/speaker.ts soundFile()).
+  { name: "start", prompt: "Single long referee whistle blast, pea whistle, close, dry", seconds: 1, max: 0.9, synth: whistleLong },
   { name: "lastcall", rate: 8000, prompt: "Countdown: four wooden clock ticks exactly one second apart, then a bright ding", seconds: 4, max: 3.5, synth: lastcall },
-  { name: "lock", prompt: "Heavy metal latch clunk, vault door locking shut, short and punchy", seconds: 0.7, max: 0.5, synth: clunk },
+  { name: "lock", prompt: "Two short sharp referee whistle blasts, dry", seconds: 0.7, max: 0.6, synth: whistleTwo },
   { name: "win", prompt: "Short triumphant brass fanfare, stadium celebration, bright major chord ending", seconds: 1.5, max: 1.3, synth: fanfare },
-  { name: "lose", prompt: "Small crowd groaning aww in disappointment, short", seconds: 1.5, max: 1.25, synth: aww },
-  { name: "siren", prompt: "Short stadium alert siren, two quick rising wails, attention call", seconds: 1.5, max: 1.3, synth: siren },
-  { name: "cheer", prompt: "Stadium crowd erupting in cheers and applause after a touchdown", seconds: 2, max: 1.3, synth: cheer },
+  { name: "lose", prompt: "Sad trombone wah wah wah waaah, comedic fail, dry", seconds: 1.5, max: 1.3, synth: trombone },
+  { name: "siren", prompt: "Stadium air horn, one loud blast", seconds: 1.2, max: 1.0, synth: airHorn },
+  { name: "cheer", prompt: "Stadium drums, two big tom hits and a clap, we will rock you rhythm", seconds: 1.2, max: 1.1, synth: stompClap },
+  // Per sport. soccer: the referee's whistle; nfl: drums and the stadium horn; nba: the arena buzzer.
+  { name: "start-soccer", prompt: "Referee kick-off whistle, one long blast, football match", seconds: 1, max: 0.9, synth: whistleLong },
+  { name: "lock-soccer", prompt: "Two short referee whistle blasts", seconds: 0.7, max: 0.6, synth: whistleTwo },
+  { name: "siren-soccer", prompt: "Three short urgent referee whistle blasts", seconds: 0.9, max: 0.8, synth: whistleThree },
+  { name: "cheer-soccer", prompt: "Stadium goal horn, one long blast", seconds: 1.2, max: 1.0, synth: airHorn },
+  { name: "start-nfl", prompt: "Marching band drumline: four big tom hits building up, then a cymbal-free final hit", seconds: 1.2, max: 1.1, synth: drumline },
+  { name: "lock-nfl", prompt: "One short referee whistle blast", seconds: 0.5, max: 0.45, synth: whistleShort },
+  { name: "siren-nfl", prompt: "Stadium air horn, one loud blast", seconds: 1.2, max: 1.0, synth: airHorn },
+  { name: "cheer-nfl", prompt: "Stadium drums, two big tom hits and a clap", seconds: 1.2, max: 1.1, synth: stompClap },
+  { name: "start-nba", prompt: "Basketball arena buzzer, one blast", seconds: 0.9, max: 0.8, synth: buzzer },
+  { name: "lock-nba", prompt: "Basketball shot clock buzzer, short", seconds: 0.6, max: 0.5, synth: buzzerShort },
+  { name: "siren-nba", prompt: "Arena air horn, one loud blast", seconds: 1.2, max: 1.0, synth: airHorn },
+  { name: "cheer-nba", prompt: "Arena drums, two big tom hits and a clap", seconds: 1.2, max: 1.1, synth: stompClap },
   { name: "coin", prompt: "Coins payout ka-ching, cash register bell with coin jingle", seconds: 1, max: 0.8, synth: coin },
 ];
 
@@ -389,6 +404,152 @@ function resample(x, from, to) {
     const j = Math.floor(pos);
     const f = pos - j;
     out[i] = (src[j] ?? 0) * (1 - f) + (src[j + 1] ?? src[j] ?? 0) * f;
+  }
+  return out;
+}
+
+
+// ---------------------------------------------------------------- sport sounds (tonal: they survive a tiny speaker)
+
+/** A pea whistle: a ~2.9 kHz tone with the pea's fast trill (frequency and level wobble), a breath of air. */
+function whistleBlast(out, rate, t0, dur, gain = 1) {
+  const r = rng(Math.round(t0 * 1000) + 5);
+  const bp = bandpass(rate).set(3000, 4);
+  const n0 = Math.floor(t0 * rate);
+  const len = Math.min(out.length - n0, Math.floor(dur * rate));
+  let ph = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / rate;
+    const a = (t < 0.02 ? t / 0.02 : 1) * (t > dur - 0.04 ? Math.max(0, (dur - t) / 0.04) : 1);
+    const trill = Math.sin(TAU * 38 * t);
+    ph += (TAU * (2900 + 170 * trill)) / rate;
+    const tone = Math.sin(ph) + 0.18 * Math.sin(2 * ph);
+    out[n0 + i] += gain * a * ((0.75 + 0.25 * trill) * tone + 0.12 * bp.run(r() * 2 - 1));
+  }
+}
+function whistleLong(rate) {
+  const out = new Float32Array(Math.round(0.95 * rate));
+  whistleBlast(out, rate, 0, 0.85);
+  return out;
+}
+function whistleShort(rate) {
+  const out = new Float32Array(Math.round(0.45 * rate));
+  whistleBlast(out, rate, 0, 0.32);
+  return out;
+}
+function whistleTwo(rate) {
+  const out = new Float32Array(Math.round(0.6 * rate));
+  whistleBlast(out, rate, 0, 0.18);
+  whistleBlast(out, rate, 0.27, 0.26);
+  return out;
+}
+function whistleThree(rate) {
+  const out = new Float32Array(Math.round(0.8 * rate));
+  for (const t of [0, 0.24, 0.48]) whistleBlast(out, rate, t, 0.16);
+  return out;
+}
+
+/** A floor tom: pitched, with harmonics so a small speaker carries it (no sub bass), and a stick click. */
+function tom(out, rate, t0, f, gain = 1) {
+  const r = rng(Math.round(t0 * 977) + 3);
+  const n0 = Math.floor(t0 * rate);
+  const len = Math.min(out.length - n0, Math.floor(0.35 * rate));
+  let ph = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / rate;
+    const fr = f * (1 + 0.6 * Math.exp(-t / 0.025));
+    ph += (TAU * fr) / rate;
+    const a = Math.exp(-t / 0.11);
+    const body = Math.sin(ph) + 0.5 * Math.sin(2 * ph) + 0.25 * Math.sin(3.01 * ph);
+    const click = t < 0.006 ? (r() * 2 - 1) * (1 - t / 0.006) : 0;
+    out[n0 + i] += gain * (a * body + 0.6 * click);
+  }
+}
+function clap(out, rate, t0, gain = 1) {
+  const r = rng(Math.round(t0 * 733) + 9);
+  const bp = bandpass(rate).set(1400, 1.6);
+  const n0 = Math.floor(t0 * rate);
+  const len = Math.min(out.length - n0, Math.floor(0.12 * rate));
+  for (let i = 0; i < len; i++) {
+    const t = i / rate;
+    const bursts = (t < 0.01 ? 1 : 0) + (t > 0.012 && t < 0.02 ? 0.8 : 0) + (t > 0.022 ? Math.exp(-(t - 0.022) / 0.03) : 0);
+    out[n0 + i] += gain * 2.4 * bursts * bp.run(r() * 2 - 1);
+  }
+}
+function drumline(rate) {
+  const out = new Float32Array(Math.round(1.1 * rate));
+  tom(out, rate, 0.0, 150, 0.8);
+  tom(out, rate, 0.18, 150, 0.8);
+  tom(out, rate, 0.36, 175, 0.9);
+  tom(out, rate, 0.45, 175, 0.9);
+  tom(out, rate, 0.62, 120, 1.1);
+  tom(out, rate, 0.62, 240, 0.5);
+  return out;
+}
+function stompClap(rate) {
+  const out = new Float32Array(Math.round(1.05 * rate));
+  tom(out, rate, 0.0, 130, 1);
+  tom(out, rate, 0.25, 130, 1);
+  clap(out, rate, 0.5, 1);
+  return out;
+}
+
+/** Arena buzzer: a harsh, steady square-ish tone (odd harmonics). */
+function buzz(out, rate, t0, dur) {
+  const n0 = Math.floor(t0 * rate);
+  const len = Math.min(out.length - n0, Math.floor(dur * rate));
+  for (let i = 0; i < len; i++) {
+    const t = i / rate;
+    const a = (t < 0.01 ? t / 0.01 : 1) * (t > dur - 0.03 ? Math.max(0, (dur - t) / 0.03) : 1);
+    let s = 0;
+    for (let h = 1; h <= 11; h += 2) s += Math.sin(TAU * 330 * h * t) / h + 0.5 * Math.sin(TAU * 337 * h * t) / h;
+    out[n0 + i] += a * s;
+  }
+}
+function buzzer(rate) {
+  const out = new Float32Array(Math.round(0.8 * rate));
+  buzz(out, rate, 0, 0.72);
+  return out;
+}
+function buzzerShort(rate) {
+  const out = new Float32Array(Math.round(0.5 * rate));
+  buzz(out, rate, 0, 0.4);
+  return out;
+}
+
+/** Stadium air horn: three detuned sawtooth voices, a pitch scoop at the start. */
+function airHorn(rate) {
+  const T = 1.0;
+  const out = new Float32Array(Math.round(T * rate));
+  const voices = [440, 446, 554];
+  const ph = voices.map(() => 0);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    const a = (t < 0.03 ? t / 0.03 : 1) * (t > T - 0.12 ? Math.max(0, (T - t) / 0.12) : 1);
+    const scoop = 1 - 0.08 * Math.exp(-t / 0.05);
+    let s = 0;
+    voices.forEach((f, k) => {
+      ph[k] = (ph[k] + (f * scoop) / rate) % 1;
+      s += 2 * ph[k] - 1;
+    });
+    out[i] = a * s * 0.4;
+  }
+  return out;
+}
+
+/** Sad trombone: wah, wah, wah, waaah (brass, falling, the last one wobbles). */
+function trombone(rate) {
+  const out = new Float32Array(Math.round(1.4 * rate));
+  const notes = [293.66, 277.18, 261.63];
+  notes.forEach((f, k) => brassNote(out, rate, k * 0.26, 0.2, f / 2, 0.9));
+  const n0 = Math.floor(0.78 * rate);
+  for (let i = 0; i < out.length - n0; i++) {
+    const t = i / rate;
+    const a = t < 0.03 ? t / 0.03 : t < 0.45 ? 1 : Math.max(0, 1 - (t - 0.45) / 0.15);
+    const f = (246.94 / 2) * (1 + 0.02 * Math.sin(TAU * 6 * t));
+    let s = 0;
+    for (let h = 1; h <= 8; h++) s += (Math.pow(0.8, h - 1) / h) * Math.sin(TAU * f * h * t);
+    out[n0 + i] += 0.9 * a * s;
   }
   return out;
 }

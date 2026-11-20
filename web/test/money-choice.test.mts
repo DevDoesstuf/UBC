@@ -153,6 +153,6 @@ test("box lobby screen: the money button sits in the Call it! row (the flashed f
   await lobby.mutate(code, (x, now) => void lobby.join(x, "Flo", now));
   s = await kioskScreen(kiosk, "http://x");
   assert.ok((s.calls ?? []).length <= 4);
-  assert.equal(s.calls![0].id, "money:toggle");
+  assert.deepEqual(s.calls!.slice(0, 2).map((c) => c.id), ["mode:pick", "money:toggle"]);
   for (const x of [...s.buttons, ...(s.calls ?? [])]) assert.ok(x.label.length <= 16 && /^[\x20-\xff]*$/.test(x.label), x.label);
 });

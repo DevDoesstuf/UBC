@@ -318,6 +318,12 @@ export function Header({ l, onMoney }: { l: Lobby; onMoney: () => void }) {
   return (
     <header className="ph-top">
       <div className="ph-top-in">
+        <div className="ph-top-brand">
+          <Wordmark className="ph-wordmark-sm" />
+          <span className="ph-codechip hd-num" translate="no" aria-label={`Party code ${l.code}`}>
+            {l.code}
+          </span>
+        </div>
         <div className="ph-top-row">
           {s && teams ? (
             <div className="ph-bug" role="group" aria-label={`${teams.label}${s.clock ? `, ${s.clock}` : ""}`}>
@@ -336,7 +342,6 @@ export function Header({ l, onMoney }: { l: Lobby; onMoney: () => void }) {
           ) : (
             <div className="ph-bug" role="group" aria-label={l.game?.title ?? "Huddle"}>
               <span className="ph-bug-title">
-                <Mark size="1.2rem" lit={3} className="ph-bug-mark" />
                 <span className="ph-trunc">{l.game?.title ?? "Huddle"}</span>
               </span>
               {live && (
@@ -346,9 +351,6 @@ export function Header({ l, onMoney }: { l: Lobby; onMoney: () => void }) {
               )}
             </div>
           )}
-          <span className="ph-codechip hd-num" translate="no" aria-label={`Party code ${l.code}`}>
-            {l.code}
-          </span>
         </div>
         <div className="ph-top-money">
           <button onClick={onMoney} className="ph-balance" aria-label={`Your balance ${usd(me.balance)}. Add money or cash out`} data-testid="balance">
