@@ -32,6 +32,26 @@ import {
 import { Aurora, BrandLoader, Icon, Kinetic, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
 import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
 
+type ChainEv = { kind: string; at: number; cents: number | null; name: string | null; via: string | null; streamed: boolean };
+
+/**
+ * "Seen on Solana via QuickNode Streams": for 6 s after a QuickNode Stream delivers one of this lobby's transactions
+ * (lib/quicknode.ts marks it streamed). Only real deliveries show it; a deposit found by Huddle's own checks doesn't.
+ */
+function StreamedChip({ l, serverNow }: { l: LobbyData; serverNow: number }) {
+  const events = ((l as { chain?: { events?: ChainEv[] } | null }).chain?.events ?? []) as ChainEv[];
+  const ev = [...events].reverse().find((e) => (e.streamed || e.via === "quicknode") && serverNow - e.at < 6000);
+  if (!ev) return null;
+  const what = ev.kind === "deposit" && ev.cents ? `${ev.name ?? "A player"} +$${(ev.cents / 100).toFixed(2)}` : "Vault update";
+  return (
+    <div key={`${ev.kind}${ev.at}`} className="hd-pop tv-streamed" role="status">
+      <span className="live-dot" aria-hidden="true" />
+      <b>{what}</b>
+      <span>seen on Solana via QuickNode Streams</span>
+    </div>
+  );
+}
+
 /** "#003594" + alpha -> rgba(); unknown colours fall back to the brand green. */
 const hexA = (hex: string | undefined, a: number) =>
   /^#?[0-9a-f]{6}$/i.test(hex ?? "") ? withAlpha(hex!, a) : `rgba(31,214,127,${a})`;
@@ -240,6 +260,8 @@ export default function WatchPage() {
           <TradeTicker trades={trades} mode={m?.mode} />
         </footer>
       )}
+
+      <StreamedChip l={l} serverNow={serverNow} />
 
       <CaptionBar
         text={captionText}

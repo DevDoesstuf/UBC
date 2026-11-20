@@ -143,6 +143,24 @@ export default function PhonePage() {
     };
   }, [shouldSync, code, refresh, say]);
 
+  // A QuickNode Stream delivered my deposit (lib/quicknode.ts marks it streamed): say so once. Only real deliveries.
+  const streamSeen = useRef<number | null>(null);
+  const myName = l?.me?.name ?? null;
+  const streamed = ((l as { chain?: { events?: { kind: string; at: number; name: string | null; via: string | null; streamed: boolean }[] } | null } | null)?.chain?.events ?? [])
+    .filter((e) => e.kind === "deposit" && (e.streamed || e.via === "quicknode") && e.name === myName)
+    .reduce((a, e) => Math.max(a, e.at), 0);
+  useEffect(() => {
+    if (!myName) return;
+    if (streamSeen.current === null) {
+      streamSeen.current = streamed;
+      return;
+    }
+    if (streamed > streamSeen.current) {
+      streamSeen.current = streamed;
+      say("Seen on Solana via QuickNode Streams");
+    }
+  }, [streamed, myName, say]);
+
   // Tapped the box after the final whistle (/k/<kiosk> sends ?collect=1): cash out once, then drop the flag.
   const collectTried = useRef(false);
   const canCollect = !!(l?.me && l.phase === "ended" && l.me.balance > 0 && token);
