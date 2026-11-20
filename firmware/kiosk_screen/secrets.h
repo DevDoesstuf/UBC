@@ -1,10 +1,10 @@
-// Your kiosk's Wi-Fi + site settings. Git-ignored: never committed.
+// Wi-Fi + site settings. Committed with placeholders: put your hotspot in locally and do not commit it.
 // Edit the three CHANGE ME lines, then Upload again.
 #pragma once
 
 // CHANGE ME: your phone hotspot's name and password (2.4 GHz; iPhone: turn on "Maximize Compatibility").
-#define WIFI_SSID "iPhone"
-#define WIFI_PASSWORD "Devhotspot"
+#define WIFI_SSID "YOUR_HOTSPOT_NAME"
+#define WIFI_PASSWORD "YOUR_HOTSPOT_PASSWORD"
 
 // CHANGE ME: the laptop's IPv4 address on the hotspot (run ipconfig while connected to the hotspot),
 // with the laptop running npm run lan in the web folder. Later: "https://<your-site>.vercel.app".

@@ -665,7 +665,7 @@ The box's speaker is the room's announcer. The website decides every sound; the 
 - Money is integer **cents** everywhere except inside `lmsr.ts` (dollars and shares).
 - Every lobby write goes through `mutate()` in `lib/lobby.ts` (lock + timers + version bump). Don't write lobby JSON anywhere else.
 - `lib/lmsr.ts` must stay dependency-free: the phone page imports it for trade previews.
-- Secrets live in env vars (`web/.env.local`, git-ignored; Vercel project settings). The firmware `secrets.h` files (hotspot name and password, site URL) ARE committed on purpose so a fresh clone can flash the boards; never put real keys in them.
+- Secrets live in env vars (`web/.env.local`, git-ignored; Vercel project settings). The firmware `secrets.h` files are committed with placeholder Wi-Fi values (the site URL and kiosk id are real) so a fresh clone builds; put your hotspot name and password in locally before flashing and don't commit them.
 
 ## Sources
 
