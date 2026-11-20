@@ -405,3 +405,18 @@
 .hk .hk-row.hk-lead { background: #2a2418; border-radius: 12px; box-shadow: none; }
 .hk .hk-row.hk-lead * { color: var(--ink) !important; }
 .hk .hk-empty { border: 0; }
+
+/* "Tap for sound": the browser holds audio until the first tap (the speaker's sound plays after it). */
+.hk-soundhint {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20, 24, 20, 0.85);
+  color: #f4f1e6;
+  font: 600 14px/1 system-ui, sans-serif;
+  cursor: pointer;
+}

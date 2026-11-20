@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { KioskConnecting, KioskView } from "@/components/KioskView";
 import { api, useNow, usePoll, useQueryParam, type KioskScreen } from "@/components/client";
+import { useKioskSpeaker } from "@/components/kioskSpeaker";
 
 export default function KioskPage() {
   const id = useQueryParam("id");
@@ -27,6 +28,9 @@ export default function KioskPage() {
   const kiosk = id || "1";
   const headers: Record<string, string> = key ? { "x-kiosk-key": key } : {};
   const { data, lastOk } = usePoll(ready ? () => api<KioskScreen>(`/api/kiosk/state?kiosk=${encodeURIComponent(kiosk)}`, { headers }) : null, 1000);
+  // The box's speaker: the same sounds and ElevenLabs announcer lines, from the same endpoint (?sound=0 for silence).
+  const soundParam = useQueryParam("sound");
+  const { blocked } = useKioskSpeaker(ready ? kiosk : null, headers, ready && soundParam !== "0");
 
   useEffect(() => setOverride(null), [data]);
 
@@ -60,6 +64,11 @@ export default function KioskPage() {
           <KioskConnecting />
         )}
       </div>
+      {blocked && soundParam !== "0" ? (
+        <button type="button" className="hk-soundhint" onClick={() => undefined}>
+          Tap for sound
+        </button>
+      ) : null}
     </div>
   );
 }
