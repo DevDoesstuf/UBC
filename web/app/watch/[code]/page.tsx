@@ -7,7 +7,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { HttpError, api, useNow, usePoll, type LobbyData } from "@/components/client";
-import { useAnnouncer } from "@/components/tv/announcer";
+import { useRoomAudio } from "@/components/tv/roomAudio";
 import {
   CaptionBar,
   EndStage,
@@ -31,7 +31,6 @@ import {
 } from "@/components/tv/board";
 import { Aurora, BrandLoader, Icon, Kinetic, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
 import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
-import { soundFile } from "@/lib/speaker";
 
 /** "#003594" + alpha -> rgba(); unknown colours fall back to the brand green. */
 const hexA = (hex: string | undefined, a: number) =>
@@ -40,17 +39,17 @@ const hexA = (hex: string | undefined, a: number) =>
 export default function WatchPage() {
   const params = useParams<{ code: string }>();
   const code = String(params.code || "").toUpperCase();
-  const { data: l, error, lastOk } = usePoll(() => api<LobbyData>(`/api/lobby/${code}`), 1000);
-  const now = useNow(250);
   const [sound, setSound] = useState(false);
+  // With sound on, poll a little faster than the box's speaker (700 ms) so the TV keeps time with it.
+  const { data: l, error, lastOk } = usePoll(() => api<LobbyData>(`/api/lobby/${code}`), sound ? 500 : 1000);
+  const now = useNow(250);
   const [playerReady, setPlayerReady] = useState(false);
   const holder = useRef<HTMLDivElement>(null);
   const player = useRef<YTPlayer | null>(null);
-  const lastEvent = useRef<number | null>(null);
-  const lastCaption = useRef<number | null>(null);
   const standings = useRef<{ code: string; rows: Ranked[] } | null>(null);
   const videoId = l?.game?.youtubeId ?? null;
-  const announcer = useAnnouncer(code, sound);
+  // The same sounds and announcer lines as the box's speaker, in the same order (components/tv/roomAudio.ts).
+  const announcer = useRoomAudio(l, sound, l ? l.now - lastOk : 0);
 
   // Create the YouTube player once we know the clip.
   useEffect(() => {
@@ -92,41 +91,14 @@ export default function WatchPage() {
     }
   }, [l, playerReady, lastOk]);
 
-  // Sounds and the announcer for new events (only with sound on). Old events are never replayed on open.
-  const { say } = announcer;
-  useEffect(() => {
-    if (!l) return;
-    const newest = l.events.length ? l.events[l.events.length - 1].id : 0;
-    const caps = l.captions ?? [];
-    const cap = caps.length ? caps.reduce((a, b) => (b.id > a.id ? b : a)) : null;
-    if (lastEvent.current === null) {
-      lastEvent.current = newest;
-      lastCaption.current = cap?.id ?? 0;
-      return;
-    }
-    const fresh = l.events.filter((e) => e.id > (lastEvent.current as number));
-    lastEvent.current = Math.max(lastEvent.current, newest);
-    const newCaption = cap && cap.id > (lastCaption.current ?? 0) ? cap : null;
-    if (cap) lastCaption.current = Math.max(lastCaption.current ?? 0, cap.id);
-    if (!sound) return;
-    for (const e of fresh) if (e.sound) new Audio(`/sounds/${soundFile(e.sound, l.game?.sport)}`).play().catch(() => {});
-    if (newCaption) {
-      const t = setTimeout(() => say({ id: newCaption.id, text: newCaption.text }), fresh.some((e) => e.sound) ? 700 : 0);
-      return () => clearTimeout(t);
-    }
-    // No announcer lines in this game: read the result out instead.
-    const result = !caps.length ? fresh.find((e) => e.kind === "result") : undefined;
-    if (result) say({ id: result.id, text: result.text });
-  }, [l, sound, say]);
-
   function toggleSound() {
     const on = !sound;
     setSound(on);
     try {
       if (on) {
+        announcer.unlock();
         player.current?.unMute();
         player.current?.setVolume(100);
-        new Audio("/sounds/tap.wav").play().catch(() => {});
       } else {
         player.current?.mute();
         announcer.stop();

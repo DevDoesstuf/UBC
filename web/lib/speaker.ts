@@ -44,7 +44,17 @@ export function soundFile(sound: SoundName, sport?: string | null): string {
   return sport && SPORT_SOUNDS[sound]?.includes(sport) ? `${sound}-${sport}.wav` : `${sound}.wav`;
 }
 
-export function speakerQueue(l: Lobby | null, base: string, voice: boolean, sport?: string | null): SpeakerItem[] {
+/** What the queue needs from a lobby: the full Lobby on the server, the public view on the TV. */
+export type SpeakerSource = Pick<Lobby, "code"> & {
+  events?: { id: number; text: string; sound?: SoundName }[];
+  captions?: { id: number; text: string; say?: string }[];
+};
+
+/**
+ * The speaker's queue. The TV (components/tv/roomAudio.ts) builds the very same queue from the public view and
+ * walks it with nextForSpeaker, so the room hears the same sounds and the same announcer lines, in the same order.
+ */
+export function speakerQueue(l: SpeakerSource | null, base: string, voice: boolean, sport?: string | null): SpeakerItem[] {
   if (!l) return [];
   const items: SpeakerItem[] = [];
   for (const e of l.events ?? []) {
