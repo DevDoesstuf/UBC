@@ -12,10 +12,13 @@ export function pushChainEvent(l: Lobby, ev: ChainEvent): ChainEvent {
   const list = (l.chain ??= []);
   const hit = list.find((e) => e.sig === ev.sig && e.kind === ev.kind);
   if (hit) {
-    if (ev.via === "quicknode" || ev.streamed) hit.streamed = true;
+    if ((ev.via === "quicknode" || ev.streamed) && !hit.streamed) {
+      hit.streamed = true;
+      hit.streamedAt = Date.now();
+    }
     return hit;
   }
-  const rec: ChainEvent = { ...ev, ...(ev.via === "quicknode" ? { streamed: true } : {}) };
+  const rec: ChainEvent = { ...ev, ...(ev.via === "quicknode" || ev.streamed ? { streamed: true, streamedAt: Date.now() } : {}) };
   list.push(rec);
   if (list.length > MAX_EVENTS) list.splice(0, list.length - MAX_EVENTS);
   return rec;
@@ -24,7 +27,11 @@ export function pushChainEvent(l: Lobby, ev: ChainEvent): ChainEvent {
 /** Marks every recorded event of this signature as also seen on a QuickNode Stream. True when one was found. */
 export function markStreamed(l: Lobby, sig: string): boolean {
   let hit = false;
-  for (const e of l.chain ?? []) if (e.sig === sig) hit = e.streamed = true;
+  for (const e of l.chain ?? []) {
+    if (e.sig !== sig) continue;
+    if (!e.streamed) e.streamedAt = Date.now();
+    hit = e.streamed = true;
+  }
   return hit;
 }
 
@@ -65,6 +72,6 @@ export function chainView(l: Lobby, meId?: string | null) {
     settleTx: settledTx ? { sig: settledTx.sig, explorer: settledTx.explorer } : null,
     partyExplorer: v?.explorer ?? null,
     payout: mine ? { cents: mine.cents, to: mine.to, sig: mine.sig, explorer: mine.explorer } : null,
-    events: events.slice(-20).map((e) => ({ kind: e.kind, label: LABEL[e.kind], sig: e.sig, explorer: e.explorer, at: e.at, cents: e.cents ?? null, name: name(e.playerId), via: e.via ?? null, streamed: !!e.streamed })),
+    events: events.slice(-20).map((e) => ({ kind: e.kind, label: LABEL[e.kind], sig: e.sig, explorer: e.explorer, at: e.at, cents: e.cents ?? null, name: name(e.playerId), via: e.via ?? null, streamed: !!e.streamed, streamedAt: e.streamedAt ?? null })),
   };
 }

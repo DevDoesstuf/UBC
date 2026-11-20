@@ -32,7 +32,7 @@ import {
 import { Aurora, BrandLoader, Icon, Kinetic, Wordmark, withAlpha, type AuroraBlob } from "@/components/huddle";
 import { loadYouTube, type YTPlayer } from "@/components/tv/youtube";
 
-type ChainEv = { kind: string; at: number; cents: number | null; name: string | null; via: string | null; streamed: boolean };
+type ChainEv = { kind: string; at: number; cents: number | null; name: string | null; via: string | null; streamed: boolean; streamedAt?: number | null };
 
 /**
  * "Seen on Solana via QuickNode Streams": for 6 s after a QuickNode Stream delivers one of this lobby's transactions
@@ -40,11 +40,11 @@ type ChainEv = { kind: string; at: number; cents: number | null; name: string | 
  */
 function StreamedChip({ l, serverNow }: { l: LobbyData; serverNow: number }) {
   const events = ((l as { chain?: { events?: ChainEv[] } | null }).chain?.events ?? []) as ChainEv[];
-  const ev = [...events].reverse().find((e) => (e.streamed || e.via === "quicknode") && serverNow - e.at < 6000);
+  const ev = [...events].reverse().find((e) => (e.streamed || e.via === "quicknode") && serverNow - (e.streamedAt ?? e.at) < 6000);
   if (!ev) return null;
   const what = ev.kind === "deposit" && ev.cents ? `${ev.name ?? "A player"} +$${(ev.cents / 100).toFixed(2)}` : "Vault update";
   return (
-    <div key={`${ev.kind}${ev.at}`} className="hd-pop tv-streamed" role="status">
+    <div key={`${ev.kind}${ev.at}${ev.streamedAt ?? ""}`} className="hd-pop tv-streamed" role="status">
       <span className="live-dot" aria-hidden="true" />
       <b>{what}</b>
       <span>seen on Solana via QuickNode Streams</span>

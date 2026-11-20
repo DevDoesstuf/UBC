@@ -299,6 +299,8 @@ export interface ChainEvent {
   via?: "server" | "sync" | "box" | "quicknode" | "instant";
   /** A QuickNode Stream also delivered this transaction. */
   streamed?: boolean;
+  /** When a QuickNode delivery first reported it (ms). */
+  streamedAt?: number;
 }
 
 export interface VaultTx {
