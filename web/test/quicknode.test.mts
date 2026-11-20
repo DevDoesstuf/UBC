@@ -202,3 +202,18 @@ test("a delivery credits the Solana Pay deposit once, by reference, re-read from
   assert.equal(txCalls, before + 1, "it was checked on chain, and refused");
   assert.equal(lobby.requirePlayer((await lobby.mutate(l.code, () => {}))!, tok).balance, 500);
 });
+
+test("QuickNode Webhooks payload (Solana Wallet Activity Monitor) becomes the same records", () => {
+  const body = [{
+    block: { slot: 524288124, blockTime: 1795162346 },
+    transactions: [
+      { raw: { meta: { err: null, loadedAddresses: { writable: [], readonly: ["R1"] } }, transaction: { signatures: ["SIG1"], message: { accountKeys: ["A", { pubkey: "B" }] } } } },
+      { raw: { meta: { err: { InstructionError: [0, "x"] } }, transaction: { signatures: ["FAILED"], message: { accountKeys: ["Z"] } } } },
+    ],
+  }];
+  const recs = qn.recordsOf(body);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].signature, "SIG1");
+  assert.equal(recs[0].slot, 524288124);
+  assert.deepEqual(recs[0].accounts, ["A", "B", "R1"]);
+});

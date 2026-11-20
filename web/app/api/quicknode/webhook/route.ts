@@ -14,7 +14,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  if (!streamToken()) return json({ error: "QuickNode webhook is not configured (QUICKNODE_STREAM_TOKEN)" }, 503);
+  // QUICKNODE_STREAM_TOKEN: the Stream's token. QUICKNODE_WEBHOOK_TOKEN: the security token of a QuickNode Webhook
+  // ("Solana Wallet Activity Monitor" on the treasury's USDC account), which signs its deliveries the same way.
+  const tokens = [streamToken(), (process.env.QUICKNODE_WEBHOOK_TOKEN || "").trim()].filter(Boolean);
+  if (!tokens.length) return json({ error: "QuickNode webhook is not configured (QUICKNODE_STREAM_TOKEN)" }, 503);
   let raw: string;
   try {
     const buf = Buffer.from(await req.arrayBuffer());
@@ -22,7 +25,8 @@ export async function POST(req: Request) {
   } catch {
     return json({ error: "Unreadable body" }, 400);
   }
-  const why = authProblem(req.headers, raw);
+  const problems = tokens.map((t) => authProblem(req.headers, raw, t));
+  const why = problems.includes(null) ? null : problems[problems.length - 1];
   if (why) return json({ error: `Unauthorized: ${why}` }, 401);
   let body: unknown;
   try {

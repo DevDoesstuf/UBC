@@ -77,6 +77,34 @@ export function recordsOf(body: unknown, out: StreamRecord[] = [], depth = 0): S
     });
     return out;
   }
+  // QuickNode Webhooks ("Solana Wallet Activity Monitor" template): [{block: {slot, blockTime}, transactions: [{raw:
+  // {meta, transaction: {signatures, message: {accountKeys}}}}]}]. Same record: the signature and every account key.
+  if (Array.isArray(o.transactions)) {
+    const block = (o.block ?? {}) as Record<string, unknown>;
+    for (const t of o.transactions as Record<string, unknown>[]) {
+      const raw = ((t && (t.raw ?? t)) ?? {}) as Record<string, unknown>;
+      const tx = (raw.transaction ?? {}) as Record<string, unknown>;
+      const msg = (tx.message ?? {}) as Record<string, unknown>;
+      const meta = (raw.meta ?? {}) as Record<string, unknown>;
+      const sig = Array.isArray(tx.signatures) ? tx.signatures[0] : null;
+      if (typeof sig !== "string" || meta.err) continue;
+      const loaded = (meta.loadedAddresses ?? {}) as Record<string, unknown>;
+      const keys = [
+        ...(Array.isArray(msg.accountKeys) ? msg.accountKeys : []),
+        ...(Array.isArray(loaded.writable) ? loaded.writable : []),
+        ...(Array.isArray(loaded.readonly) ? loaded.readonly : []),
+      ].map((k) => (typeof k === "string" ? k : k && typeof k === "object" ? (k as { pubkey?: unknown }).pubkey : null));
+      out.push({
+        signature: sig,
+        slot: typeof block.slot === "number" ? block.slot : null,
+        blockTime: typeof block.blockTime === "number" ? block.blockTime : null,
+        accounts: keys.filter((k): k is string => typeof k === "string").slice(0, 64),
+        watched: [],
+        huddle: [],
+      });
+    }
+    return out;
+  }
   if ("data" in o) recordsOf(o.data, out, depth + 1);
   return out;
 }
