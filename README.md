@@ -12,15 +12,31 @@ Everything runs on **one website** (Next.js on Vercel, Upstash Redis). The kiosk
 
 **Live:** https://huddle-live-eight.vercel.app (TV: `/watch/CODE`, phones: `/l/CODE`, box preview: `/kiosk?id=1`).
 
+### Links
+
+| What | Link |
+|---|---|
+| Live site (home: join with a code) | https://huddle-live-eight.vercel.app |
+| Box screen in a browser (with the box speaker's audio) | https://huddle-live-eight.vercel.app/kiosk?id=1 |
+| Phone (join and play) | `https://huddle-live-eight.vercel.app/l/CODE` (CODE = the 4-letter party code on the box) |
+| TV page (live odds, leaderboard, announcer) | `https://huddle-live-eight.vercel.app/watch/CODE` |
+| NFC tap link (the sticker on the box) | https://huddle-live-eight.vercel.app/k/1 |
+| Solana program `huddle_vault` (devnet) | [GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu](https://explorer.solana.com/address/GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu?cluster=devnet) |
+| Source | https://github.com/DevDoesstuf/UBC |
+
+### Try the demo game
+
+On the box (or `/kiosk?id=1`), pick **England v Argentina** (World Cup semi-final), choose **Pool**, scan the QR on two phones and add money, then tap **Start**. The pregame question opens at Gemini's real pre-match price, the live questions show a "Did you know?" card and settle themselves a few seconds after each lock, and at the final whistle everyone taps their phone on the box to collect.
+
 ## UBC 2026 Hackathon: tracks and bounties
 
 | Entry | What judges look for | Where Huddle does it |
 |---|---|---|
 | **Consumer Applications** (main track) | Crypto invisible: no seed phrase, no gas, everyday use, real UX | Tap or scan to join, one-tap YES/NO, demo money or Solana Pay with fees paid by the house, a touchscreen box + phones + TV in one design |
 | **Best use of Solana** (chain award) | Core on-chain functionality, Anchor program, Solana-native primitives, smooth wallet UX | Anchor `huddle_vault` program (party vault PDA, Ed25519-verified signed balances, on-chain payouts), SPL USDC, Solana Pay QR on the phone or the box. [Solana](#solana) |
-| **Gemini Prediction Markets** | Odds over time, bringing market data into other apps, market discovery | Gemini's price beside the room's on every comparable question, odds graph and "Odds right now" board on the box, Gemini-calibrated model prices, Room vs Model vs Gemini Brier scorecard, `GET /api/gemini/markets` |
-| **ElevenLabs** | Voice central, not an add-on | The announcer is the box's voice: ElevenLabs TTS (Flash) per sport persona on a speaker ESP32, plus Sound Effects for the room. [ElevenLabs](#elevenlabs-the-announcer-and-the-room-sounds) |
-| **QuickNode Streams** | A Stream with a filter and a destination as a core data source | A Solana devnet Block Stream filtered to our vault and treasury, webhook credits deposits instantly. [QuickNode Streams](#quicknode-streams) |
+| **Gemini Prediction Markets** | Odds over time, bringing market data into other apps, market discovery | Gemini's price beside the room's on every comparable question, Room vs Gemini odds graph, a **Gemini odds** mode (bet at Gemini's live price, picked on the box), Gemini-calibrated model prices, real Gemini price history in replays, Room vs Model vs Gemini Brier scorecard, `GET /api/gemini/markets` |
+| **ElevenLabs** | Voice central, not an add-on | The announcer is the box's voice: ElevenLabs TTS (Flash) with a commentator per sport and per game (British for the Premier League and the World Cup, American for the NFL, a Spanish accent for Portugal v Spain), streamed to a speaker ESP32 and played in sync on the TV and the box preview. [ElevenLabs](#elevenlabs-the-announcer-and-the-room-sounds) |
+| **QuickNode** | A Stream or webhook with a filter and a destination as a core data source | QuickNode watches the treasury on Solana devnet and pushes each deposit to our webhook, which credits it at once; the TV and phone show "seen on Solana via QuickNode". Works with a Streams filter or the Webhooks "Wallet Activity Monitor". [QuickNode](#quicknode-streams-and-webhooks) |
 
 ## What Huddle adds on top of the original Live Lines build
 
@@ -31,29 +47,34 @@ Everything runs on **one website** (Next.js on Vercel, Upstash Redis). The kiosk
 | **Real recent games** | 49ers 46-40 Cowboys, Chargers 23-20 Ravens, Colts 24-22 Dolphins (NFL, Nov 15-16), Man United 4-4 Aston Villa (Premier League, Nov 8), Clippers 113-112 Thunder (NBA, Nov 13): real ESPN play-by-play compressed to about 7 minutes, with NFL, soccer and NBA questions (free throws, timeouts, quarter winners, crunch time). `node scripts/build-replays.mjs` rebuilds them or adds more | `scripts/build-replays.mjs`, `config/replays/` |
 | **Model prices + Gemini odds** | Each market opens at the model's probability, calibrated to Gemini; Gemini sits beside the room's price (on real games: Gemini's real price at that moment of the game, from its price history), recorded at open and lock and drawn over time; end-of-game Brier scorecard (Room vs Model vs Gemini); `GET /api/gemini/markets` lists what Gemini is trading now | `lib/gemini.ts`, `lib/lobby.ts` |
 | **Announcer** | One caption per event in the game's voice; ElevenLabs TTS when `ELEVENLABS_API_KEY` is set (served to the TV and to the speaker ESP32 through `/api/kiosk/audio`), browser voice otherwise | `lib/announcer.ts`, `lib/tts.ts` |
-| **Three ways to play** | LMSR market (default), pool (winners split the pot), head-to-head offers between friends | `lib/modes.ts` |
+| **Four ways to play, picked on the box** | After a game is picked the box asks "How do you want to play?": **Pool** (winners split the pot), **Market** (LMSR, prices move with every bet), **Gemini odds** (a fixed price from Gemini Prediction Markets, a winning share pays $1) or **Head to head** (offers between friends) | `lib/modes.ts`, `lib/kiosk.ts` |
+| **Demo game: England v Argentina** | World Cup semi-final from the official highlights: a pregame "will Argentina reach the final?" call at Gemini's real pre-match price that settles at the final whistle, live questions with a "Did you know?" stat card on the box, results that settle themselves (no YES/NO taps) | `config/games.json`, `lib/lobby.ts` |
+| **Tap to collect** | After the final whistle, tapping a phone on the box's NFC tag opens that player's page and cashes out; the box shows "NAME collects $X!" | `app/k/[kiosk]`, `lib/hw.ts` |
+| **Sport sounds and per-game voices** | Kickoff whistle for soccer, drums for football, buzzer for basketball; each game can set its own ElevenLabs voice (`"voice"` in `games.json`) | `lib/speaker.ts`, `scripts/make-sounds.mjs` |
+| **One sound everywhere** | The TV page and the browser box preview play the box speaker's exact queue (same files, same order, same skip rules), so the room hears one announcer | `components/tv/roomAudio.ts`, `components/kioskSpeaker.ts` |
+| **Built-in wallet** | In Solana games each player gets a per-player devnet wallet: **Pay instantly** is one tap, the house pays the fee | `lib/solana.ts`, `app/api/lobby/[code]/deposit/instant` |
 | **Solana money, invisible** | Demo money by default. `MONEY_MODE=solana`: buy in with **Solana Pay** (scan a QR with any Solana wallet, devnet USDC, or **pay on the box**), cash out to any Solana address; the treasury pays all fees. `SETTLEMENT=vault`: each party's money sits in its own **Anchor program vault** and the game settles on chain from box-signed balances verified by the Ed25519 program. A **QuickNode Stream** credits deposits the moment they land. See [Solana](#solana) | `lib/solana.ts`, `lib/vault.ts`, `lib/quicknode.ts` |
 | **Kickoff design, green + ivory** | The original Huddle "Kickoff" look and motion (kinetic questions, rolling odds, LED-ring countdown, split bar, result flood, confetti, podium) recoloured green on ivory. One kit and one set of tokens for the phones, the TV page and the box preview; the box firmware draws the same design | `components/huddle/` (kit), `app/globals.css` (tokens), `components/phone/`, `components/tv/`, `firmware/kiosk_screen/ui.cpp` |
 
 Data contract, env vars and human setup steps: [`web/CONTRACT.md`](web/CONTRACT.md).
 
-This README is the single source of context for people and agents working on the repo. The original spec is in [docs/](docs/Live%20Lines%20-%20Kiosk%20&%20Watch-Party%20Flow.pdf).
+This README is the main reference for anyone working on the repo. The original spec is in [docs/](docs/Live%20Lines%20-%20Kiosk%20&%20Watch-Party%20Flow.pdf).
 
 ---
 
-## Status (Nov 17, 2026)
+## Status (Nov 20, 2026)
 
 | Piece | State |
 |---|---|
-| Website: lobby, games config, LMSR market, phone page, watch page, web kiosk, kiosk API | **Built and tested locally** in demo mode: full game end to end (create lobby, 2 players join and deposit, trade, auto-lock, resolve, payouts, end, cash out), plus 20 simultaneous buys with no lost trades. `npm run build` passes. |
-| LMSR pricing | **Unit tested** against the spec's worked example (`npm test`). |
-| Coinbase Onramp deposits + on-chain payouts | **Written against Coinbase's current docs, not yet run** (needs your CDP keys). See [Money](#money). |
-| Upstash Redis storage (needed on Vercel) | **Written, not yet run** against a real Upstash instance. Local dev uses memory. |
-| Kiosk firmware (ESP32-S3 touchscreen) | **Compiled, flashed and working on the real board** (Nov 17). First flash failed only because PSRAM was off in the IDE settings. See [Kiosk firmware](#kiosk-firmware-esp32-s3-touch-lcd-43). |
-| Speaker + second ESP32 | **Wiring confirmed** with a beep test (BCLK 26, LRC 25, DIN 27). `firmware/speaker` polls `/api/kiosk/audio` and streams each WAV (event sounds, plus the announcer's voice when ElevenLabs is on), using the same I2S driver as the test. The full sketch has not been run on the board yet. See [Speaker](#speaker-second-esp32--i2s-amp). |
-| NFC | No firmware needed: a passive NFC sticker holding `https://<site>/k/1`. |
-| Solana vault (`SETTLEMENT=vault`) + QuickNode webhook | **Proven end to end on a local validator** (Nov 18, `npm run test:vault-localnet`): program deployed, Solana Pay deposits (polling, a real block through the Stream filter into the webhook, pay on the box), sweeps into the vault, Ed25519-verified settlement, payouts checked on chain. **Devnet deploy waits for devnet SOL** (`node scripts/solana-go-live.mjs`, see [Solana](#solana)); the QuickNode Stream waits for an account. |
-| YouTube clip | **Placeholder.** Put a real clip id and timestamps in `web/config/games.json`. |
+| Website (lobby, games, four play modes, phone, TV, box preview, kiosk API) | **Live on Vercel** at https://huddle-live-eight.vercel.app with Upstash Redis. `npm test` (124 tests) and `npm run build` pass. |
+| Kiosk firmware (ESP32-S3 touchscreen) | **Flashed and running on the real box.** Everything added since is delivered through the screen JSON, so it works on the flashed firmware without a reflash. The new logo on the boot and connecting screens shows after the next flash. |
+| Speaker ESP32 + I2S amp | **Running on the box**: plays the room sounds and the ElevenLabs announcer from `/api/kiosk/audio`. |
+| NFC | A passive NFC sticker holding `https://<site>/k/1`: tap to join, and after the final whistle tap to collect. |
+| Solana (`MONEY_MODE=solana`, `SETTLEMENT=vault`) | **Live on devnet**: `huddle_vault` deployed at `GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu`, Solana Pay deposits (phone or box QR) credited in about 2 s, Pay instantly from the built-in wallet, sweeps into the party vault, on-chain settlement and payouts. Each game picks demo money or Solana on the box. |
+| QuickNode | **Live**: a QuickNode webhook watches the treasury's USDC account on devnet and delivers each deposit to `/api/quicknode/webhook`. The Streams filter is in the repo too. |
+| ElevenLabs | **Live**: Flash TTS announcer with per-sport and per-game voices, cached and pre-warmed. |
+| Gemini Prediction Markets | **Live**: public read API (no key), real prices in the replays and the demo game, Gemini odds mode. |
+| Coinbase Onramp (`MONEY_MODE=coinbase`) | Written against Coinbase's docs, not run (needs CDP keys). Solana is the money path we demo. |
 
 ---
 
@@ -81,8 +102,8 @@ web/                       <- the website (Next.js 16, TypeScript). Vercel root 
   app/kiosk                <- web version of the kiosk screen (same JSON as the ESP32)
   app/k/[kiosk]            <- NFC entry point (redirects to the kiosk's current lobby)
   components/              <- huddle/ (the shared kit: Roll, LockRing, SplitBar, Kinetic, Burst, Avatar, motion), phone/, tv/, KioskView (same layout as firmware), Qr, client helpers
-  public/sounds/*.wav      <- room sounds (join, tap, start, lastcall, lock, win, lose, siren, cheer, coin)
-  scripts/make-sounds.mjs  <- remakes them: ElevenLabs Sound Effects with a key, procedural placeholders without
+  public/sounds/*.wav      <- room sounds (join, tap, start, lastcall, lock, win, lose, siren, cheer, coin; start/lock/siren/cheer per sport)
+  scripts/make-sounds.mjs  <- remakes them (synthesized: whistles, drums, buzzers, per sport; ElevenLabs Sound Effects with a key)
   test/lmsr.test.mts       <- pricing tests
 firmware/kiosk_screen/     <- Arduino sketch for the Waveshare ESP32-S3-Touch-LCD-4.3
   kiosk_screen.ino         <- setup/loop
@@ -96,10 +117,9 @@ firmware/speaker/          <- Arduino sketch for the speaker ESP32 (I2S amp): pl
   secrets.example.h        <- copy to secrets.h: same values as the screen's
 programs/huddle_vault/     <- the Anchor program (Rust) the vault mode settles through; idl/ has its IDL
 Anchor.toml, Cargo.toml    <- Anchor workspace (anchor build -> target/deploy/huddle_vault.so)
-.claude/launch.json        <- dev server config for Claude Code's preview
 ```
 
-The earlier **TapBet** prototype (Express, pooled bets, in-memory) was the starting point. Its kiosk API idea (the firmware draws whatever the server describes) and its sounds were kept. Everything else was rebuilt for the spec: LMSR instead of pools, Vercel-friendly storage, Coinbase instead of Stripe/Solana.
+The earlier **TapBet** prototype (Express, pooled bets, in-memory) was the starting point. Its kiosk API idea (the firmware draws whatever the server describes) and its sounds were kept. Everything else was rebuilt for the spec: LMSR markets (pools came back later as one of the play modes), Vercel-friendly storage, and Solana for money.
 
 ---
 
@@ -117,7 +137,7 @@ Then open:
 
 | URL | What |
 |---|---|
-| http://localhost:3000 | Home: join by code, links, server status and config warnings |
+| http://localhost:3000 | Home: join by code |
 | http://localhost:3000/kiosk?id=1 | The kiosk screen in a browser (click = touch) |
 | http://localhost:3000/l/ABCD | Phone page for lobby ABCD. Add `?seat=2` to be a second player in the same browser |
 | http://localhost:3000/watch/ABCD | Watch page (click "Start the watch party" once to allow sound) |
@@ -127,7 +147,7 @@ Try a full round without hardware: open `/kiosk?id=1`, tap **Football**, open th
 
 To test with real phones or the ESP32 before the site is on Vercel, run `npm run lan` (production build, listening on every network interface, port 3000) and open `http://<laptop-ip>:3000` on the phones (same Wi-Fi or hotspot as the laptop). Find the IP with `ipconfig` (the Wi-Fi adapter's IPv4 address). Set `PUBLIC_BASE_URL=http://<laptop-ip>:3000` in `web/.env.local` so QR codes point at the laptop and not at `localhost`. The first time, Windows Firewall asks whether Node.js may accept connections: allow it. Phone hotspots often count as "Public" networks, so tick Public too, or set that Wi-Fi network to Private in Windows settings.
 
-Other commands: `npm test` (pricing tests), `npm run typecheck`, `npm run build`.
+Other commands: `npm test` (the full test suite), `npm run typecheck`, `npm run build`.
 
 ---
 
@@ -291,8 +311,8 @@ Peer-to-peer betting with real money is regulated as gambling in most places, an
 | | |
 |---|---|
 | Program | **`huddle_vault`**, Anchor (Rust), program id **`GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu`** |
-| Network | Solana **devnet** (deployed by `web/scripts/solana-go-live.mjs` once the treasury is funded; until then it runs on a local validator, see [Proof](#proof-on-a-local-validator)) |
-| Token | A 6-decimal test USDC SPL token (`USDC_MINT`), minted by the treasury |
+| Network | Solana **devnet**, deployed ([explorer](https://explorer.solana.com/address/GRpABdrQhDya9n2zuf19w2idbL3CRSqmWYTJs52taRHu?cluster=devnet)) by `web/scripts/solana-go-live.mjs`; the same flow also runs on a local validator, see [Proof](#proof-on-a-local-validator) |
+| Token | A 6-decimal test USDC SPL token on devnet (`USDC_MINT`), minted by the treasury |
 | Wallet UX | **Solana Pay** transfer requests (QR or "Open in wallet", any Solana wallet), shown on the phone or **on the box** |
 | Source | [`programs/huddle_vault`](programs/huddle_vault) (instructions in `lib.rs`, Ed25519 checks in `ed25519.rs`, settlement math in `settle.rs`, accounts in `state.rs`; IDL in `idl/`); the site's client is `web/lib/vault.ts` |
 
@@ -371,7 +391,7 @@ natural next step.
 It checks every wallet and the vault on chain (the vault ends at 0). A second party covers a house win (`withdraw_host`).
 `VAULT_E2E_LOG=1` prints every signature.
 
-## QuickNode Streams
+## QuickNode Streams and Webhooks
 
 | | |
 |---|---|
@@ -412,6 +432,19 @@ A batch with nothing of ours returns `null`, so QuickNode sends nothing.
 - **Polling stays as the fallback.** It covers the case where the Stream is paused or not set up.
 
 Setup, click by click: [`web/CONTRACT.md` → QuickNode Stream setup](web/CONTRACT.md#quicknode-stream-setup).
+
+### QuickNode Webhooks (what runs in production now)
+
+The same endpoint also takes **QuickNode Webhooks**, which need no custom filter: a **Solana Wallet Activity Monitor**
+webhook on **Solana Devnet** watching the treasury's USDC token account (`7PFFXAw4ePbB4V8qfxsy7uz8JFWGyAXxF3E3CE2x6MXG`).
+Its payload (`[{block, transactions: [{raw: {meta, transaction}}]}]`) is read into the same records as a Stream
+delivery (`recordsOf` in `lib/quicknode.ts`): signature plus every account key, failed transactions dropped. It is
+signed with the webhook's own security token, set as `QUICKNODE_WEBHOOK_TOKEN` (checked next to
+`QUICKNODE_STREAM_TOKEN`). Turn payload compression off.
+
+When a delivery reaches a deposit, its chain event is marked `streamed` with the time (`streamedAt`): the TV shows
+"NAME +$5.00 seen on Solana via QuickNode Streams" for 6 s and the player's phone shows "Seen on Solana via QuickNode
+Streams". Only real deliveries show it; a deposit found by Huddle's own polling doesn't.
 
 ### Go live (human steps)
 
@@ -573,16 +606,19 @@ The box's speaker is the room's announcer. The website decides every sound; the 
   | Persona (games) | Voice | Env var |
   |---|---|---|
   | `nfl` (NFL, NBA replays) | Brian `nPczCjzI2devNBz1zQrb`, deep American play-by-play | `ELEVENLABS_VOICE_NFL` |
-  | `soccer` (Premier League, Portugal vs Spain) | George `JBFqnCBsd6RMkjVDRZzb`, warm British | `ELEVENLABS_VOICE_SOCCER` |
+  | `soccer` (Premier League, World Cup) | George `JBFqnCBsd6RMkjVDRZzb`, warm British | `ELEVENLABS_VOICE_SOCCER` |
+  | one game: Portugal v Spain (`"voice"` in `games.json`) | Carlos `AsHHje51j2aYdrvLDHfG`, Spanish accent | per game |
   | `calm` (any game with `"persona": "calm"` in `games.json`) | Eric `cjVigY5qzO86Huf0OWal`, friendly and even | `ELEVENLABS_VOICE_CALM` |
 
 - Each clip is cached by a hash of (voice, model, settings, format, text) in Redis for 24 h, so a line is synthesized once. While the speaker plays an event's sound effect, `/api/kiosk/audio` pre-warms the voice line that follows it, so the line is usually cached by the time the speaker asks. A key ElevenLabs rejects (401/403) is remembered for 5 minutes and the site behaves as if there were no key.
 
-**2. Sound Effects (offline, once).** `web/scripts/make-sounds.mjs` asks the Sound Effects API (`POST /v1/sound-generation`, `output_format=pcm_22050`, model `eleven_text_to_sound_v3`, falling back to `eleven_text_to_sound_v2`) for each room sound from a text prompt, then trims, normalizes and writes it to `web/public/sounds` as mono 16-bit WAV under 60 KB. Until it is run with a key, the committed files are procedural placeholders the same script synthesizes (`--synth`), so the speaker already plays all of them.
+**Room sounds.** The committed sounds are synthesized by `web/scripts/make-sounds.mjs` (no key needed): a referee's whistle for soccer, a drumline for football, a buzzer for basketball, plus coins, chimes and a sad trombone. `start`, `lock`, `siren` and `cheer` have one file per sport (`start-soccer.wav`, `lock-nfl.wav`, ...); `soundFile()` in `lib/speaker.ts` picks the game's. The same queue plays on the speaker, on the TV page and in the browser box preview.
+
+**2. Sound Effects (optional).** With a key, `web/scripts/make-sounds.mjs` can instead ask the Sound Effects API (`POST /v1/sound-generation`, `output_format=pcm_22050`, model `eleven_text_to_sound_v3`, falling back to `eleven_text_to_sound_v2`) for each room sound from a text prompt, then trims, normalizes and writes it to `web/public/sounds` as mono 16-bit WAV under 60 KB. Without a key the script synthesizes them (`--synth`), which is what is committed.
 
 | Sound | When | Prompt (shortened) |
 |---|---|---|
-| `start` | a market opens | airy whoosh |
+| `start` | a market opens | kickoff whistle / drums / buzzer, per sport |
 | `siren` | the host calls a "Call it!" moment | stadium alert siren |
 | `lastcall` (8 kHz) | 4.5 s before the lock, on markets of 10 s or more | clock ticks one second apart, then a ding |
 | `lock` | trading locks | heavy latch clunk |
@@ -608,9 +644,9 @@ The box's speaker is the room's announcer. The website decides every sound; the 
 |---|---|
 | Kiosk hardware: ESP32 + on-device UI, or Raspberry Pi + browser? | ESP32-S3 touchscreen drawing server-sent JSON (no LVGL, no QR library on device). `/kiosk` is the same screen in a browser, so a tablet or Pi works as a fallback |
 | Real-time: polling or hosted real-time? | Polling about every second |
-| Onramp provider | Coinbase Onramp (USDC on Base) + CDP Server Wallet for payouts |
-| Resolving markets | Host taps YES/NO on the kiosk. Optional auto-resolve from config (`answer` + `resolveAt`). AI resolution is a later add-on |
-| Subsidy | LMSR. House covers up to `b * ln(1/p)` per question (p = opening price of the winning side; `b * ln 2` at 50/50). The pooled-bet fallback from the spec is not implemented (TapBet had it) |
+| Money provider | Solana devnet: Solana Pay deposits, a built-in wallet, the `huddle_vault` program for settlement (Coinbase Onramp on Base is written as an alternative) |
+| Resolving markets | Replays resolve from the real play-by-play; clip games with a known `answer` settle themselves after the lock; otherwise the host taps YES/NO on the box |
+| Subsidy | LMSR. House covers up to `b * ln(1/p)` per question (p = opening price of the winning side; `b * ln 2` at 50/50). Pool, Gemini odds and head-to-head are the other play modes |
 | Real money | Off by default. Needs three env flags. Legal note above |
 | Other 3 games | Basketball, Soccer, Tennis as "Coming soon" tiles (change in games.json) |
 
@@ -622,7 +658,7 @@ The box's speaker is the room's announcer. The website decides every sound; the 
 - Phones authenticate with a random token in `localStorage`. Clearing it means rejoining as a new player (old balance stays on the old player).
 - Coinbase webhooks (`onramp.transaction.*`) could replace the deposit polling.
 
-## Notes for agents
+## Notes for contributors
 
 - **The firmware contract is `web/lib/kiosk.ts`.** If you change field names there, change `firmware/kiosk_screen/ui.cpp` and `web/components/KioskView.tsx` too. Adding new optional fields or screens is safe: old firmware ignores them.
 - Never put game logic in the firmware. Make the site decide and send it.
