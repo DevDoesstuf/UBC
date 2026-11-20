@@ -697,6 +697,11 @@ export function lockMarket(l: Lobby, now: number = Date.now()): void {
   refreshMarketGemini(l, now);
   l.phase = "locked";
   m.lockAt = Math.min(m.lockAt, now);
+  // A clip question with a known answer resolves a fixed time after its lock, even when the host locked it early.
+  if (!l.replay && m.source?.kind === "clip" && m.resolveAt !== null) {
+    const cq = getGame(l.gameId)?.questions[m.qIndex];
+    if (cq && cq.resolveAt != null) m.resolveAt = m.lockAt + Math.max(2, cq.resolveAt - cq.lockAt) * 1000;
+  }
   m.priceAtLock = yesPrice(m);
   noteTrail(m, now, true);
   if (modeOf(m) === "h2h") releaseOffers(l, m);

@@ -813,10 +813,13 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
       title: "Trading closed",
       subtitle: m.resolveAt ? "Watch the play. The result comes in by itself" : "Watch the play, then tap what happened",
       lockIn: 0,
-      buttons: [
-        { id: "resolve:yes", label: "It was YES", style: "yes" },
-        { id: "resolve:no", label: "It was NO", style: "no" },
-      ],
+      // A known result (a replayed real game) comes in by itself: no buttons to tap.
+      buttons: m.resolveAt
+        ? []
+        : [
+            { id: "resolve:yes", label: "It was YES", style: "yes" },
+            { id: "resolve:no", label: "It was NO", style: "no" },
+          ],
     };
   }
 

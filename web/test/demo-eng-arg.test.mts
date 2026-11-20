@@ -69,9 +69,18 @@ test("England v Argentina: pool, pregame call settles at the end, fact cards, ta
       x.hw = { ...(x.hw ?? {}), hotseat: null };
       lobby.buy(x, x.players[ids[who]], "yes", 200, now);
     });
-    await touch("lock");
-    s = await touch("resolve:yes");
+    s = await touch("lock");
+    // The real result is known: no YES/NO buttons, it settles by itself a few seconds after the lock.
+    assert.equal(s.legacyOf ?? s.screen, "locked");
+    assert.deepEqual(s.buttons, []);
+    const lk = (await lobby.getLobby(code))!.market!;
+    assert.ok(lk.resolveAt! - lk.lockAt >= 7000 && lk.resolveAt! - lk.lockAt <= 9000, "about 8 s after the lock");
+    await lobby.mutate(code, (x) => {
+      x.market!.resolveAt = Date.now() - 1;
+    });
+    s = await kioskScreen(KIOSK, "http://x");
     assert.equal((s.legacyOf ?? s.screen), "result");
+    assert.equal((await lobby.getLobby(code))!.market!.outcome, "yes");
   }
   if (l.phase !== "ended") await touch("end");
   l = (await lobby.getLobby(code))!;

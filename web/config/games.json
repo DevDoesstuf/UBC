@@ -45,8 +45,8 @@
           "short": "England score in the next 10?",
           "startAt": 0,
           "lockAt": 25,
-          "resolveAt": null,
-          "answer": null,
+          "resolveAt": 33,
+          "answer": "yes",
           "prior": 0.18,
           "stat": "England were favourites before kickoff: Gemini gave them 54% to reach the final."
         },
@@ -56,8 +56,8 @@
           "short": "Argentina score in the next 10?",
           "startAt": 0,
           "lockAt": 25,
-          "resolveAt": null,
-          "answer": null,
+          "resolveAt": 33,
+          "answer": "yes",
           "prior": 0.24,
           "stat": "Last 16 v Egypt: Argentina were 2-0 down in the 75th minute and still won 3-2."
         },
@@ -67,8 +67,8 @@
           "short": "Argentina win it in stoppage time?",
           "startAt": 0,
           "lockAt": 20,
-          "resolveAt": null,
-          "answer": null,
+          "resolveAt": 28,
+          "answer": "yes",
           "prior": 0.2,
           "stat": "Messi just set up the equaliser. Against Egypt, Argentina's winner came in stoppage time."
         }

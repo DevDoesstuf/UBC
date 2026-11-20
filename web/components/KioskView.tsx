@@ -775,7 +775,7 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
       <Kinetic f="H3" x={24} y={94} w={508} lines={2} lh={29} text={q} delay={80} stagger={30} />
       <div className="hk-abs hk-rise" style={{ left: 0, top: 0, ...d(200) }}>
         <Roll f="N2" x={22} y={heroY} text={`${yesP}%`} color={locked ? P.ink2 : P.ink} up={P.yes} down={P.no} dir={Math.sign(s.move ?? 0)} ms={700} />
-        <T f="B1" x={34 + `${yesP}%`.length * 31} y={heroY - 2} color={P.ink2}>
+        <T f="B1" x={52 + `${yesP}%`.length * 36} y={heroY - 2} color={P.ink2}>
           chance
           {diff !== 0 && <span style={{ color: diff > 0 ? P.yes : P.no, marginLeft: 14, fontSize: 18 }}>{diff > 0 ? "▲" : "▼"} {Math.abs(diff)}</span>}
         </T>
