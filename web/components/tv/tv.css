@@ -584,6 +584,9 @@ body:has(.tvk) { background: #000; overflow: hidden; }
 .tv-streamed {
   position: absolute;
   left: 2.2vw;
+  right: auto;
+  width: max-content;
+  max-width: 70vw;
   bottom: 9.5vh;
   z-index: 6;
   display: flex;
