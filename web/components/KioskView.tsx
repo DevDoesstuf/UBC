@@ -760,11 +760,27 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
   const heroY = two ? 190 : 162;
   const secs = Math.ceil(rem / 1000);
   const frac = tot > 0 ? Math.min(1, Math.max(0, rem / tot)) : 0;
+  // "chance" sits a fixed gap after the big number, measured (digit widths differ by font and while it loads).
+  const heroRef = useRef<HTMLDivElement>(null);
+  const [numW, setNumW] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = heroRef.current?.firstElementChild as HTMLElement | null;
+      if (el) setNumW(el.offsetWidth);
+    };
+    measure();
+    void document.fonts.ready.then(measure);
+  }, [yesP]);
   return (
     <div key={q} className="hk-fill">
       <div className="hk-abs hk-fade hk-topline" style={{ left: 20, top: 16 }}>
         <MiniBrand />
-        {locked ? <Lock cx={5} cy={13} s={0.6} color={P.ink2} /> : <i className="hk-dot" />}
+        {locked ? (
+          // Its own slot in the row (Lock is absolutely positioned), so it never sits on the logo.
+          <span style={{ position: "relative", display: "inline-block", width: 12, height: 15, flex: "none" }}>
+            <Lock cx={6} cy={6.6} s={0.6} color={P.ink2} />
+          </span>
+        ) : <i className="hk-dot" />}
         <span className="hk-body">{title}</span>
         {s.volume !== undefined ? <span className="hk-body hk-muted">{money(s.volume)} vol</span> : s.traded ? <span className="hk-body hk-muted">{s.traded}</span> : null}
       </div>
@@ -773,9 +789,9 @@ function Market({ s, onTouch, pending, fresh, locked }: Ctx & { locked: boolean 
       {s.score ? <Scorebug s={s} rx={right} y={10} h={40} /> : s.code ? <CodeChip code={s.code} rx={right} /> : null}
       <i className="hk-abs hk-hr" style={{ left: 16, top: 58, width: 768 }} />
       <Kinetic f="H3" x={24} y={94} w={508} lines={2} lh={29} text={q} delay={80} stagger={30} />
-      <div className="hk-abs hk-rise" style={{ left: 0, top: 0, ...d(200) }}>
+      <div ref={heroRef} className="hk-abs hk-rise" style={{ left: 0, top: 0, ...d(200) }}>
         <Roll f="N2" x={22} y={heroY} text={`${yesP}%`} color={locked ? P.ink2 : P.ink} up={P.yes} down={P.no} dir={Math.sign(s.move ?? 0)} ms={700} />
-        <T f="B1" x={52 + `${yesP}%`.length * 36} y={heroY - 2} color={P.ink2}>
+        <T f="B1" x={22 + (numW || `${yesP}%`.length * 36) + 12} y={heroY - 2} color={P.ink2}>
           chance
           {diff !== 0 && <span style={{ color: diff > 0 ? P.yes : P.no, marginLeft: 14, fontSize: 18 }}>{diff > 0 ? "▲" : "▼"} {Math.abs(diff)}</span>}
         </T>
