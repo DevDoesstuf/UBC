@@ -32,6 +32,12 @@ export interface Question {
   answer?: Side | null;
   /** Model probability of YES (0..1). The LMSR opens at this price instead of 50/50 (clamped to 5..95%). */
   prior?: number | null;
+  /** A fact shown with the question: under it on phones and the TV, and as a full-screen card on the box at open. */
+  stat?: string;
+  /** Trades now, settles at the end (host's End): it is parked after its lock so the live questions can run. */
+  settleAtEnd?: boolean;
+  /** Gemini's real price for this exact question (a settled market's last pre-game price), shown beside the room. */
+  geminiQuote?: { label: string; prob: number; asOf: string; url?: string; event: string; contract: string };
   /** Comparable Gemini contract: event ticker and the contract code that means YES (e.g. "DAL"). */
   gemini?: { event: string; contract: string } | null;
 }
@@ -147,6 +153,8 @@ export interface Market {
   /** Resolved as void: every stake refunded. */
   voided?: boolean;
   voidReason?: string | null;
+  /** The question's fact line (Question.stat). */
+  stat?: string | null;
   /** The "last call" tick was sent (once per market, a few seconds before the lock). */
   lastCall?: boolean;
   /** Where the question came from. */
@@ -273,6 +281,10 @@ export interface Lobby {
   vault?: LobbyVault;
   /** Box/speaker extras (lib/hw.ts): tap-to-confirm bets, flashes, hot seat, standings breaks. */
   hw?: import("./hw").HwState;
+  /** A clip game's settle-at-end question while the live questions run (Question.settleAtEnd). */
+  parkedClip?: Market | null;
+  /** Its result, for the box's reveal on the end screen. */
+  parkedReveal?: { text: string; outcome: Side; winners: string; at: number } | null;
 }
 
 /** One Solana transaction Huddle made or saw for a lobby. */

@@ -30,8 +30,8 @@ export function openValue(m: OpenMarket | null | undefined, playerId: string): n
 }
 
 /** Open value per player across the running question and a replay's parked pregame question. */
-export function openValues(l: Pick<Lobby, "order" | "market" | "replay">): Record<string, number> {
-  const parked = l.replay?.parkedMarket ?? null;
+export function openValues(l: Pick<Lobby, "order" | "market" | "replay"> & Partial<Pick<Lobby, "parkedClip">>): Record<string, number> {
+  const parked = l.replay?.parkedMarket ?? l.parkedClip ?? null;
   const out: Record<string, number> = {};
   for (const id of l.order) out[id] = openValue(l.market, id) + openValue(parked, id);
   return out;

@@ -679,6 +679,9 @@ export function EndOfGame({ l, cashOut, cashed }: { l: Lobby; cashOut: ReactNode
               You have <span className="hd-num ph-ink">{usd(me.balance)}</span> to take home.
             </p>
             <span ref={pot} />
+            <p className="ph-tapconfirm hd-pop" data-testid="tap-collect" style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 700, padding: 12, margin: "4px 0 12px" }}>
+              <Icon name="nfc" size={22} /> Tap your phone on the box to collect
+            </p>
             {cashOut}
           </>
         ) : (

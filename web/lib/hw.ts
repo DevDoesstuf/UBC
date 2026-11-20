@@ -18,7 +18,7 @@ export const BIG_WIN_PROFIT = 500;
 export const BIG_LOSS_CENTS = 300;
 
 export interface HwPending { side: Side; cents: number; at: number; until: number; questionId: string }
-export interface HwFlash { kind: "join" | "bigwin" | "bigloss"; name: string; text: string; cents?: number; until: number }
+export interface HwFlash { kind: "join" | "bigwin" | "bigloss" | "collect"; name: string; text: string; cents?: number; until: number }
 export interface HwHotseat {
   playerId: string; name: string; questionId: string; mult: number; until: number;
   accepted?: boolean; done?: boolean; bonus?: number;
@@ -118,6 +118,16 @@ export function onJoin(l: Lobby, p: Player, now: number): void {
   else pushCaption(l, text, toSpeech(text), "join", now);
   hw(l).flash = { kind: "join", name: p.name, text, until: now + JOIN_FLASH_MS };
 }
+
+/** Cash out by tapping the box at the end: the box shows who just collected and the speaker says it. */
+export function onCollect(l: Lobby, p: Player, cents: number, now: number): void {
+  const text = `${p.name} collects ${dollars(cents)}!`;
+  pushEvent(l, "deposit", text, "coin", now);
+  pushCaption(l, text, toSpeech(text), "collect", now);
+  hw(l).flash = { kind: "collect", name: p.name, cents, text, until: now + COLLECT_FLASH_MS };
+}
+const COLLECT_FLASH_MS = 5000;
+const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 // ---------------------------------------------------------------- 2. bets in
 

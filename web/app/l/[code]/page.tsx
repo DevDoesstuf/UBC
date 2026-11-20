@@ -143,6 +143,27 @@ export default function PhonePage() {
     };
   }, [shouldSync, code, refresh, say]);
 
+  // Tapped the box after the final whistle (/k/<kiosk> sends ?collect=1): cash out once, then drop the flag.
+  const collectTried = useRef(false);
+  const canCollect = !!(l?.me && l.phase === "ended" && l.me.balance > 0 && token);
+  useEffect(() => {
+    if (!canCollect || collectTried.current) return;
+    if (new URLSearchParams(window.location.search).get("collect") !== "1") return;
+    collectTried.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    (async () => {
+      try {
+        const r = await api<{ cents: number; explorer?: string }>(`/api/lobby/${code}/cashout`, { body: { address: "" }, token: tokenRef.current });
+        setCashed({ cents: r.cents, explorer: r.explorer });
+        navigator.vibrate?.([30, 60, 30]);
+        say(`Collected ${usd(r.cents)}`);
+        await refresh();
+      } catch (e) {
+        say((e as Error).message, "err");
+      }
+    })();
+  }, [canCollect, code, refresh, say]);
+
   // Solana Pay: while a payment link is showing, check for it every 3 s.
   useEffect(() => {
     if (!payLink) return;

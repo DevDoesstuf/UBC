@@ -13,6 +13,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ kiosk: s
   const l = await getKioskLobby(id).catch(() => null);
   // A bet waiting for a tap (lib/hw.ts): ?tap=1 lets the phone page confirm it with the token in localStorage.
   const tap = l && anyPending(l, Date.now()) ? "?tap=1" : "";
-  const to = l && l.phase !== "ended" ? `/l/${l.code}${tap}` : `/?nokiosk=${encodeURIComponent(id)}`;
+  // After the final whistle a tap on the box collects your winnings (?collect=1, the phone page cashes out).
+  const to = !l ? `/?nokiosk=${encodeURIComponent(id)}` : l.phase === "ended" ? `/l/${l.code}?collect=1` : `/l/${l.code}${tap}`;
   return NextResponse.redirect(`${baseUrl(req)}${to}`, 302);
 }

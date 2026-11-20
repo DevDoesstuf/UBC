@@ -23,7 +23,7 @@ import { chainView } from "./chain";
 import type { Game, Lobby, LobbyEvent, Market, MarketMode, Offer, Player, Side, WithdrawalRecord } from "./types";
 import { MARKET_MODES } from "./types";
 import { lobbyMoneyMode, moneyLocked, MONEY_OFFERED } from "./money";
-import { acceptHotseat, HwError, interludeHold, onJoin, onResult, onVoid, pendingFor, placePending, takePending, tickHw } from "./hw";
+import { acceptHotseat, HwError, interludeHold, onCollect, onJoin, onResult, onVoid, pendingFor, placePending, takePending, tickHw } from "./hw";
 
 export class ApiError extends Error {
   status: number;
@@ -657,6 +657,12 @@ export function openMarket(l: Lobby, now: number): void {
     source: { kind: "clip" },
     geminiKey: q.gemini ? { event: q.gemini.event, contract: q.gemini.contract } : null,
   });
+  if (q.stat) l.market.stat = q.stat;
+  if (q.geminiQuote) {
+    // A settled Gemini market for this exact question: its real last pre-game price, labelled with its date.
+    const g = q.geminiQuote;
+    l.market.gemini = { prob: g.prob, label: g.label, asOf: g.asOf, url: g.url, live: false, eventTicker: g.event, contract: g.contract, source: "snapshot" };
+  }
   l.phase = "open";
   markOpen(l, now);
   announceOpen(l, l.market, now);
@@ -696,6 +702,14 @@ export function lockMarket(l: Lobby, now: number = Date.now()): void {
   if (modeOf(m) === "h2h") releaseOffers(l, m);
   addEvent(l, "lock", "Trading closed. Watch the play!", "lock");
   caption(l, { type: "lock", yesPct: m.priceAtLock * 100, mode: modeOf(m) }, now, m.questionId);
+  // A settle-at-end question (e.g. "Will Argentina reach the final?") steps aside so the live questions can run.
+  const q = !l.replay && m.source?.kind === "clip" ? getGame(l.gameId)?.questions[m.qIndex] : undefined;
+  if (q?.settleAtEnd && !l.parkedClip) {
+    l.parkedClip = m;
+    l.market = null;
+    l.phase = "lobby";
+    l.qIndex = m.qIndex + 1;
+  }
 }
 
 /** h2h: at lock, the unmatched part of every offer goes back to its maker. */
@@ -879,10 +893,13 @@ export function voidMarket(l: Lobby, reason: string | null, now: number): void {
 /** The pregame question of a replay game settles at the final whistle (or is refunded). */
 function settleParked(l: Lobby, outcome: Side | null, reason: string | null, now: number): void {
   const run = l.replay;
-  const m = run?.parkedMarket;
-  if (!run || !m) return;
-  run.parked = null;
-  run.parkedMarket = null;
+  const m = run?.parkedMarket ?? l.parkedClip;
+  if (!m) return;
+  if (run) {
+    run.parked = null;
+    run.parkedMarket = null;
+  }
+  l.parkedClip = null;
   settle(l, m, outcome, now);
   if (!outcome) {
     m.voided = true;
@@ -893,7 +910,9 @@ function settleParked(l: Lobby, outcome: Side | null, reason: string | null, now
   recordScore(l, m, outcome);
   l.results.push({ qIndex: m.qIndex, text: m.text, outcome, volume: m.volume, payouts: { ...m.payouts } });
   const winners = winnersOf(l, m, outcome);
-  addEvent(l, "result", `Pregame call: ${outcome === "yes" ? "YES" : "NO"}! ${winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ") || "No winners."}`, winners.length ? "win" : "lose");
+  const named = winners.map((w) => `${w.name} wins ${usd(w.cents)}`).join(", ");
+  addEvent(l, "result", `Pregame call: ${outcome === "yes" ? "YES" : "NO"}! ${named || "No winners."}`, winners.length ? "win" : "lose");
+  l.parkedReveal = { text: m.text, outcome, winners: named, at: now };
   const atLock = m.priceAtLock ?? yesPrice(m);
   caption(l, { type: "result", outcome, winners, atLockPct: (outcome === "yes" ? atLock : 1 - atLock) * 100 }, now, `parked-${m.questionId}`);
 }
@@ -901,6 +920,11 @@ function settleParked(l: Lobby, outcome: Side | null, reason: string | null, now
 export function endSession(l: Lobby, now: number = Date.now()): void {
   if (l.phase === "open" || l.phase === "locked") throw new ApiError(400, "Resolve the current question first");
   if (l.replay?.parkedMarket) settleParked(l, null, "the session ended before the final whistle", now);
+  if (l.parkedClip) {
+    // The clip's known answer settles it at the end (the final whistle); without one it is refunded.
+    const answer = getGame(l.gameId)?.questions[l.parkedClip.qIndex]?.answer ?? null;
+    settleParked(l, answer, answer ? null : "the session ended before it was decided", now);
+  }
   l.phase = "ended";
   addEvent(l, "end", "Session over. Cash out on your phone.", "coin");
   // Same order as every board (box, TV, phone): lib/standings.ts. The caption then says how far up the leader
@@ -1018,6 +1042,8 @@ export function takeOffer(l: Lobby, p: Player, offerId: string, cents: number, n
 export function reserveWithdrawal(l: Lobby, p: Player, to: string | null, now: number): WithdrawalRecord {
   if (p.balance <= 0) throw new ApiError(400, "Nothing to cash out");
   const w: WithdrawalRecord = { playerId: p.id, cents: p.balance, at: now, to, txHash: null, status: "demo" };
+  // After the final whistle a cash-out is a moment on the box ("Sam collects $12.40!"), usually from an NFC tap.
+  if (l.phase === "ended") onCollect(l, p, p.balance, now);
   p.withdrawn += p.balance;
   p.balance = 0;
   l.withdrawals.push(w);
@@ -1036,7 +1062,7 @@ function marketExtras(l: Lobby, m: Market) {
     trail: (m.trail ?? []).map((p) => ({ at: p.at, room: p.room, gemini: p.gemini })),
     priceAtLock: m.priceAtLock ?? null,
     voided: m.voided ?? false,
-    rationale: m.source && "rationale" in m.source ? m.source.rationale : null,
+    rationale: m.stat ?? (m.source && "rationale" in m.source ? m.source.rationale : null),
     moment: m.source?.kind === "moment" ? m.source.moment : m.source?.kind === "replay" ? m.source.moment ?? null : null,
     /** true = nothing settles it by itself: the host taps It was YES/NO on the box. */
     hostSettles: m.resolveAt === null && m.source?.kind !== "replay",
@@ -1097,7 +1123,7 @@ export function publicView(l: Lobby, token: string | null, baseUrl: string) {
   const name = (id: string) => l.players[id]?.name ?? "?";
   const py = m ? lmsr.priceYes(m.yes, m.no, m.b) : 0.5;
   const run = l.replay;
-  const parked = run?.parkedMarket ?? null;
+  const parked = run?.parkedMarket ?? l.parkedClip ?? null;
   const open = openValues(l);
   const score = run
     ? {

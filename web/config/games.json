@@ -2,6 +2,79 @@
   "_help": "One entry per game tile on the kiosk (the first 4 are shown). Adding a game is adding an entry here, not code. Set live=true to make a tile tappable. kind: \"clip\" (default) = a YouTube clip with the questions written below; \"replay\" = a game timeline from config/replays (replay = its id) where the question engine writes and resolves the questions as the game plays. Real games are built by scripts/build-replays.mjs; their league, date, source and gemini mapping come from the replay file, so the entry needs only id, title, subtitle, kind, replay, persona, moments and color. Clip times are seconds into the video: trading opens when the host starts a question (the video jumps to startAt), locks automatically at lockAt, and if answer is set to \"yes\" or \"no\" it resolves itself at resolveAt; otherwise the host taps the result on the kiosk. prior (0..1, optional) = model probability of YES: the market opens at that price instead of 50/50 (clamped to 5..95%). gemini (optional): on a game, { event: <Gemini ticker base>, home, away } compares replay questions with Gemini Prediction Markets; on a clip question, { event: <full event ticker>, contract: <contract code meaning YES> }. moments (optional): the \"Call it\" moment kinds the kiosk offers for this game (nfl: third_down, red_zone, big_play, next_score; soccer: penalty, corner, free_kick, next_goal; sport sets which list applies). mode (optional): market (LMSR, default), pool (winners split the pot) or h2h (players make and take offers). persona: nfl | soccer | calm (announcer voice). b is the LMSR liquidity: smaller = jumpier prices; the house can lose at most b x ln(1/p) dollars per question when it opens at prior p (b x ln2 = $6.93 at 50/50, b=10).",
   "games": [
     {
+      "id": "wc-eng-arg",
+      "gemini": {"event": "FIFAWC-2607151900-ARG-ENG", "home": "ENG", "away": "ARG", "settledAt": "2026-07-15T21:30:00Z", "snapshot": {"asOf": "2026-07-14T23:59:00Z", "events": [{"ticker": "FIFAWC-2607151900-ARG-ENG-A", "title": "Argentina vs England", "contracts": [{"ticker": "ARG", "label": "Argentina advances", "lastTradePrice": "0.48"}, {"ticker": "ENG", "label": "England advances", "lastTradePrice": "0.54"}]}, {"ticker": "FIFAWC-2607151900-ARG-ENG-T", "title": "Argentina vs England: Total Goals", "contracts": [{"ticker": "O1", "label": "Over 1.5 goals scored", "lastTradePrice": "0.67"}, {"ticker": "O2", "label": "Over 2.5 goals scored", "lastTradePrice": "0.40"}]}]}},
+      "title": "England v Argentina",
+      "subtitle": "World Cup semi-final, Atlanta",
+      "live": true,
+      "kind": "clip",
+      "sport": "soccer",
+      "persona": "soccer",
+      "league": "World Cup",
+      "home": { "name": "England", "nick": "England", "short": "ENG", "color": "#CE1124" },
+      "away": { "name": "Argentina", "nick": "Argentina", "short": "ARG", "color": "#75AADB" },
+      "date": "2026-07-15",
+      "real": true,
+      "mode": "pool",
+      "color": "#75AADB",
+      "youtubeId": "",
+      "b": 10,
+      "questions": [
+        {
+          "id": "final",
+          "text": "Pregame: will Argentina reach the World Cup final?",
+          "short": "Argentina to reach the final?",
+          "startAt": 0,
+          "lockAt": 40,
+          "resolveAt": null,
+          "answer": "yes",
+          "settleAtEnd": true,
+          "prior": 0.48,
+          "stat": "Gemini Prediction Markets had Argentina at 48% to reach the final the day before kickoff.",
+          "geminiQuote": {
+            "label": "Argentina advances",
+            "prob": 0.48,
+            "asOf": "2026-07-14T23:59:00Z",
+            "event": "FIFAWC-2607151900-ARG-ENG-A",
+            "contract": "ARG"
+          }
+        },
+        {
+          "id": "eng10",
+          "text": "Second half, 0-0. Will England score in the next 10 minutes?",
+          "short": "England score in the next 10?",
+          "startAt": 0,
+          "lockAt": 25,
+          "resolveAt": null,
+          "answer": null,
+          "prior": 0.18,
+          "stat": "England were favourites before kickoff: Gemini gave them 54% to reach the final."
+        },
+        {
+          "id": "arg10",
+          "text": "80 minutes, England lead 1-0. Will Argentina score in the next 10 minutes?",
+          "short": "Argentina score in the next 10?",
+          "startAt": 0,
+          "lockAt": 25,
+          "resolveAt": null,
+          "answer": null,
+          "prior": 0.24,
+          "stat": "Last 16 v Egypt: Argentina were 2-0 down in the 75th minute and still won 3-2."
+        },
+        {
+          "id": "arg90",
+          "text": "1-1 with stoppage time to play. Will Argentina score again before the final whistle?",
+          "short": "Argentina win it in stoppage time?",
+          "startAt": 0,
+          "lockAt": 20,
+          "resolveAt": null,
+          "answer": null,
+          "prior": 0.2,
+          "stat": "Messi just set up the equaliser. Against Egypt, Argentina's winner came in stoppage time."
+        }
+      ]
+    },
+    {
       "id": "nfl-sf-dal",
       "title": "49ers at Cowboys",
       "subtitle": "Real NFL game, Nov 15",

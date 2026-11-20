@@ -161,7 +161,7 @@ export interface KioskScreen extends HwKioskFields {
   betsIn?: { n: number; of: number };
   hotseat?: { name: string; mult: number; leftMs: number };
   tip?: { label: string; text: string };
-  flash?: { kind: "join" | "bigwin" | "bigloss"; name: string; cents?: number; text: string; leftMs: number };
+  flash?: { kind: "join" | "bigwin" | "bigloss" | "collect"; name: string; cents?: number; text: string; leftMs: number };
   confirm?: { name: string; side: "YES" | "NO"; cents: number; leftMs: number };
   interlude?: { kind: "standings"; leftMs: number };
 }
@@ -324,7 +324,8 @@ function gameCard(g: Game): KioskCard {
     ?? (tl && !tl.meta.real ? "Demo game" : undefined);
   return {
     id: `game:${g.id}`, title: k(g.title), sub: k(enabled ? g.subtitle || "Live" : "Coming soon"), enabled,
-    league, kind: g.kind ?? "clip", date, color: hex(g.color), gemini: !!g.gemini?.event,
+    // A real past game is a replay to the room, scripted clip or not.
+    league, kind: g.real ? "replay" : g.kind ?? "clip", date, color: hex(g.color), gemini: !!g.gemini?.event,
     // US leagues (MLS too) write "Away at Home"; soccer elsewhere writes "Home v Away" (lib/matchup.ts).
     ...(home && away ? { home, away, at: awayFirst(sport, typeof x.league === "string" ? x.league : league) } : {}),
   };
@@ -706,6 +707,16 @@ export function forFlashedBox(s: KioskScreen, l: Lobby | null, now: number = Dat
     const pick = msg("How do you want to play?", MODE_PICK_TEXT, MODE_CHOICES.map((c, i) => ({ id: `mode:${c}`, label: MODE_LABEL[c], style: i === 0 ? "yes" : "plain" })));
     return { ...pick, palette: { ...KIOSK_PALETTE } };
   }
+  // End screen moments: the settle-at-end question's reveal, then each "tap to collect".
+  if (l.phase === "ended") {
+    const pr = l.parkedReveal;
+    if (pr && now - pr.at < 7000) {
+      return msg(`${pr.outcome === "yes" ? "YES" : "NO"}! ${pr.text}`, pr.winners ? `${pr.winners}. Tap your phone on the box to collect` : "Nobody called it. Tap your phone on the box to collect", [], pr.outcome === "yes" ? "green" : "gray");
+    }
+    if (s.flash?.kind === "collect") {
+      return msg(`${s.flash.name} collects ${usd(s.flash.cents ?? 0)}!`, "Tap your phone on the box to collect yours", []);
+    }
+  }
   if (s.hotseat) {
     return msg(`Hot seat: ${s.hotseat.name}!`, "Tap below in the next five seconds to double your stake", [{ id: "hotseat:accept", label: "Tap to double", style: "yes" }], "amber");
   }
@@ -717,8 +728,12 @@ export function forFlashedBox(s: KioskScreen, l: Lobby | null, now: number = Dat
     return msg("Standings check", top, []);
   }
   const m = l.market;
+  // The question's fact line: a full-screen card for the first few seconds (the flashed market screen has no room for it).
+  if (s.screen === "market" && m?.stat && now - m.openedAt >= 600 && now - m.openedAt < 5600 && m.lockAt - now > 4000) {
+    return msg("Did you know?", m.stat, []);
+  }
   // Inside info: a 3 s flash on every other question, so the price stays on screen most of the time.
-  if (s.tip && s.screen === "market" && m && m.qIndex % 2 === 1 && now - m.openedAt >= 2500 && now - m.openedAt < 5500 && m.lockAt - now > 6000) {
+  if (s.tip && s.screen === "market" && m && !m.stat && m.qIndex % 2 === 1 && now - m.openedAt >= 2500 && now - m.openedAt < 5500 && m.lockAt - now > 6000) {
     return msg(s.tip.label, s.tip.text, []);
   }
   const bp = l.boxPay;
@@ -837,7 +852,7 @@ async function kioskScreenV1(kioskId: string, baseUrl: string, l: Lobby | null):
   return {
     screen: "ended", kiosk: kioskId, color: "gray", footer: footerL,
     title: "Session over",
-    subtitle: "Thanks for playing. Cash out on your phone",
+    subtitle: "Tap your phone on the box to collect your winnings",
     lines: board.slice(0, 6).map((p) => k(`${p.rank}.  ${kn(p.name)}  ${usd(p.worth)}`)),
     buttons: [{ id: "new", label: "New game", style: "yes" }],
   };
